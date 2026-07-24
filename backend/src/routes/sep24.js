@@ -5,6 +5,10 @@
  * POST /api/sep24/transactions/deposit/interactive  – initiate interactive deposit
  * POST /api/sep24/transactions/withdraw/interactive – initiate interactive withdrawal
  * GET  /api/sep24/transaction                        – poll transaction status
+ * POST /api/sep24/deposit                             – anchor deposit
+ * POST /api/sep24/withdraw                             – anchor withdrawal
+ * GET  /api/sep24/transactions/:txId                  – anchor transaction status
+ * POST /api/sep24/callback                             – anchor webhook callback
  */
 
 "use strict";
@@ -16,22 +20,14 @@ const { validate } = require("../validation/middleware");
 const {
   sep24InteractiveSchema,
   sep24TransactionQuerySchema,
+  sep24DepositWithdrawSchema,
 } = require("../validation/schemas");
+const { formatErrorResponse, ERROR_CODES } = require("../../../shared/errorCodes");
 
 /**
  * POST /api/sep24/transactions/deposit/interactive
  *
  * Initiates an anchor interactive deposit session.
- *
- * Request body (JSON):
- *   - asset_code  (required) — e.g. "USDC", "XLM"
- *   - account     (required) — Stellar public key (G…)
- *   - memo        (optional)
- *   - memo_type   (optional)
- *   - anchor_url  (optional) — override for the anchor's interactive flow URL
- *
- * Response 200:
- *   { type: "interactive_customer_info_needed", url: string, id: string }
  */
 router.post(
   "/transactions/deposit/interactive",
@@ -65,16 +61,6 @@ router.post(
  * POST /api/sep24/transactions/withdraw/interactive
  *
  * Initiates an anchor interactive withdrawal session.
- *
- * Request body (JSON):
- *   - asset_code  (required)
- *   - account     (required)
- *   - memo        (optional)
- *   - memo_type   (optional)
- *   - anchor_url  (optional)
- *
- * Response 200:
- *   { type: "interactive_customer_info_needed", url: string, id: string }
  */
 router.post(
   "/transactions/withdraw/interactive",
@@ -108,29 +94,6 @@ router.post(
  * GET /api/sep24/transaction?id=<uuid>
  *
  * Polls the current status of an interactive transaction.
- *
- * Response 200:
- *   {
- *     transaction: {
- *       id: string,
- *       kind: "deposit" | "withdrawal",
- *       status: "pending_external" | "completed" | "error",
- *       status_eta: number | null,
- *       more_info_url: string | null,
- *       amount_in: string | null,
- *       amount_out: string | null,
- *       amount_fee: string | null,
- *       started_at: string,
- *       updated_at: string,
- *       completed_at: string | null,
- *       stellar_transaction_id: string | null,
- *       external_transaction_id: string | null,
- *       message: string | null
- *     }
- *   }
- *
- * Response 404:
- *   { error: "Transaction not found" }
  */
 router.get(
   "/transaction",
@@ -145,7 +108,6 @@ router.get(
         .json(formatErrorResponse("RES_NOT_FOUND", { resourceType: "transaction" }));
     }
 
-    // Build the SEP-0024 compliant transaction response
     const txn = {
       id: record.id,
       kind: record.kind,
@@ -171,16 +133,11 @@ router.get(
 /**
  * POST /api/sep24/deposit
  * Initiates a REAL interactive deposit against a configured Stellar anchor.
- * Body: { assetCode, assetIssuer, amount, anchorName, account, token }
  */
-router.post("/deposit", async (req, res) => {
+router.post("/deposit", validate(sep24DepositWithdrawSchema), async (req, res) => {
   try {
-    const { assetCode, assetIssuer, amount, anchorName, account, token } = req.body;
-    if (!assetCode || !account) {
-      return res
-        .status(ERROR_CODES.VAL_MISSING_FIELD.httpStatus)
-        .json(formatErrorResponse("VAL_MISSING_FIELD", { fields: ["assetCode", "account"] }));
-    }
+    const { assetCode, assetIssuer, amount, anchorName, account, token } =
+      req.validated;
     const result = await sep24Service.callAnchorDeposit({
       account,
       assetCode,
@@ -199,16 +156,11 @@ router.post("/deposit", async (req, res) => {
 /**
  * POST /api/sep24/withdraw
  * Initiates a REAL interactive withdrawal against a configured Stellar anchor.
- * Body: { assetCode, assetIssuer, amount, destAccount, anchorName, account, token }
  */
-router.post("/withdraw", async (req, res) => {
+router.post("/withdraw", validate(sep24DepositWithdrawSchema), async (req, res) => {
   try {
-    const { assetCode, assetIssuer, amount, destAccount, anchorName, account, token } = req.body;
-    if (!assetCode || !account || !destAccount) {
-      return res
-        .status(ERROR_CODES.VAL_MISSING_FIELD.httpStatus)
-        .json(formatErrorResponse("VAL_MISSING_FIELD", { fields: ["assetCode", "account", "destAccount"] }));
-    }
+    const { assetCode, assetIssuer, amount, destAccount, anchorName, account, token } =
+      req.validated;
     const result = await sep24Service.callAnchorWithdraw({
       account,
       assetCode,

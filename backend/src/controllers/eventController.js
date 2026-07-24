@@ -11,7 +11,6 @@
 
 const eventIndexer = require("../services/eventIndexer");
 const logger = require("../utils/logger");
-const { sendError } = require("../utils/errorResponse");
 
 /**
  * GET /api/events/:publicKey
@@ -19,7 +18,7 @@ const { sendError } = require("../utils/errorResponse");
  * Return paginated contract events where the given public key
  * appears as a participant (sender, recipient, signer, etc.).
  *
- * Query params:
+ * Query params (validated by eventsQuerySchema):
  *   - limit  {number} 1–100 (default 20)
  *   - offset {number} 0-based (default 0)
  *
@@ -29,31 +28,7 @@ const { sendError } = require("../utils/errorResponse");
  */
 async function getEvents(req, res, next) {
   try {
-    const { publicKey } = req.params;
-
-    const rawLimit = req.query.limit;
-    let limit = 20;
-    if (rawLimit !== undefined) {
-      const parsed = parseInt(rawLimit, 10);
-      if (isNaN(parsed) || !Number.isSafeInteger(parsed) || parsed < 1) {
-        return sendError(res, "VAL_INVALID_LIMIT", {
-          details: { parameter: "limit", received: rawLimit },
-        });
-      }
-      limit = Math.min(parsed, 100);
-    }
-
-    const rawOffset = req.query.offset;
-    let offset = 0;
-    if (rawOffset !== undefined) {
-      const parsed = parseInt(rawOffset, 10);
-      if (isNaN(parsed) || !Number.isSafeInteger(parsed) || parsed < 0) {
-        return sendError(res, "VAL_INVALID_OFFSET", {
-          details: { parameter: "offset", received: rawOffset },
-        });
-      }
-      offset = parsed;
-    }
+    const { publicKey, limit, offset } = req.validated;
 
     const { events, total } = await eventIndexer.queryEventsByPublicKey(
       publicKey,
@@ -87,7 +62,7 @@ async function getEvents(req, res, next) {
  */
 async function getStats(req, res, next) {
   try {
-    const { publicKey } = req.params;
+    const { publicKey } = req.validated;
     const stats = await eventIndexer.getEventStats(publicKey);
 
     const totalEvents = stats.reduce((sum, s) => sum + s.count, 0);

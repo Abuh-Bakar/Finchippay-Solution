@@ -14,7 +14,6 @@ const {
 } = require("../validation/schemas");
 const { formatErrorResponse, ERROR_CODES } = require("../../../shared/errorCodes");
 
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
 /**
  * POST /api/scheduled-txns
  * Schedules a new transaction for future submission.
@@ -22,37 +21,22 @@ const { formatErrorResponse, ERROR_CODES } = require("../../../shared/errorCodes
  */
 router.post("/", validate(scheduleTransactionSchema), (req, res, next) => {
   try {
-    // submitAt is already confirmed to parse to a valid date by the schema.
     const { signedXDR, submitAt, publicKey } = req.validated;
-
- #136-Issue-#14-Database-Backed-Turrets-with-Price-Feed-Fallbacks-FIX
-    const schedule = scheduledTransactionService.scheduleTransaction(
-
-// POST /api/scheduled-transactions
-router.post("/", (req, res, next) => {
-  try {
-    const { signedXDR, submitAt, publicKey } = req.body;
-
-    if (!signedXDR || !submitAt || !publicKey) {
-      return res
-        .status(400)
-        .json({ error: "Missing signedXDR, submitAt, or publicKey" });
-    }
-
-    const submitDate = new Date(submitAt);
-    if (isNaN(submitDate.getTime())) {
-      return res
-        .status(400)
-        .json({ error: "submitAt must be a valid ISO 8601 date string" });
-    const schedule = scheduledTransactionService.createSchedule(req.body);
+    const schedule = scheduledTransactionService.createSchedule({
+      signedXDR,
+      submitAt,
+      publicKey,
+    });
     res.status(201).json(schedule);
   } catch (error) {
     next(error);
   }
 });
- master
 
-// POST /api/scheduled-transactions/pending/:id/submit
+/**
+ * POST /api/scheduled-txns/pending/:id/submit
+ * Submit a signed XDR for a pending scheduled transaction execution.
+ */
 router.post("/pending/:id/submit", async (req, res, next) => {
   try {
     const { signedXDR } = req.body;
@@ -63,25 +47,14 @@ router.post("/pending/:id/submit", async (req, res, next) => {
     }
     const result = await scheduledTransactionService.submitPendingExecution(
       req.params.id,
- master
       signedXDR,
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
-      new Date(submitAt),
-      publicKey,
-
- master
     );
- #136-Issue-#14-Database-Backed-Turrets-with-Price-Feed-Fallbacks-FIX
-    res.status(201).json(schedule);
-
     res.json(result);
- master
   } catch (error) {
     next(error);
   }
 });
 
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
 /**
  * GET /api/scheduled-txns/:publicKey
  * Lists all pending scheduled transactions for a given public key.
@@ -93,7 +66,7 @@ router.get(
     try {
       const { publicKey } = req.validated;
       const transactions =
-        scheduledTransactionService.getPendingTransactions(publicKey);
+        scheduledTransactionService.listSchedules(publicKey);
       res.json(transactions);
     } catch (error) {
       next(error);
@@ -103,65 +76,23 @@ router.get(
 
 /**
  * DELETE /api/scheduled-txns/:id
- * Cancels a scheduled transaction.
+ * Cancels (deletes) a scheduled transaction.
  */
 router.delete("/:id", validate(idParamSchema, "params"), (req, res, next) => {
   try {
     const { id } = req.validated;
-    const cancelled = scheduledTransactionService.cancelTransaction(id);
+    const cancelled = scheduledTransactionService.deleteSchedule(id);
     if (cancelled) {
       res.json({ message: `Transaction ${id} cancelled successfully.` });
-    } else {
-      res
-        .status(404)
-        .json({ error: `Transaction ${id} not found or not pending.` });
-
-// GET /api/scheduled-transactions/:publicKey/pending
-router.get("/:publicKey/pending", (req, res, next) => {
-  try {
-    const pending = scheduledTransactionService.listPendingExecutions(req.params.publicKey);
-    res.json(pending);
-  } catch (error) {
-    next(error);
-  }
-});
-
-// GET /api/scheduled-transactions/:publicKey
-router.get("/:publicKey", (req, res, next) => {
-  try {
-    const schedules = scheduledTransactionService.listSchedules(req.params.publicKey);
-    res.json(schedules);
-  } catch (error) {
-    next(error);
-  }
-});
-
-// PUT /api/scheduled-transactions/:id
-router.put("/:id", (req, res, next) => {
-  try {
-    const updated = scheduledTransactionService.updateSchedule(req.params.id, req.body);
-    res.json(updated);
-  } catch (error) {
-    next(error);
-  }
-});
-
-// DELETE /api/scheduled-transactions/:id
-router.delete("/:id", (req, res, next) => {
-  try {
-    const deleted = scheduledTransactionService.deleteSchedule(req.params.id);
-    if (deleted) {
-      res.json({ message: `Scheduled transaction ${req.params.id} deleted.` });
     } else {
       res
         .status(ERROR_CODES.RES_NOT_FOUND.httpStatus)
         .json(
           formatErrorResponse("RES_NOT_FOUND", {
             resourceType: "scheduledTransaction",
-            id: req.params.id,
+            id,
           }),
         );
- master
     }
   } catch (error) {
     next(error);
