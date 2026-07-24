@@ -8,6 +8,7 @@ import {
   truncateMemoText,
 } from "@/lib/stellar";
 import { signTransactionWithWallet } from "@/lib/wallet";
+import CSVUpload from "./CSVUpload";
 
 const MAX_RECIPIENTS = 10;
 
@@ -69,6 +70,7 @@ export default function BatchPaymentForm({
   ]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [batchMessage, setBatchMessage] = useState<string | null>(null);
+  const [showCSVUpload, setShowCSVUpload] = useState(false);
 
   const xlmBalanceValue = parseFloat(xlmBalance || "0");
   const availableXLM = Math.max(
@@ -123,6 +125,26 @@ export default function BatchPaymentForm({
   const handleRemoveRecipient = (id: string) => {
     setRecipients((current) => current.filter((recipient) => recipient.id !== id));
     setBatchMessage(null);
+  };
+
+  const handleCSVImport = (parsedRows: any[]) => {
+    const newRecipients = parsedRows.map((row) => ({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      address: row.recipient || "",
+      amount: row.amount || "",
+      memo: row.memo || "",
+      token: AVAILABLE_TOKENS.find((t) => t.code === (row.asset || "XLM")) || AVAILABLE_TOKENS[0],
+      status: "idle" as RecipientStatus,
+    }));
+
+    setRecipients((current) => {
+      // Remove the first empty recipient if it's the only one
+      const filtered = current.filter((r) => r.address || r.amount);
+      return [...filtered, ...newRecipients].slice(0, MAX_RECIPIENTS);
+    });
+
+    setShowCSVUpload(false);
+    setBatchMessage(`Imported ${newRecipients.length} recipients from CSV.`);
   };
 
   const validateRecipient = (recipient: BatchRecipient) => {
@@ -360,7 +382,7 @@ export default function BatchPaymentForm({
           </div>
         ))}
 
-        <div className="grid gap-3 sm:grid-cols-[1fr_auto] items-center">
+        <div className="grid gap-3 sm:grid-cols-2 items-center">
           <button
             type="button"
             onClick={handleAddRecipient}
@@ -369,7 +391,15 @@ export default function BatchPaymentForm({
           >
             Add recipient
           </button>
-          <div className="rounded-3xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-4 py-3 text-sm text-slate-700 dark:text-slate-300">
+          <button
+            type="button"
+            onClick={() => setShowCSVUpload(true)}
+            disabled={isProcessing}
+            className="btn-secondary w-full py-2.5"
+          >
+            📥 Import CSV
+          </button>
+          <div className="rounded-3xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-4 py-3 text-sm text-slate-700 dark:text-slate-300 sm:col-span-2">
             Total:{" "}
             <span className="font-semibold text-slate-900 dark:text-white">
               {Object.entries(totalByToken)
@@ -409,6 +439,21 @@ export default function BatchPaymentForm({
             Retry failed payments
           </button>
         </div>
+
+        {showCSVUpload && (
+          <div className="rounded-3xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-6 mt-6">
+            <div className="mb-4">
+              <h3 className="font-semibold text-slate-900 dark:text-white">Import from CSV</h3>
+              <p className="text-sm text-slate-600 dark:text-slate-400">
+                Upload a CSV file to import multiple recipients at once.
+              </p>
+            </div>
+            <CSVUpload
+              onImport={handleCSVImport}
+              onCancel={() => setShowCSVUpload(false)}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
