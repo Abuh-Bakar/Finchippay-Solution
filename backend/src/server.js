@@ -47,32 +47,18 @@ const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./swagger");
 const { startTurretsServer } = require("./turretsServer");
 const eventIndexer = require("./services/eventIndexer");
-const { startRetryWorker, closeAllStreams } = require("./services/webhookService");
+const { startRetryWorker, closeAllStreams: closeWebhookStreams } = require("./services/webhookService");
 const logger = require("./utils/logger");
 const { validateEnv, parseAllowedOrigins } = require("./config/validateEnv");
 const { requireJsonContentType } = require("./middleware/bodyParsing");
 const { trackHttpMetrics } = require("./middleware/metrics");
 const metricsRoutes = require("./routes/metrics");
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
-const {
-  correlationMiddleware,
-  getRequestId,
-} = require("./utils/correlationId");
-const { initRedis, closeRedis } = require("./services/cacheService");
-const { zodErrorHandler } = require("./validation/middleware");
-const { errorLogFields } = require("./utils/errorResponse");
-const traceContextMiddleware = require("./middleware/tracing");
-
 const { correlationMiddleware, getRequestId } = require("./utils/correlationId");
-// Requiring errorResponse registers getRequestId as the shared registry's
-// correlation-ID provider, so every error body the API returns — including the
-// ones built by direct formatErrorResponse calls — carries the request's
-// X-Request-ID (#270).
 const { errorLogFields } = require("./utils/errorResponse");
 const { initRedis, closeRedis } = require("./services/cacheService");
-const { closeAll: closeAllStreams } = require("./services/balanceStreamService");
+const { closeAll: closeBalanceStreams } = require("./services/balanceStreamService");
+const { zodErrorHandler } = require("./validation/middleware");
 const traceContextMiddleware = require("./middleware/tracing");
- master
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -146,20 +132,7 @@ function getFederationServerUrl(req) {
  * Content-Security-Policy directives for this JSON API.
  *
  * The backend serves no HTML pages of its own except Swagger UI at /api/docs,
- * so the policy is intentionally restrictive:
- *
- *  defaultSrc  – block everything not listed explicitly.
- *  scriptSrc   – only same-origin scripts (Swagger UI bundles its own JS).
- *  styleSrc    – same-origin + unsafe-inline (Swagger UI injects inline styles).
- *  imgSrc      – same-origin + data URIs (Swagger UI logo).
- *  connectSrc  – only same-origin fetch/XHR (all API calls go to self).
- *  fontSrc     – same-origin only.
- *  objectSrc   – none (no Flash / plugins).
- *  frameSrc    – none (not embedded in iframes).
- *  upgradeInsecureRequests – omitted intentionally; handled at the load-balancer
- *                            level in production.
- *
- * Helmet v7+ ships with CSP *disabled* by default, so this must be explicit.
+ * so the policy is intentionally restrictive.
  */
 const helmetOptions = {
   contentSecurityPolicy: {
@@ -178,16 +151,11 @@ const helmetOptions = {
 
 app.use(helmet(helmetOptions));
 // Prometheus HTTP metrics — track duration & count for every request.
-// Mounted before routes so the "finish" event captures the resolved
-// route pattern (e.g. "GET /api/payments/:id") rather than raw paths.
 app.use(trackHttpMetrics);
 // Correlation ID middleware — generates/adopts X-Request-ID, stores in ALS.
-// Mounted before pino-http so the requestId appears in every log line.
 app.use(correlationMiddleware);
 app.use(traceContextMiddleware);
-// Structured JSON request logging (#269) — replaces morgan('dev'); reuses the
-// shared pino logger so HTTP logs are machine-parseable (Datadog/CloudWatch).
-// req.id is set by correlationMiddleware above.
+// Structured JSON request logging (#269) — machine-parseable JSON logs.
 app.use(
   pinoHttp({
     logger,
@@ -199,17 +167,10 @@ app.use(
   }),
 );
 
-// Content-Type enforcement (#81) — reject POST/PUT requests whose body isn't
-// application/json before the JSON parser below gets a chance to silently
-// skip it.
+// Content-Type enforcement (#81)
 app.use(requireJsonContentType);
 
-// JSON body size limits (#81).
-// /api/turrets may receive larger txFunction payloads, so it gets its own
-// parser with a higher limit; every other route falls through to the 100kb
-// default. body-parser skips re-parsing a request whose body it has already
-// parsed (req._body), so mounting the turrets parser first is sufficient —
-// the global parser below is a no-op for requests it already handled.
+// JSON body size limits (#81) — turrets gets larger limit for txFunction payloads.
 app.use("/api/turrets", express.json({ limit: "512kb" }));
 app.use(express.json({ limit: "100kb" }));
 
@@ -225,9 +186,6 @@ app.use((err, req, res, next) => {
 });
 
 // CORS
-// parseAllowedOrigins validates format at startup (see validateEnv.js) and
-// returns the trimmed list of origins that are safe to use at runtime.
-// Any malformed entries cause process.exit(1) before this line is reached.
 const { origins: allowedOrigins } = parseAllowedOrigins(
   process.env.ALLOWED_ORIGINS,
 );
@@ -235,7 +193,6 @@ const { origins: allowedOrigins } = parseAllowedOrigins(
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (e.g. curl, Postman)
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
@@ -253,8 +210,7 @@ app.use(
 app.use("/health", healthRoutes);
 app.use("/api/health", healthRoutes);
 
-// Stellar SEP-0001 discovery document. Wallets and SDKs read this file to
-// discover the SEP-0002 federation endpoint for `name*domain` addresses.
+// Stellar SEP-0001 discovery document
 app.get("/.well-known/stellar.toml", (req, res) => {
   const domain = getFederationDomain(req);
   const protocol =
@@ -276,9 +232,6 @@ TRANSFER_SERVER_SEP0024="${transferServerUrl}"
 });
 
 // Global rate limiting — 100 requests per 15 minutes per IP.
-// standardHeaders: true  → emits RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset (RFC 6585 draft-7).
-// legacyHeaders: false   → suppresses deprecated X-RateLimit-* headers.
-// Clients should inspect RateLimit-Remaining and back off when it approaches 0.
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -338,8 +291,7 @@ app.use((req, res) => {
 // Sentry must capture errors before the generic handler responds
 Sentry.setupExpressErrorHandler(app);
 
-// Convert any stray ZodError (thrown outside the validate() middleware, e.g.
-// a schema.parse() inside a controller) into the standard 400 payload.
+// Convert any stray ZodError into the standard 400 payload.
 app.use(zodErrorHandler);
 
 app.use((err, req, res, next) => {
@@ -348,39 +300,17 @@ app.use((err, req, res, next) => {
   if (err.errorCode) {
     const entry = formatErrorResponse(err.errorCode, err.details);
     const status = err.status || ERROR_CODES[err.errorCode]?.httpStatus || 500;
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
-    logger.error(
- #136-Issue-#14-Database-Backed-Turrets-with-Price-Feed-Fallbacks-FIX
-      { ...errorLogFields(err.errorCode, { details: err.details }), status },
-
-      { status, errorCode: err.errorCode, details: err.details },
-
-    // The logged correlationId is the same one returned in the response body,
-    // which is what makes a user-quoted ID searchable in the logs.
     logger.error(
       { ...errorLogFields(err.errorCode, { details: err.details }), status },
- master
- master
       "Request error",
     );
     return res.status(status).json(entry);
   }
 
   const status = err.status || 500;
- #136-Issue-#14-Database-Backed-Turrets-with-Price-Feed-Fallbacks-FIX
   const message = sanitizeMessage(err.message) || ERROR_CODES.SRV_INTERNAL.message;
   logger.error({ ...errorLogFields("SRV_INTERNAL"), status, message }, "Request error");
 
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
-  const message =
-    sanitizeMessage(err.message) || ERROR_CODES.SRV_INTERNAL.message;
-  logger.error({ status, message }, "Request error");
-
-  const message = sanitizeMessage(err.message) || ERROR_CODES.SRV_INTERNAL.message;
-  logger.error({ ...errorLogFields("SRV_INTERNAL"), status, message }, "Request error");
- master
- master
-  // For unknown/unclassified errors, fall back to SRV_INTERNAL with raw details.
   const fallback = formatErrorResponse("SRV_INTERNAL", {
     originalMessage: sanitizeMessage(err.message),
   });
@@ -388,8 +318,6 @@ app.use((err, req, res, next) => {
 });
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
-// On SIGTERM / SIGINT, flush pending OpenTelemetry spans and close the
-// HTTP server before exiting so no traces or in-flight requests are lost.
 
 async function gracefulShutdown(signal, server, otelSdk) {
   logger.info({ signal }, "Received shutdown signal — draining…");
@@ -399,18 +327,24 @@ async function gracefulShutdown(signal, server, otelSdk) {
     if (err) logger.error({ err }, "Error closing HTTP server");
   });
 
-  // 2. Close the Horizon payment streams backing the balance SSE endpoint so
-  //    they don't leak hanging connections on restart (#157).
+  // 2. Close webhook Horizon SSE streams (stops retry worker, waits for deliveries)
   try {
-    closeAllStreams();
+    closeWebhookStreams();
   } catch (err) {
-    logger.error({ err }, "Error closing Horizon balance streams");
+    logger.error({ err }, "Error closing webhook streams");
   }
 
-  // 3. Close Redis connection
+  // 3. Close balance SSE streams
+  try {
+    closeBalanceStreams();
+  } catch (err) {
+    logger.error({ err }, "Error closing balance streams");
+  }
+
+  // 4. Close Redis connection
   await closeRedis();
 
-  // 4. Flush OTel spans (time-boxed at 5 s)
+  // 5. Flush OTel spans (time-boxed at 5 s)
   if (otelSdk) {
     try {
       await Promise.race([
