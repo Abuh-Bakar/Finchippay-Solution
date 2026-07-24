@@ -224,11 +224,16 @@ export default function SettingsPage({
     setTurretsError(null);
 
     try {
-      const updated =
-        deployment.status === "active"
-          ? await pauseTurretsFunction(deployment.id)
-          : await resumeTurretsFunction(deployment.id);
-      setDeployments((prev: TurretsDeployment[]) => prev.map((item: TurretsDeployment) => (item.id === deployment.id ? updated : item)));
+      deployment.status === "active"
+        ? await pauseTurretsFunction(deployment.id)
+        : await resumeTurretsFunction(deployment.id);
+      setDeployments((prev: TurretsDeployment[]) =>
+        prev.map((item: TurretsDeployment) =>
+          item.id === deployment.id
+            ? { ...item, status: item.status === "active" ? "paused" as const : "active" as const }
+            : item
+        )
+      );
     } catch (err) {
       setTurretsError(err instanceof Error ? err.message : "Failed to update deployment status");
     } finally {
