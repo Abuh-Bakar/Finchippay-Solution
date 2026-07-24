@@ -125,25 +125,6 @@ async function getTopRecipients(publicKey) {
 }
 
 /**
- * Clear all cached analytics entries for a public key.
- *
- * Used by tests and by internal callers that need to force a refresh after
- * on-chain activity they know about (e.g. a newly recorded tip).
- *
- * @param {string} publicKey
- */
-function clearCache(publicKey) {
-  const cache = getCache();
-  // cache.del() resolves synchronously from the in-process LRU store when
-  // Redis is unavailable, so fire-and-forget is safe here.
-  return Promise.all([
-    cache.del(`analytics:summary:${publicKey}`),
-    cache.del(`analytics:top-recipients:${publicKey}`),
-    cache.del(`analytics:activity:${publicKey}`),
-  ]);
-}
-
-/**
  * Get payment activity by day of week.
  * Returns counts for all 7 days (Sunday = 0, ... Saturday = 6).
  */
@@ -195,8 +176,11 @@ async function getActivityByDay(publicKey) {
 }
 
 /**
- * Clear cached analytics for a specific public key.
- * Used primarily for testing.
+ * Clear all cached analytics entries for a public key.
+ *
+ * Used by tests and by internal callers that need to force a refresh after
+ * on-chain activity they know about (e.g. a newly recorded tip).
+ *
  * @param {string} publicKey
  */
 async function clearCache(publicKey) {

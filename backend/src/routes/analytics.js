@@ -21,13 +21,7 @@ router.get(
   "/:publicKey/summary",
   strictLimiter,
   sanitizePublicKey,
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
   validate(publicKeyParamSchema, "params"),
-
- #136-Issue-#14-Database-Backed-Turrets-with-Price-Feed-Fallbacks-FIX
-
- master
- master
   analyticsController.getSummary,
 );
 
@@ -39,13 +33,7 @@ router.get(
   "/:publicKey/top-recipients",
   strictLimiter,
   sanitizePublicKey,
-160-issue-38-rtl-language-support-arabic-hebrew-fix
   validate(publicKeyParamSchema, "params"),
-
- #136-Issue-#14-Database-Backed-Turrets-with-Price-Feed-Fallbacks-FIX
-
- master
- master
   analyticsController.getTopRecipients,
 );
 
@@ -57,19 +45,8 @@ router.get(
   "/:publicKey/activity",
   strictLimiter,
   sanitizePublicKey,
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
   validate(publicKeyParamSchema, "params"),
   analyticsController.getActivityByDay,
-
-  analyticsController.getActivityByDay,
-);
-
-router.get(
-  "/:publicKey/timeseries",
-  strictLimiter,
-  sanitizePublicKey,
-  analyticsController.getTimeseries
- master
 );
 
 module.exports = router;

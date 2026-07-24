@@ -41,6 +41,7 @@ const parsePaymentRoutes = require("./routes/parsePayment");
 const scheduledTransactionRoutes = require("./routes/scheduledTransactions");
 const sep24Routes = require("./routes/sep24");
 const sep12Routes = require("./routes/sep12");
+const eventsRoutes = require("./routes/events");
 const featuresRoutes = require("./routes/features");
 const adminFeatureFlagsRoutes = require("./routes/adminFeatureFlags");
 const rateLimitStatsRoutes = require("./routes/rateLimitStats");
@@ -48,13 +49,12 @@ const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./swagger");
 const { startTurretsServer } = require("./turretsServer");
 const eventIndexer = require("./services/eventIndexer");
-const { startRetryWorker, closeAllStreams } = require("./services/webhookService");
+const { startRetryWorker } = require("./services/webhookService");
 const logger = require("./utils/logger");
 const { validateEnv, parseAllowedOrigins } = require("./config/validateEnv");
 const { requireJsonContentType } = require("./middleware/bodyParsing");
 const { trackHttpMetrics } = require("./middleware/metrics");
 const metricsRoutes = require("./routes/metrics");
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
 const {
   correlationMiddleware,
   getRequestId,
@@ -63,17 +63,7 @@ const { initRedis, closeRedis } = require("./services/cacheService");
 const { zodErrorHandler } = require("./validation/middleware");
 const { errorLogFields } = require("./utils/errorResponse");
 const traceContextMiddleware = require("./middleware/tracing");
-
-const { correlationMiddleware, getRequestId } = require("./utils/correlationId");
-// Requiring errorResponse registers getRequestId as the shared registry's
-// correlation-ID provider, so every error body the API returns — including the
-// ones built by direct formatErrorResponse calls — carries the request's
-// X-Request-ID (#270).
-const { errorLogFields } = require("./utils/errorResponse");
-const { initRedis, closeRedis } = require("./services/cacheService");
 const { closeAll: closeAllStreams } = require("./services/balanceStreamService");
-const traceContextMiddleware = require("./middleware/tracing");
- master
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -299,6 +289,7 @@ app.use("/api/accounts", accountRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/webhooks", webhookRoutes);
 app.use("/api/analytics", analyticsRoutes);
+app.use("/api/events", eventsRoutes);
 app.use("/api/turrets", turretsRoutes);
 app.use("/api/tips", tipsRoutes);
 app.use("/api/parse-payment", parsePaymentRoutes);
@@ -353,38 +344,17 @@ app.use((err, req, res, next) => {
   if (err.errorCode) {
     const entry = formatErrorResponse(err.errorCode, err.details);
     const status = err.status || ERROR_CODES[err.errorCode]?.httpStatus || 500;
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
-    logger.error(
- #136-Issue-#14-Database-Backed-Turrets-with-Price-Feed-Fallbacks-FIX
-      { ...errorLogFields(err.errorCode, { details: err.details }), status },
-
-      { status, errorCode: err.errorCode, details: err.details },
-
-    // The logged correlationId is the same one returned in the response body,
-    // which is what makes a user-quoted ID searchable in the logs.
     logger.error(
       { ...errorLogFields(err.errorCode, { details: err.details }), status },
- master
- master
       "Request error",
     );
     return res.status(status).json(entry);
   }
 
   const status = err.status || 500;
- #136-Issue-#14-Database-Backed-Turrets-with-Price-Feed-Fallbacks-FIX
   const message = sanitizeMessage(err.message) || ERROR_CODES.SRV_INTERNAL.message;
   logger.error({ ...errorLogFields("SRV_INTERNAL"), status, message }, "Request error");
 
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
-  const message =
-    sanitizeMessage(err.message) || ERROR_CODES.SRV_INTERNAL.message;
-  logger.error({ status, message }, "Request error");
-
-  const message = sanitizeMessage(err.message) || ERROR_CODES.SRV_INTERNAL.message;
-  logger.error({ ...errorLogFields("SRV_INTERNAL"), status, message }, "Request error");
- master
- master
   // For unknown/unclassified errors, fall back to SRV_INTERNAL with raw details.
   const fallback = formatErrorResponse("SRV_INTERNAL", {
     originalMessage: sanitizeMessage(err.message),

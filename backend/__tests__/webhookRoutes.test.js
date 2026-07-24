@@ -58,7 +58,7 @@ describe("POST /api/webhooks", () => {
       .post("/api/webhooks")
       .send({ url: "https://x.test/h" });
     expect(res.status).toBe(400);
-    expect(res.body.error.message).toMatch(/required/i);
+    expect(res.body.error).toMatch(/required/i);
   });
 
   it("registers a webhook", async () => {
