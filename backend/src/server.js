@@ -24,7 +24,7 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const pinoHttp = require("pino-http");
-const rateLimit = require("express-rate-limit");
+const { createInstrumentedLimiter } = require("./middleware/rateLimit");
 const Sentry = require("@sentry/node");
 const { formatErrorResponse, ERROR_CODES } = require("../../shared/errorCodes");
 
@@ -41,38 +41,29 @@ const parsePaymentRoutes = require("./routes/parsePayment");
 const scheduledTransactionRoutes = require("./routes/scheduledTransactions");
 const sep24Routes = require("./routes/sep24");
 const sep12Routes = require("./routes/sep12");
+const featuresRoutes = require("./routes/features");
+const adminFeatureFlagsRoutes = require("./routes/adminFeatureFlags");
+const rateLimitStatsRoutes = require("./routes/rateLimitStats");
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./swagger");
 const { startTurretsServer } = require("./turretsServer");
 const eventIndexer = require("./services/eventIndexer");
-const { startRetryWorker, closeAllStreams } = require("./services/webhookService");
+const { startRetryWorker } = require("./services/webhookService");
 const logger = require("./utils/logger");
 const { validateEnv, parseAllowedOrigins } = require("./config/validateEnv");
 const { requireJsonContentType } = require("./middleware/bodyParsing");
 const { trackHttpMetrics } = require("./middleware/metrics");
 const metricsRoutes = require("./routes/metrics");
- 140-issue-18-input-validation-with-zod-schemas-fix
- 140-issue-18-input-validation-with-zod-schemas-fix
 
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
- master
 const {
   correlationMiddleware,
   getRequestId,
 } = require("./utils/correlationId");
 const { initRedis, closeRedis } = require("./services/cacheService");
 const { zodErrorHandler } = require("./validation/middleware");
-
-const { correlationMiddleware, getRequestId } = require("./utils/correlationId");
-// Requiring errorResponse registers getRequestId as the shared registry's
-// correlation-ID provider, so every error body the API returns — including the
-// ones built by direct formatErrorResponse calls — carries the request's
-// X-Request-ID (#270).
 const { errorLogFields } = require("./utils/errorResponse");
-const { initRedis, closeRedis } = require("./services/cacheService");
 const { closeAll: closeAllStreams } = require("./services/balanceStreamService");
 const traceContextMiddleware = require("./middleware/tracing");
- master
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -142,25 +133,6 @@ function getFederationServerUrl(req) {
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
-/**
- * Content-Security-Policy directives for this JSON API.
- *
- * The backend serves no HTML pages of its own except Swagger UI at /api/docs,
- * so the policy is intentionally restrictive:
- *
- *  defaultSrc  – block everything not listed explicitly.
- *  scriptSrc   – only same-origin scripts (Swagger UI bundles its own JS).
- *  styleSrc    – same-origin + unsafe-inline (Swagger UI injects inline styles).
- *  imgSrc      – same-origin + data URIs (Swagger UI logo).
- *  connectSrc  – only same-origin fetch/XHR (all API calls go to self).
- *  fontSrc     – same-origin only.
- *  objectSrc   – none (no Flash / plugins).
- *  frameSrc    – none (not embedded in iframes).
- *  upgradeInsecureRequests – omitted intentionally; handled at the load-balancer
- *                            level in production.
- *
- * Helmet v7+ ships with CSP *disabled* by default, so this must be explicit.
- */
 const helmetOptions = {
   contentSecurityPolicy: {
     directives: {
@@ -177,17 +149,9 @@ const helmetOptions = {
 };
 
 app.use(helmet(helmetOptions));
-// Prometheus HTTP metrics — track duration & count for every request.
-// Mounted before routes so the "finish" event captures the resolved
-// route pattern (e.g. "GET /api/payments/:id") rather than raw paths.
 app.use(trackHttpMetrics);
-// Correlation ID middleware — generates/adopts X-Request-ID, stores in ALS.
-// Mounted before pino-http so the requestId appears in every log line.
 app.use(correlationMiddleware);
 app.use(traceContextMiddleware);
-// Structured JSON request logging (#269) — replaces morgan('dev'); reuses the
-// shared pino logger so HTTP logs are machine-parseable (Datadog/CloudWatch).
-// req.id is set by correlationMiddleware above.
 app.use(
   pinoHttp({
     logger,
@@ -199,21 +163,11 @@ app.use(
   }),
 );
 
-// Content-Type enforcement (#81) — reject POST/PUT requests whose body isn't
-// application/json before the JSON parser below gets a chance to silently
-// skip it.
 app.use(requireJsonContentType);
 
-// JSON body size limits (#81).
-// /api/turrets may receive larger txFunction payloads, so it gets its own
-// parser with a higher limit; every other route falls through to the 100kb
-// default. body-parser skips re-parsing a request whose body it has already
-// parsed (req._body), so mounting the turrets parser first is sufficient —
-// the global parser below is a no-op for requests it already handled.
 app.use("/api/turrets", express.json({ limit: "512kb" }));
 app.use(express.json({ limit: "100kb" }));
 
-// JSON body parsing error handler
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
     return res.status(400).json({ error: "Invalid JSON body" });
@@ -224,10 +178,6 @@ app.use((err, req, res, next) => {
   next();
 });
 
-// CORS
-// parseAllowedOrigins validates format at startup (see validateEnv.js) and
-// returns the trimmed list of origins that are safe to use at runtime.
-// Any malformed entries cause process.exit(1) before this line is reached.
 const { origins: allowedOrigins } = parseAllowedOrigins(
   process.env.ALLOWED_ORIGINS,
 );
@@ -235,7 +185,6 @@ const { origins: allowedOrigins } = parseAllowedOrigins(
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (e.g. curl, Postman)
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
@@ -248,13 +197,9 @@ app.use(
   }),
 );
 
-// ─── Health route (exempt from rate limiting) ─────────────────────────────────
-
 app.use("/health", healthRoutes);
 app.use("/api/health", healthRoutes);
 
-// Stellar SEP-0001 discovery document. Wallets and SDKs read this file to
-// discover the SEP-0002 federation endpoint for `name*domain` addresses.
 app.get("/.well-known/stellar.toml", (req, res) => {
   const domain = getFederationDomain(req);
   const protocol =
@@ -275,17 +220,16 @@ TRANSFER_SERVER_SEP0024="${transferServerUrl}"
   res.send(tomlContent);
 });
 
-// Global rate limiting — 100 requests per 15 minutes per IP.
-// standardHeaders: true  → emits RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset (RFC 6585 draft-7).
-// legacyHeaders: false   → suppresses deprecated X-RateLimit-* headers.
-// Clients should inspect RateLimit-Remaining and back off when it approaches 0.
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: formatErrorResponse("RATE_LIMITED_GLOBAL"),
-});
+const limiter = createInstrumentedLimiter(
+  {
+    windowMs: 15 * 60 * 1000,
+    limit: 100,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: formatErrorResponse("RATE_LIMITED_GLOBAL"),
+  },
+  "global",
+);
 app.use(limiter);
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
@@ -301,6 +245,9 @@ app.use("/api/parse-payment", parsePaymentRoutes);
 app.use("/api/scheduled-transactions", scheduledTransactionRoutes);
 app.use("/api/sep24", sep24Routes);
 app.use("/api/sep12", sep12Routes);
+app.use("/api/features", featuresRoutes);
+app.use("/api/admin/feature-flags", adminFeatureFlagsRoutes);
+app.use("/api/admin/rate-limit-stats", rateLimitStatsRoutes);
 app.use("/federation", federationRoutes);
 app.use("/metrics", metricsRoutes);
 
@@ -333,55 +280,26 @@ app.use((req, res) => {
 
 // ─── Error Handling ────────────────────────────────────────────────────────────
 
-// Sentry must capture errors before the generic handler responds
 Sentry.setupExpressErrorHandler(app);
 
-// Convert any stray ZodError (thrown outside the validate() middleware, e.g.
-// a schema.parse() inside a controller) into the standard 400 payload.
 app.use(zodErrorHandler);
 
 app.use((err, req, res, next) => {
   void next;
-  // If the error already has a code from our registry, use it directly.
   if (err.errorCode) {
     const entry = formatErrorResponse(err.errorCode, err.details);
     const status = err.status || ERROR_CODES[err.errorCode]?.httpStatus || 500;
- 140-issue-18-input-validation-with-zod-schemas-fix
- 140-issue-18-input-validation-with-zod-schemas-fix
-
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
- master
-    logger.error(
-      { status, errorCode: err.errorCode, details: err.details },
-
-    // The logged correlationId is the same one returned in the response body,
-    // which is what makes a user-quoted ID searchable in the logs.
     logger.error(
       { ...errorLogFields(err.errorCode, { details: err.details }), status },
- master
       "Request error",
     );
     return res.status(status).json(entry);
   }
 
   const status = err.status || 500;
- 140-issue-18-input-validation-with-zod-schemas-fix
- 140-issue-18-input-validation-with-zod-schemas-fix
-
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
- master
-  const message =
-    sanitizeMessage(err.message) || ERROR_CODES.SRV_INTERNAL.message;
-  logger.error({ status, message }, "Request error");
-
   const message = sanitizeMessage(err.message) || ERROR_CODES.SRV_INTERNAL.message;
   logger.error({ ...errorLogFields("SRV_INTERNAL"), status, message }, "Request error");
- 140-issue-18-input-validation-with-zod-schemas-fix
-master
 
- master
- master
-  // For unknown/unclassified errors, fall back to SRV_INTERNAL with raw details.
   const fallback = formatErrorResponse("SRV_INTERNAL", {
     originalMessage: sanitizeMessage(err.message),
   });
@@ -389,29 +307,22 @@ master
 });
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
-// On SIGTERM / SIGINT, flush pending OpenTelemetry spans and close the
-// HTTP server before exiting so no traces or in-flight requests are lost.
 
 async function gracefulShutdown(signal, server, otelSdk) {
   logger.info({ signal }, "Received shutdown signal — draining…");
 
-  // 1. Stop accepting new connections
   server.close((err) => {
     if (err) logger.error({ err }, "Error closing HTTP server");
   });
 
-  // 2. Close the Horizon payment streams backing the balance SSE endpoint so
-  //    they don't leak hanging connections on restart (#157).
   try {
     closeAllStreams();
   } catch (err) {
     logger.error({ err }, "Error closing Horizon balance streams");
   }
 
-  // 3. Close Redis connection
   await closeRedis();
 
-  // 4. Flush OTel spans (time-boxed at 5 s)
   if (otelSdk) {
     try {
       await Promise.race([
@@ -433,7 +344,6 @@ async function gracefulShutdown(signal, server, otelSdk) {
 
 if (require.main === module) {
   validateEnv();
-  // Initialise Redis connection (non-blocking; degrades gracefully if unavailable)
   initRedis().catch((err) => {
     logger.error({ err }, "Redis initialisation failed");
   });

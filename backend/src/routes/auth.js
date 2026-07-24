@@ -4,33 +4,22 @@
  *
  * GET  /api/auth?account=G... → returns a challenge transaction
  * POST /api/auth              → verifies signed challenge, returns JWT
+ * POST /api/auth/refresh      → rotates access + refresh tokens
+ * POST /api/auth/logout       → revokes the token family
  */
 "use strict";
 
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const { Utils, Keypair } = require("@stellar/stellar-sdk");
- 140-issue-18-input-validation-with-zod-schemas-fix
- 140-issue-18-input-validation-with-zod-schemas-fix
-
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
- master
-const { JWT_SECRET } = require("../middleware/auth");
-const {
-  formatErrorResponse,
-  ERROR_CODES,
-} = require("../../../shared/errorCodes");
+const { formatErrorResponse, ERROR_CODES } = require("../../../shared/errorCodes");
 const { validate } = require("../validation/middleware");
 const {
   authChallengeQuerySchema,
   authTokenBodySchema,
 } = require("../validation/schemas");
-
-
-const { formatErrorResponse, ERROR_CODES } = require("../../../shared/errorCodes");
 const tokenService = require("../services/tokenService");
 const { sendError } = require("../utils/errorResponse");
- master
 
 const router = express.Router();
 
@@ -73,7 +62,7 @@ router.get("/", validate(authChallengeQuerySchema, "query"), (req, res) => {
   }
 });
 
-// POST /api/auth — verify signed challenge and issue JWT
+// POST /api/auth — verify signed challenge and issue JWT (and refresh token)
 router.post("/", validate(authTokenBodySchema), (req, res) => {
   const { transaction } = req.validated;
 
@@ -87,44 +76,28 @@ router.post("/", validate(authTokenBodySchema), (req, res) => {
       "",
     );
 
- 140-issue-18-input-validation-with-zod-schemas-fix
- 140-issue-18-input-validation-with-zod-schemas-fix
-
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
- master
-    const token = jwt.sign({ publicKey: accountId }, JWT_SECRET, {
-      expiresIn: "24h",
-
+    // Issue both an access token and a refresh token via the token service.
     const { accessToken, refreshToken } = tokenService.issueTokens(accountId);
 
     res.cookie("jwt", accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
-      maxAge:   15 * 60 * 1000, // 15 mins
- master
+      maxAge: 15 * 60 * 1000, // 15 minutes
     });
 
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
- 140-issue-18-input-validation-with-zod-schemas-fix
- 140-issue-18-input-validation-with-zod-schemas-fix
-
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
- master
-      maxAge: 24 * 60 * 60 * 1000,
-
-      maxAge:   7 * 24 * 60 * 60 * 1000, // 7 days
- master
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
     res.json({
       success: true,
       token: accessToken, // for backward compatibility
       accessToken,
-      refreshToken
+      refreshToken,
     });
   } catch (e) {
     res
@@ -157,23 +130,23 @@ router.post("/refresh", (req, res) => {
 
   res.cookie("jwt", accessToken, {
     httpOnly: true,
-    secure:   process.env.NODE_ENV === "production",
+    secure: process.env.NODE_ENV === "production",
     sameSite: "strict",
-    maxAge:   15 * 60 * 1000,
+    maxAge: 15 * 60 * 1000,
   });
 
   res.cookie("refreshToken", newRefreshToken, {
     httpOnly: true,
-    secure:   process.env.NODE_ENV === "production",
+    secure: process.env.NODE_ENV === "production",
     sameSite: "strict",
-    maxAge:   7 * 24 * 60 * 60 * 1000,
+    maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 
   res.json({
     success: true,
     token: accessToken,
     accessToken,
-    refreshToken: newRefreshToken
+    refreshToken: newRefreshToken,
   });
 });
 

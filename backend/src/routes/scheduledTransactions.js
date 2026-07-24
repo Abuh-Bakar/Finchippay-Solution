@@ -12,6 +12,7 @@ const {
   loosePublicKeyParamSchema,
   idParamSchema,
 } = require("../validation/schemas");
+const { formatErrorResponse, ERROR_CODES } = require("../../../shared/errorCodes");
 
  140-issue-18-input-validation-with-zod-schemas-fix
 140-issue-18-input-validation-with-zod-schemas-fix
@@ -27,6 +28,9 @@ router.post("/", validate(scheduleTransactionSchema), (req, res, next) => {
   try {
     // submitAt is already confirmed to parse to a valid date by the schema.
     const { signedXDR, submitAt, publicKey } = req.validated;
+
+ #136-Issue-#14-Database-Backed-Turrets-with-Price-Feed-Fallbacks-FIX
+    const schedule = scheduledTransactionService.scheduleTransaction(
 
 // POST /api/scheduled-transactions
 router.post("/", (req, res, next) => {
@@ -63,6 +67,7 @@ router.post("/pending/:id/submit", async (req, res, next) => {
     }
     const result = await scheduledTransactionService.submitPendingExecution(
       req.params.id,
+ master
       signedXDR,
  140-issue-18-input-validation-with-zod-schemas-fix
  140-issue-18-input-validation-with-zod-schemas-fix
@@ -74,7 +79,11 @@ router.post("/pending/:id/submit", async (req, res, next) => {
 
  master
     );
+ #136-Issue-#14-Database-Backed-Turrets-with-Price-Feed-Fallbacks-FIX
+    res.status(201).json(schedule);
+
     res.json(result);
+ master
   } catch (error) {
     next(error);
   }
