@@ -118,15 +118,19 @@ const JOYRIDE_STYLES = {
 
 export interface OnboardingTourProps {
   /** Tour state provided by the useOnboardingTour hook from _app.tsx. */
-  tour: OnboardingTourState;
+  tour?: OnboardingTourState;
+  /** Whether the tour overlay should be visible. */
+  isVisible?: boolean;
+  /** Called when the user completes all tour steps. */
+  onComplete?: () => void;
+  /** Called when the user skips the tour. */
+  onSkip?: () => void;
 }
 
-export default function OnboardingTour({ tour }: OnboardingTourProps) {
-  /**
-   * Called by react-joyride on every tour event.
-   */
+export default function OnboardingTour({ tour, isVisible, onComplete, onSkip }: OnboardingTourProps) {
   const handleJoyrideCallback = useCallback(
     (data: CallBackProps) => {
+      if (!tour) return;
       const { action, index, status, type } = data;
 
       const isFinished = status === "finished";
@@ -147,7 +151,6 @@ export default function OnboardingTour({ tour }: OnboardingTourProps) {
         if (isFinished) {
           tour.completeTour();
         } else if (isSkipped) {
-          // Save current step index so the tour can be resumed.
           tour.setStepIndex(index);
           tour.skipTour();
         }
@@ -155,6 +158,8 @@ export default function OnboardingTour({ tour }: OnboardingTourProps) {
     },
     [tour]
   );
+
+  if (!tour) return null;
 
   return (
     <>
