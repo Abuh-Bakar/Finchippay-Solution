@@ -329,7 +329,7 @@ async function gracefulShutdown(signal, server, otelSdk) {
 
   // 2. Close webhook Horizon SSE streams (stops retry worker, waits for deliveries)
   try {
-    closeWebhookStreams();
+    await closeWebhookStreams();
   } catch (err) {
     logger.error({ err }, "Error closing webhook streams");
   }
@@ -370,7 +370,9 @@ if (require.main === module) {
   initRedis().catch((err) => {
     logger.error({ err }, "Redis initialisation failed");
   });
-  require("./services/scheduledTransactionService").loadActiveSchedules();
+  require("./services/scheduledTransactionService").loadActiveSchedules().catch((err) => {
+    logger.error({ err }, "Failed to load active scheduled transactions");
+  });
   const server = app.listen(PORT, () => {
     console.log(`
   ✨ Finchippay Solution API
