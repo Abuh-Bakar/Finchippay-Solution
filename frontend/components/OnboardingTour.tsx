@@ -11,26 +11,23 @@
  *   - Resume banner shown when the tour is incomplete but not currently running.
  *   - Manual launch available from Navbar via the startTour callback.
  *
- * State is managed externally by the useOnboardingTour hook, which is called
- * in _app.tsx so that the Navbar and this component share the same instance.
+ * Supports two APIs:
+ *   1. Hook-based (from _app.tsx): pass `tour` from useOnboardingTour hook.
+ *   2. Props-based (from dashboard.tsx): pass `isVisible`, `onComplete`, `onSkip`.
+ *      When `tour` is absent, the hook is used internally.
  */
 
 import dynamic from "next/dynamic";
 import { useCallback } from "react";
 import type { CallBackProps, Step } from "react-joyride";
 import type { OnboardingTourState } from "@/hooks/useOnboardingTour";
+import { useOnboardingTour } from "@/hooks/useOnboardingTour";
 
 // ─── react-joyride is client-only (uses DOM APIs) ────────────────────────────
 const Joyride = dynamic(() => import("react-joyride"), { ssr: false });
 
 // ─── Tour steps ───────────────────────────────────────────────────────────────
 
-/**
- * CSS target selectors for each step.
- * Each selector must match a real DOM element rendered by the page.
- * If the element does not exist on the current page the step is simply skipped
- * by react-joyride (TARGET_NOT_FOUND event).
- */
 export const TOUR_STEPS: Step[] = [
   {
     target: '[data-tour="wallet-connect"]',
@@ -92,7 +89,7 @@ const LOCALE = {
 
 const JOYRIDE_STYLES = {
   options: {
-    primaryColor: "#0ea5e9", // stellar-500 (matches the app's brand colour)
+    primaryColor: "#0ea5e9",
     zIndex: 10000,
   },
   tooltip: {
@@ -119,18 +116,21 @@ const JOYRIDE_STYLES = {
 export interface OnboardingTourProps {
   /** Tour state provided by the useOnboardingTour hook from _app.tsx. */
   tour?: OnboardingTourState;
-  /** Whether the tour overlay should be visible. */
+  /** Whether the tour overlay should be visible (used when tour is absent). */
   isVisible?: boolean;
-  /** Called when the user completes all tour steps. */
+  /** Called when the user completes all tour steps (used when tour is absent). */
   onComplete?: () => void;
-  /** Called when the user skips the tour. */
+  /** Called when the user skips the tour (used when tour is absent). */
   onSkip?: () => void;
 }
 
-export default function OnboardingTour({ tour, isVisible, onComplete, onSkip }: OnboardingTourProps) {
+export default function OnboardingTour({ tour: externalTour, isVisible, onComplete, onSkip }: OnboardingTourProps) {
+  // Use internal hook when no external tour state is provided (props-based API)
+  const internalTour = useOnboardingTour();
+  const tour = externalTour || internalTour;
+
   const handleJoyrideCallback = useCallback(
     (data: CallBackProps) => {
-      if (!tour) return;
       const { action, index, status, type } = data;
 
       const isFinished = status === "finished";
@@ -144,31 +144,34 @@ export default function OnboardingTour({ tour, isVisible, onComplete, onSkip }: 
         } else if (action === "close" || action === "skip") {
           tour.setStepIndex(index);
           tour.skipTour();
+          onSkip?.();
         }
       }
 
       if (type === "tour:end") {
         if (isFinished) {
           tour.completeTour();
+          onComplete?.();
         } else if (isSkipped) {
           tour.setStepIndex(index);
           tour.skipTour();
+          onSkip?.();
         }
       }
     },
-    [tour]
+    [tour, onComplete, onSkip]
   );
 
-  if (!tour) return null;
+  const isRunning = externalTour ? tour.isRunning : (isVisible ?? tour.isRunning);
 
   return (
     <>
       {/* ── react-joyride tour overlay ────────────────────────────────── */}
-      {tour.isRunning && (
+      {isRunning && (
         <Joyride
           steps={TOUR_STEPS}
           stepIndex={tour.stepIndex}
-          run={tour.isRunning}
+          run={isRunning}
           continuous
           showProgress
           showSkipButton
@@ -180,8 +183,8 @@ export default function OnboardingTour({ tour, isVisible, onComplete, onSkip }: 
         />
       )}
 
-      {/* ── Resume banner ─────────────────────────────────────────────── */}
-      {tour.isResumable && !tour.isRunning && (
+      {/* ── Resume banner (only shown when using external hook-based API) ── */}
+      {externalTour && tour.isResumable && !tour.isRunning && (
         <div
           role="status"
           aria-live="polite"
@@ -221,7 +224,6 @@ export default function OnboardingTour({ tour, isVisible, onComplete, onSkip }: 
 
 // ─── Re-export hook and constants for consumers ───────────────────────────────
 
-export { useOnboardingTour } from "@/hooks/useOnboardingTour";
 export {
   ONBOARDING_KEY_COMPLETED,
   ONBOARDING_KEY_DISMISSED,

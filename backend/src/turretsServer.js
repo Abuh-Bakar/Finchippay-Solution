@@ -31,16 +31,16 @@ const { parseAllowedOrigins } = require("./config/validateEnv");
 
 const TURRETS_PORT = Number(process.env.TURRETS_PORT || 4100);
 
+// ─── Sentry (module-level init, idempotent) ───────────────────────────────────
+Sentry.init({
+  dsn: process.env.SENTRY_DSN,
+  environment: process.env.NODE_ENV || "development",
+  enabled: !!process.env.SENTRY_DSN,
+  tracesSampleRate: 0.2,
+});
+
 function createTurretsApp() {
   const app = express();
-
-  // ─── Sentry ─────────────────────────────────────────────────────────────────
-  Sentry.init({
-    dsn: process.env.SENTRY_DSN,
-    environment: process.env.NODE_ENV || "development",
-    enabled: !!process.env.SENTRY_DSN,
-    tracesSampleRate: 0.2,
-  });
 
   // ─── Helmet ─────────────────────────────────────────────────────────────────
   app.use(
