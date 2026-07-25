@@ -109,6 +109,16 @@ pub struct ReceiptMetadata {
     pub ledger: u32,
 }
 
+/// Off-chain verifiable proof referencing an on-chain receipt.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ReceiptProof {
+    pub receipt_index: u32,
+    pub payer: Address,
+    pub expected_amount: i128,
+    pub expected_memo: Symbol,
+}
+
 // ─── Escrow ───────────────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -1160,8 +1170,39 @@ impl FinchippayContract {
         val
     }
 
+    /// Generate a `ReceiptProof` from the on-chain receipt at `index` for `payer`.
+    /// This is a convenience helper that reads the stored receipt and packages
+    /// the payer, amount, and memo into a proof struct for off-chain verification.
+    pub fn generate_receipt_proof(env: Env, payer: Address, index: u32) -> ReceiptProof {
+        let receipt = Self::get_receipt(env, payer.clone(), index);
+        ReceiptProof {
+            receipt_index: index,
+            payer,
+            expected_amount: receipt.amount,
+            expected_memo: receipt.memo,
+        }
+    }
 
-    // ─── Escrow ───────────────────────────────────────────────────────────────
+    /// Verify that a receipt at `payer` + `index` matches the given `expected_amount`
+    /// and `expected_memo`. Returns `true` only if all fields match exactly, proving
+    /// the receipt was minted on-chain by this contract.
+    ///
+    /// Returns `false` (never panics) for non-existent indices or mismatched values
+    /// so callers can use the result in conditional logic without catching traps.
+    pub fn verify_receipt(
+        env: Env,
+        payer: Address,
+        index: u32,
+        expected_amount: i128,
+        expected_memo: Symbol,
+    ) -> bool {
+        let key = DataKey::ReceiptRecord(payer, index);
+        let receipt: ReceiptMetadata = match env.storage().persistent().get(&key) {
+            Some(r) => r,
+            None => return false,
+        };
+        receipt.amount == expected_amount && receipt.memo == expected_memo
+    }
 
     /// Lock `amount` tokens from `from` until `release_ledger`. Returns the escrow ID.
     ///
@@ -4506,5 +4547,109 @@ mod tests {
         let w = client.get_emergency_withdrawal(&id);
         assert_eq!(w.status, EmergencyWithdrawalStatus::Executed);
         assert_eq!(token.balance(&to), 4_000);
+    }
+
+    // ── Receipt verification ─────────────────────────────────────────────
+
+    #[test]
+    fn test_verify_receipt_matches_on_chain_data() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        env.mock_all_auths();
+        let _token_id = create_token(&env, &admin, &from, 5_000);
+        let memo = Symbol::new(&env, "inv_42");
+        client.mint_receipt(&from, &to, &1_500, &memo);
+
+        assert!(client.verify_receipt(&from, &0, &1_500, &memo));
+    }
+
+    #[test]
+    fn test_verify_receipt_returns_false_for_wrong_amount() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        env.mock_all_auths();
+        let _token_id = create_token(&env, &admin, &from, 5_000);
+        let memo = Symbol::new(&env, "inv_42");
+        client.mint_receipt(&from, &to, &1_500, &memo);
+
+        assert!(!client.verify_receipt(&from, &0, &9_999, &memo));
+    }
+
+    #[test]
+    fn test_verify_receipt_returns_false_for_wrong_memo() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        env.mock_all_auths();
+        let _token_id = create_token(&env, &admin, &from, 5_000);
+        let memo = Symbol::new(&env, "inv_42");
+        client.mint_receipt(&from, &to, &1_500, &memo);
+
+        let wrong_memo = Symbol::new(&env, "WRONG");
+        assert!(!client.verify_receipt(&from, &0, &1_500, &wrong_memo));
+    }
+
+    #[test]
+    fn test_verify_receipt_returns_false_for_nonexistent_index() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        env.mock_all_auths();
+        let _token_id = create_token(&env, &admin, &from, 5_000);
+        let memo = Symbol::new(&env, "inv_42");
+        client.mint_receipt(&from, &to, &1_500, &memo);
+
+        assert!(!client.verify_receipt(&from, &99, &1_500, &memo));
+    }
+
+    #[test]
+    fn test_generate_receipt_proof_returns_stored_fields() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        env.mock_all_auths();
+        let _token_id = create_token(&env, &admin, &from, 5_000);
+        let memo = Symbol::new(&env, "rent_jan");
+        client.mint_receipt(&from, &to, &2_500, &memo);
+
+        let proof = client.generate_receipt_proof(&from, &0);
+        assert_eq!(proof.receipt_index, 0);
+        assert_eq!(proof.payer, from);
+        assert_eq!(proof.expected_amount, 2_500);
+        assert_eq!(proof.expected_memo, memo);
+    }
+
+    #[test]
+    fn test_verify_receipt_multiple_receipts_independent() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        env.mock_all_auths();
+        let _token_id = create_token(&env, &admin, &from, 10_000);
+        let memo_a = Symbol::new(&env, "receipt_a");
+        let memo_b = Symbol::new(&env, "receipt_b");
+        client.mint_receipt(&from, &to, &100, &memo_a);
+        client.mint_receipt(&from, &to, &200, &memo_b);
+
+        // Each receipt verifies independently.
+        assert!(client.verify_receipt(&from, &0, &100, &memo_a));
+        assert!(client.verify_receipt(&from, &1, &200, &memo_b));
+        // Cross-checks fail.
+        assert!(!client.verify_receipt(&from, &0, &200, &memo_b));
+        assert!(!client.verify_receipt(&from, &1, &100, &memo_a));
     }
 }
