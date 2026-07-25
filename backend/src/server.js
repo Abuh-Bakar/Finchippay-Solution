@@ -41,6 +41,7 @@ const parsePaymentRoutes = require("./routes/parsePayment");
 const scheduledTransactionRoutes = require("./routes/scheduledTransactions");
 const sep24Routes = require("./routes/sep24");
 const sep12Routes = require("./routes/sep12");
+const sep38Routes = require("./routes/sep38");
 const eventRoutes = require("./routes/events");
 const featuresRoutes = require("./routes/features");
 const adminFeatureFlagsRoutes = require("./routes/adminFeatureFlags");
@@ -48,16 +49,24 @@ const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./swagger");
 const { startTurretsServer } = require("./turretsServer");
 const eventIndexer = require("./services/eventIndexer");
-const { startRetryWorker, closeAllStreams: closeWebhookStreams } = require("./services/webhookService");
+const {
+  startRetryWorker,
+  closeAllStreams: closeWebhookStreams,
+} = require("./services/webhookService");
 const logger = require("./utils/logger");
 const { validateEnv, parseAllowedOrigins } = require("./config/validateEnv");
 const { requireJsonContentType } = require("./middleware/bodyParsing");
 const { trackHttpMetrics } = require("./middleware/metrics");
 const metricsRoutes = require("./routes/metrics");
-const { correlationMiddleware, getRequestId } = require("./utils/correlationId");
+const {
+  correlationMiddleware,
+  getRequestId,
+} = require("./utils/correlationId");
 const { errorLogFields } = require("./utils/errorResponse");
 const { initRedis, closeRedis } = require("./services/cacheService");
-const { closeAll: closeBalanceStreams } = require("./services/balanceStreamService");
+const {
+  closeAll: closeBalanceStreams,
+} = require("./services/balanceStreamService");
 const { zodErrorHandler } = require("./validation/middleware");
 const traceContextMiddleware = require("./middleware/tracing");
 
@@ -256,6 +265,7 @@ app.use("/api/scheduled-transactions", scheduledTransactionRoutes);
 app.use("/api/events", eventRoutes);
 app.use("/api/sep24", sep24Routes);
 app.use("/api/sep12", sep12Routes);
+app.use("/sep38", sep38Routes);
 app.use("/api/features", featuresRoutes);
 app.use("/api/admin/feature-flags", adminFeatureFlagsRoutes);
 app.use("/federation", federationRoutes);
@@ -310,8 +320,12 @@ app.use((err, req, res, next) => {
   }
 
   const status = err.status || 500;
-  const message = sanitizeMessage(err.message) || ERROR_CODES.SRV_INTERNAL.message;
-  logger.error({ ...errorLogFields("SRV_INTERNAL"), status, message }, "Request error");
+  const message =
+    sanitizeMessage(err.message) || ERROR_CODES.SRV_INTERNAL.message;
+  logger.error(
+    { ...errorLogFields("SRV_INTERNAL"), status, message },
+    "Request error",
+  );
 
   const fallback = formatErrorResponse("SRV_INTERNAL", {
     originalMessage: sanitizeMessage(err.message),
@@ -392,9 +406,11 @@ if (require.main === module) {
     initRedis().catch((err) => {
       logger.error({ err }, "Redis initialisation failed");
     });
-    require("./services/scheduledTransactionService").loadActiveSchedules().catch((err) => {
-      logger.error({ err }, "Failed to load active scheduled transactions");
-    });
+    require("./services/scheduledTransactionService")
+      .loadActiveSchedules()
+      .catch((err) => {
+        logger.error({ err }, "Failed to load active scheduled transactions");
+      });
     const server = app.listen(PORT, () => {
       console.log(`
   ✨ Finchippay Solution API
