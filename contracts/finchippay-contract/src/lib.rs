@@ -316,6 +316,11 @@ const CONTRACT_VERSION: u32 = 3;
 const EMERGENCY_WITHDRAWAL_DELAY: u32 = 17_280;
 /// Maximum number of admin signers allowed for emergency withdrawal approvals.
 const MAX_ADMIN_SIGNERS: u32 = 20;
+/// Storage layout version — must be incremented every time the `DataKey` enum
+/// or any persistent struct field layout changes. The admin must call
+/// `validate_storage_compatibility` before upgrading to ensure the new WASM
+/// declares a layout version >= this value, preventing bricked storage.
+const STORAGE_LAYOUT_VERSION: u32 = 1;
 
 // ─── Storage key enum ─────────────────────────────────────────────────────────
 
@@ -327,6 +332,8 @@ pub enum DataKey {
     Paused,
     /// Stored contract version; bumped on upgrade.
     Version,
+    /// Storage layout version for upgrade compatibility checks.
+    StorageLayoutVersion,
     // Tips
     TipTotal(Address),
     TipCount(Address),
@@ -540,6 +547,10 @@ impl FinchippayContract {
             .persistent()
             .set(&DataKey::Version, &CONTRACT_VERSION);
         bump(&env, &DataKey::Version);
+        env.storage()
+            .persistent()
+            .set(&DataKey::StorageLayoutVersion, &STORAGE_LAYOUT_VERSION);
+        bump(&env, &DataKey::StorageLayoutVersion);
         env.events().publish((Symbol::new(&env, "init"),), admin);
         Ok(())
     }
@@ -702,16 +713,62 @@ impl FinchippayContract {
         ver
     }
 
+    /// Return the current storage layout version. This must be incremented
+    /// whenever the `DataKey` enum or any persistent struct field layout
+    /// changes to prevent bricked upgrades.
+    pub fn get_storage_layout_version(env: Env) -> u32 {
+        let key = DataKey::StorageLayoutVersion;
+        let ver: u32 = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(STORAGE_LAYOUT_VERSION);
+        if env.storage().persistent().has(&key) {
+            bump(&env, &key);
+        }
+        ver
+    }
+
+    /// Validate that the new layout version is compatible with the current one.
+    ///
+    /// The new layout version must be >= the current version to prevent
+    /// bricked upgrades from incompatible data layouts.
+    ///
+    /// This is called automatically by `upgrade()`.
+    pub fn validate_storage_compatibility(
+        env: Env,
+        new_layout_version: u32,
+    ) -> bool {
+        let current_version = Self::get_storage_layout_version(env);
+
+        if new_layout_version < current_version {
+            panic!("new WASM storage layout version is lower than current");
+        }
+
+        true
+    }
+
     /// Admin: upgrade the contract WASM to `new_wasm_hash`.
     ///
-    /// After a successful upgrade the stored version is incremented so off-chain
-    /// indexers can detect the change.
-    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) {
+    /// The caller must also provide `new_layout_version` — the storage layout
+    /// version declared by the new WASM. This must be >= the current layout
+    /// version to prevent bricked upgrades. After a successful upgrade the
+    /// stored version is incremented and the layout version is updated.
+    pub fn upgrade(
+        env: Env,
+        admin: Address,
+        new_wasm_hash: BytesN<32>,
+        new_layout_version: u32,
+    ) {
         admin.require_auth();
         let stored = get_admin(&env);
         if admin != stored {
             panic!("Unauthorized");
         }
+
+        // Validate storage compatibility before upgrading.
+        Self::validate_storage_compatibility(env.clone(), new_layout_version);
+
         env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
         let current_ver: u32 = env
             .storage()
@@ -722,9 +779,13 @@ impl FinchippayContract {
             .persistent()
             .set(&DataKey::Version, &(current_ver + 1));
         bump(&env, &DataKey::Version);
+        env.storage()
+            .persistent()
+            .set(&DataKey::StorageLayoutVersion, &new_layout_version);
+        bump(&env, &DataKey::StorageLayoutVersion);
         env.events().publish(
             (Symbol::new(&env, "upgraded"),),
-            (current_ver + 1, new_wasm_hash),
+            (current_ver + 1, new_wasm_hash, new_layout_version),
         );
     }
 
@@ -3178,7 +3239,7 @@ mod tests {
         client.set_pauser(&admin, &pauser);
         // The pauser must not be able to swap the contract WASM.
         let dummy_hash = BytesN::from_array(&env, &[0u8; 32]);
-        client.upgrade(&pauser, &dummy_hash);
+        client.upgrade(&pauser, &dummy_hash, &1);
     }
 
     // ── Batch send ─────────────────────────────────────────────────────────
@@ -4652,4 +4713,51 @@ mod tests {
         assert!(!client.verify_receipt(&from, &0, &200, &memo_b));
         assert!(!client.verify_receipt(&from, &1, &100, &memo_a));
     }
+
+    // ==================== Storage Compatibility Tests ====================
+
+    #[test]
+    fn test_get_storage_layout_version_returns_initial() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let version = client.get_storage_layout_version();
+        assert_eq!(version, 1);
+    }
+
+    #[test]
+    fn test_validate_compatibility_same_version_passes() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        assert!(client.validate_storage_compatibility(&1));
+    }
+
+    #[test]
+    fn test_validate_compatibility_higher_version_passes() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        assert!(client.validate_storage_compatibility(&5));
+    }
+
+    #[test]
+    #[should_panic(expected = "new WASM storage layout version is lower than current")]
+    fn test_validate_compatibility_lower_version_panics() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        client.validate_storage_compatibility(&0);
+    }
+
+    #[test]
+    #[should_panic(expected = "new WASM storage layout version is lower than current")]
+    fn test_upgrade_rejects_lower_layout_version() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        env.mock_all_auths();
+
+        let dummy_hash = BytesN::from_array(&env, &[1u8; 32]);
+        client.upgrade(&admin, &dummy_hash, &0);
+    }
 }
+
+// Mock contracts for storage compatibility tests — no longer needed.
+// Kept as empty module placeholder to avoid disrupting surrounding code.
