@@ -237,7 +237,7 @@ async function computeBalanceChanges(
       let estimatedChange = 0;
       for (const op of tx.operations) {
         if (op.type === "payment" || op.type === "createAccount") {
-          const opBody = op.body;
+          const opBody = (op as any).body;
           const amount =
             "amount" in (opBody as any)
               ? parseFloat((opBody as any).amount)

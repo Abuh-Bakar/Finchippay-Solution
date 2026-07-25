@@ -12,6 +12,8 @@ const express    = require("express");
 const router     = express.Router();
 const { strictLimiter } = require("../middleware/rateLimit");
 const { verifyJWT }     = require("../middleware/auth");
+const { validate } = require("../validation/middleware");
+const { adminToggleFlagSchema } = require("../validation/schemas");
 const featureFlagsController = require("../controllers/featureFlagsController");
 
 /**
@@ -36,6 +38,7 @@ router.post(
   "/:key/toggle",
   strictLimiter,
   verifyJWT,
+  validate(adminToggleFlagSchema),
   featureFlagsController.adminToggleFlag
 );
 

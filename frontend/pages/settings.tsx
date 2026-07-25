@@ -8,7 +8,6 @@ import Head from "next/head";
 import Link from "next/link";
 import { useTranslation } from "react-i18next";
 import { getNetworkConfig, setNetworkConfig, NetworkConfig } from "@/lib/stellar";
-import { signTransactionWithWallet } from "@/lib/wallet";
 import { disconnectWallet, signTransactionWithWallet } from "@/lib/wallet";
 import { clearAddressBook, loadAddressBookContacts } from "@/lib/addressBook";
 import {
@@ -225,11 +224,16 @@ export default function SettingsPage({
     setTurretsError(null);
 
     try {
-      const updated =
-        deployment.status === "active"
-          ? await pauseTurretsFunction(deployment.id)
-          : await resumeTurretsFunction(deployment.id);
-      setDeployments((prev) => prev.map((item) => (item.id === deployment.id ? updated : item)));
+      deployment.status === "active"
+        ? await pauseTurretsFunction(deployment.id)
+        : await resumeTurretsFunction(deployment.id);
+      setDeployments((prev: TurretsDeployment[]) =>
+        prev.map((item: TurretsDeployment) =>
+          item.id === deployment.id
+            ? { ...item, status: item.status === "active" ? "paused" as const : "active" as const }
+            : item
+        )
+      );
     } catch (err) {
       setTurretsError(err instanceof Error ? err.message : "Failed to update deployment status");
     } finally {
@@ -731,7 +735,7 @@ export default function SettingsPage({
                 Address Book
               </h2>
               <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
-                Manage your locally stored contacts. Contacts are stored in your browser's local storage and will be cleared when you disconnect your wallet.
+                Manage your locally stored contacts. Contacts are stored in your browser&apos;s local storage and will be cleared when you disconnect your wallet.
               </p>
               <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-cosmos-900 rounded-lg border border-slate-200 dark:border-slate-700">
                 <div>

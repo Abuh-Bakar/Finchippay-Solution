@@ -100,7 +100,7 @@ export default function AnalyticsCharts({
                 cx="50%"
                 cy="50%"
                 outerRadius={90}
-                label={({ asset, percentage }) => `${asset} (${percentage}%)`}
+                label={({ name, percent }) => `${name} (${((percent ?? 0) * 100).toFixed(0)}%)`}
               >
                 {assetBreakdown.map((_, i) => (
                   <Cell key={i} fill={COLORS[i % COLORS.length]} />
