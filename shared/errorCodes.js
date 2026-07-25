@@ -187,6 +187,11 @@ const ERROR_CODES = {
     httpStatus: 400,
     message: "Offset must be a non-negative integer.",
   },
+  VAL_INVALID_CURSOR: {
+    code: "VAL_INVALID_CURSOR",
+    httpStatus: 400,
+    message: "Cursor is malformed. Use a cursor returned by a previous page.",
+  },
   VAL_INVALID_QUERY_PARAM: {
     code: "VAL_INVALID_QUERY_PARAM",
     httpStatus: 400,

@@ -4,14 +4,23 @@
  *
  * GET  /api/auth?account=G... → returns a challenge transaction
  * POST /api/auth              → verifies signed challenge, returns JWT
+ * POST /api/auth/refresh      → rotates access + refresh tokens
+ * POST /api/auth/logout       → revokes the token family
  */
 "use strict";
 
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const { Utils, Keypair } = require("@stellar/stellar-sdk");
-
-const { formatErrorResponse, ERROR_CODES } = require("../../../shared/errorCodes");
+const {
+  formatErrorResponse,
+  ERROR_CODES,
+} = require("../../../shared/errorCodes");
+const { validate } = require("../validation/middleware");
+const {
+  authChallengeQuerySchema,
+  authTokenBodySchema,
+} = require("../validation/schemas");
 const tokenService = require("../services/tokenService");
 const { sendError } = require("../utils/errorResponse");
 
@@ -34,13 +43,8 @@ function getServerKeypair() {
 }
 
 // GET /api/auth?account=G... — issue a SEP-0010 challenge transaction
-router.get("/", (req, res) => {
-  const { account } = req.query;
-  if (!account) {
-    return res
-      .status(ERROR_CODES.VAL_MISSING_FIELD.httpStatus)
-      .json(formatErrorResponse("VAL_MISSING_FIELD", { fields: ["account"] }));
-  }
+router.get("/", validate(authChallengeQuerySchema, "query"), (req, res) => {
+  const { account } = req.validated;
 
   try {
     const keypair = getServerKeypair();
@@ -55,18 +59,15 @@ router.get("/", (req, res) => {
   } catch (e) {
     res
       .status(ERROR_CODES.AUTH_CHALLENGE_FAILED.httpStatus)
-      .json(formatErrorResponse("AUTH_CHALLENGE_FAILED", { reason: e.message }));
+      .json(
+        formatErrorResponse("AUTH_CHALLENGE_FAILED", { reason: e.message }),
+      );
   }
 });
 
-// POST /api/auth — verify signed challenge and issue JWT
-router.post("/", (req, res) => {
-  const { transaction } = req.body;
-  if (!transaction) {
-    return res
-      .status(ERROR_CODES.VAL_MISSING_FIELD.httpStatus)
-      .json(formatErrorResponse("VAL_MISSING_FIELD", { fields: ["transaction"] }));
-  }
+// POST /api/auth — verify signed challenge and issue JWT (and refresh token)
+router.post("/", validate(authTokenBodySchema), (req, res) => {
+  const { transaction } = req.validated;
 
   try {
     const keypair = getServerKeypair();
@@ -78,42 +79,47 @@ router.post("/", (req, res) => {
       "",
     );
 
+    // Issue both an access token and a refresh token via the token service.
     const { accessToken, refreshToken } = tokenService.issueTokens(accountId);
 
     res.cookie("jwt", accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
-      maxAge:   15 * 60 * 1000, // 15 mins
+      maxAge: 15 * 60 * 1000, // 15 minutes
     });
 
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
-      secure:   process.env.NODE_ENV === "production",
+      secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
-      maxAge:   7 * 24 * 60 * 60 * 1000, // 7 days
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
     res.json({
       success: true,
-      token: accessToken, // for backward compatibility
+      token: accessToken, // backward compatibility
       accessToken,
-      refreshToken
+      refreshToken,
     });
   } catch (e) {
     res
       .status(ERROR_CODES.AUTH_CHALLENGE_FAILED.httpStatus)
-      .json(formatErrorResponse("AUTH_CHALLENGE_FAILED", { reason: e.message }));
+      .json(
+        formatErrorResponse("AUTH_CHALLENGE_FAILED", { reason: e.message }),
+      );
   }
 });
 
-// POST /api/auth/refresh — Rotate access + refresh tokens
+// POST /api/auth/refresh — rotate access + refresh tokens
 router.post("/refresh", (req, res) => {
   const refreshToken = req.body.refreshToken || req.cookies?.refreshToken;
   if (!refreshToken) {
     return res
       .status(ERROR_CODES.VAL_MISSING_FIELD.httpStatus)
-      .json(formatErrorResponse("VAL_MISSING_FIELD", { fields: ["refreshToken"] }));
+      .json(
+        formatErrorResponse("VAL_MISSING_FIELD", { fields: ["refreshToken"] }),
+      );
   }
 
   const rotated = tokenService.rotateRefreshToken(refreshToken);
@@ -129,27 +135,27 @@ router.post("/refresh", (req, res) => {
 
   res.cookie("jwt", accessToken, {
     httpOnly: true,
-    secure:   process.env.NODE_ENV === "production",
+    secure: process.env.NODE_ENV === "production",
     sameSite: "strict",
-    maxAge:   15 * 60 * 1000,
+    maxAge: 15 * 60 * 1000,
   });
 
   res.cookie("refreshToken", newRefreshToken, {
     httpOnly: true,
-    secure:   process.env.NODE_ENV === "production",
+    secure: process.env.NODE_ENV === "production",
     sameSite: "strict",
-    maxAge:   7 * 24 * 60 * 60 * 1000,
+    maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 
   res.json({
     success: true,
     token: accessToken,
     accessToken,
-    refreshToken: newRefreshToken
+    refreshToken: newRefreshToken,
   });
 });
 
-// POST /api/auth/logout — Revoke the token family
+// POST /api/auth/logout — revoke the token family
 router.post("/logout", (req, res) => {
   const refreshToken = req.body.refreshToken || req.cookies?.refreshToken;
   let publicKey = null;

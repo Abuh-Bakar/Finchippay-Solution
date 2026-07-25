@@ -364,7 +364,10 @@ export default function SettingsPage({
                 {t("settings.languageTitle")}
               </h2>
               <p className="text-sm text-slate-400 dark:text-slate-400 mb-4">{t("settings.languageDescription")}</p>
-              <div className="grid grid-cols-3 gap-3">
+              <p className="mb-4 text-xs text-slate-500 dark:text-slate-400" role="status">
+                {t("settings.rtlSupportNote")}
+              </p>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {SUPPORTED_LANGUAGES.map((lang) => (
                   <button
                     key={lang.code}
@@ -728,7 +731,7 @@ export default function SettingsPage({
                 Address Book
               </h2>
               <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
-                Manage your locally stored contacts. Contacts are stored in your browser's local storage and will be cleared when you disconnect your wallet.
+                Manage your locally stored contacts. Contacts are stored in your browser&apos;s local storage and will be cleared when you disconnect your wallet.
               </p>
               <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-cosmos-900 rounded-lg border border-slate-200 dark:border-slate-700">
                 <div>

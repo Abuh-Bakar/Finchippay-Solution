@@ -106,7 +106,9 @@ describe("SEP-0024 API", () => {
         })
         .expect(400);
 
-      expect(response.body.error.details.reason).toContain("Invalid Stellar public key");
+      expect(response.body.error.details.reason).toContain(
+        "Invalid Stellar public key",
+      );
     });
   });
 

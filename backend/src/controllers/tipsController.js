@@ -16,6 +16,11 @@
 "use strict";
 
 const tipsService = require("../services/tipsService");
+const { buildPage, setPaginationHeaders } = require("../utils/paginate");
+
+// Extract the keyset cursor fields from a mapped tip record. `timestamp` holds
+// the row's `created_at`; `id` is the unique tiebreaker.
+const tipCursor = (tip) => ({ created_at: tip.timestamp, id: tip.id });
 
 // Lazy-loaded to avoid circular dependency at parse time
 function getCache() {
@@ -30,34 +35,22 @@ function getCache() {
  * POST /api/tips
  * Record a new tip after the on-chain transaction has been confirmed.
  *
- * Body: {
- *   senderPublicKey:  string,   // Stellar G… address of the sender
- *   creatorPublicKey: string,   // Stellar G… address of the creator
- *   amount:           string,   // Amount sent (e.g. "10.0000000")
- *   asset?:           string,   // Asset code (default "XLM")
- *   memo?:            string,   // Optional message from sender
- *   txHash?:          string    // Stellar transaction hash for verification
- * }
- *
- * @param {import('express').Request}  req
- * @param {import('express').Response} res
- * @param {import('express').NextFunction} next
- *
- * @returns {201} { success: true, data: TipRecord, message }
- * @returns {400} Validation error — missing or invalid fields.
+ * Body:
+ *   senderPublicKey / creatorPublicKey / amount / asset / memo / txHash
  */
 async function recordTip(req, res, next) {
   try {
+    // Input has already been validated by `tipSchema` (see validate()
+    // middleware) — asset defaults to "XLM", amount is a positive decimal
+    // string, both keys are valid Stellar addresses.
     const { senderPublicKey, creatorPublicKey, amount, asset, memo, txHash } =
-      req.body;
-
-    tipsService.validateTipInput({ senderPublicKey, creatorPublicKey, amount });
+      req.validated;
 
     const tip = await tipsService.recordTip({
       senderPublicKey,
       creatorPublicKey,
       amount,
-      asset: asset || "XLM",
+      asset,
       memo: memo || "",
       txHash: txHash || "",
     });
@@ -85,33 +78,30 @@ async function recordTip(req, res, next) {
 /**
  * GET /api/tips/received/:creatorPublicKey
  * Return paginated tips received by a creator, including aggregate stats.
- *
- * Query params:
- *   - `limit`  {number} max records (default 50)
- *   - `offset` {number} records to skip for pagination (default 0)
- *
- * @param {import('express').Request}  req
- * @param {import('express').Response} res
- * @param {import('express').NextFunction} next
- *
- * @returns {200} { success: true, data: { tips, total, limit, offset, stats } }
- * @returns {400} Invalid public key format.
  */
 async function getTipsReceived(req, res, next) {
   try {
-    const { creatorPublicKey } = req.params;
-    const limit = req.query.limit ? parseInt(req.query.limit, 10) : undefined;
-    const offset = req.query.offset
-      ? parseInt(req.query.offset, 10)
-      : undefined;
+    const { creatorPublicKey } = req.validated;
+    const { limit, cursor } = req.pagination;
 
-    const result = await tipsService.getTipsReceived(creatorPublicKey, {
-      limit,
-      offset,
-    });
+    const { tips, total } = await tipsService.getTipsReceived(
+      creatorPublicKey,
+      {
+        limit,
+        cursor,
+      },
+    );
     const stats = await tipsService.getTipsStats(creatorPublicKey);
 
-    return res.json({ success: true, data: { ...result, stats } });
+    const { data, nextCursor } = buildPage(tips, limit, tipCursor);
+    setPaginationHeaders(req, res, { nextCursor, total, limit });
+
+    return res.json({
+      success: true,
+      data,
+      stats,
+      pagination: { nextCursor, total, limit },
+    });
   } catch (err) {
     next(err);
   }
@@ -120,17 +110,10 @@ async function getTipsReceived(req, res, next) {
 /**
  * GET /api/tips/stats/:creatorPublicKey
  * Return aggregate tip statistics for a creator without the full tip list.
- *
- * @param {import('express').Request}  req
- * @param {import('express').Response} res
- * @param {import('express').NextFunction} next
- *
- * @returns {200} { success: true, data: { totalTips, totalByAsset, averageTip, largestTip, smallestTip } }
- * @returns {400} Invalid public key format.
  */
 async function getTipsStats(req, res, next) {
   try {
-    const { creatorPublicKey } = req.params;
+    const { creatorPublicKey } = req.validated;
     const stats = await tipsService.getTipsStats(creatorPublicKey);
     return res.json({ success: true, data: stats });
   } catch (err) {
@@ -141,31 +124,25 @@ async function getTipsStats(req, res, next) {
 /**
  * GET /api/tips/sent/:senderPublicKey
  * Return paginated tips sent by a user.
- *
- * Query params:
- *   - `limit`  {number} max records (default 50)
- *   - `offset` {number} records to skip for pagination (default 0)
- *
- * @param {import('express').Request}  req
- * @param {import('express').Response} res
- * @param {import('express').NextFunction} next
- *
- * @returns {200} { success: true, data: { tips, total, limit, offset } }
- * @returns {400} Invalid public key format.
  */
 async function getTipsSent(req, res, next) {
   try {
-    const { senderPublicKey } = req.params;
-    const limit = req.query.limit ? parseInt(req.query.limit, 10) : undefined;
-    const offset = req.query.offset
-      ? parseInt(req.query.offset, 10)
-      : undefined;
+    const { senderPublicKey } = req.validated;
+    const { limit, cursor } = req.pagination;
 
-    const result = await tipsService.getTipsSent(senderPublicKey, {
+    const { tips, total } = await tipsService.getTipsSent(senderPublicKey, {
       limit,
-      offset,
+      cursor,
     });
-    return res.json({ success: true, data: result });
+
+    const { data, nextCursor } = buildPage(tips, limit, tipCursor);
+    setPaginationHeaders(req, res, { nextCursor, total, limit });
+
+    return res.json({
+      success: true,
+      data,
+      pagination: { nextCursor, total, limit },
+    });
   } catch (err) {
     next(err);
   }

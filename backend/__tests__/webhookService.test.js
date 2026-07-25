@@ -49,13 +49,19 @@ jest.mock("../src/db", () => {
             });
             return { changes: 1 };
           }
-          if (sql.includes("UPDATE webhook_deliveries") && sql.includes("SET status = 'delivered'")) {
+          if (
+            sql.includes("UPDATE webhook_deliveries") &&
+            sql.includes("SET status = 'delivered'")
+          ) {
             const [id] = args;
             const d = deliveries.get(id);
             if (d) d.status = "delivered";
             return { changes: 1 };
           }
-          if (sql.includes("UPDATE webhook_deliveries") && sql.includes("SET attempts")) {
+          if (
+            sql.includes("UPDATE webhook_deliveries") &&
+            sql.includes("SET attempts")
+          ) {
             const [errorMsg, nextRetryAt, maxRetries, id] = args;
             const d = deliveries.get(id);
             if (d) {
@@ -66,7 +72,10 @@ jest.mock("../src/db", () => {
             }
             return { changes: 1 };
           }
-          if (sql.includes("UPDATE webhook_deliveries") && sql.includes("SET status = 'pending', attempts = 0")) {
+          if (
+            sql.includes("UPDATE webhook_deliveries") &&
+            sql.includes("SET status = 'pending', attempts = 0")
+          ) {
             let count = 0;
             for (const [, d] of deliveries) {
               if (d.status === "dead") {
@@ -78,7 +87,11 @@ jest.mock("../src/db", () => {
             }
             return { changes: count };
           }
-          if (sql.includes("SELECT * FROM webhook_deliveries WHERE status = 'pending'")) {
+          if (
+            sql.includes(
+              "SELECT * FROM webhook_deliveries WHERE status = 'pending'",
+            )
+          ) {
             return [];
           }
           if (sql.includes("SELECT d.* FROM webhook_deliveries")) {
@@ -91,7 +104,11 @@ jest.mock("../src/db", () => {
           return { changes: 0 };
         }),
         all: jest.fn((...args) => {
-          if (sql.includes("SELECT * FROM webhook_deliveries WHERE status = 'pending'")) {
+          if (
+            sql.includes(
+              "SELECT * FROM webhook_deliveries WHERE status = 'pending'",
+            )
+          ) {
             return [];
           }
           if (sql.includes("SELECT d.* FROM webhook_deliveries")) {
@@ -143,13 +160,25 @@ jest.mock("../src/utils/webhookSignature", () => ({
   verifyWebhookSignature: jest.fn(),
 }));
 
+const knex = require("../src/db/connection");
 const webhookService = require("../src/services/webhookService");
 
 const ACCOUNT_A = "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUWDA";
 const ACCOUNT_B = "GDUKMGUGDZQK6YHYA5Z6AY2G4XDSZPSZ3SW5UN3ARVMO6QSRDWP5YLEX";
-const ACCOUNT_C = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
-const ACCOUNT_D = "GCDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD";
-const ACCOUNT_E = "GCEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE";
+const ACCOUNT_C =
+  "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+const ACCOUNT_D =
+  "GCDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD";
+const ACCOUNT_E =
+  "GCEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE";
+
+beforeEach(async () => {
+  await knex("webhooks").del();
+});
+
+afterEach(async () => {
+  await webhookService.closeAllStreams();
+});
 
 describe("webhook registry", () => {
   it("registers and lists webhooks for an account", async () => {
@@ -198,12 +227,13 @@ describe("signPayload", () => {
 
 describe("closeAllStreams (graceful shutdown on SIGTERM/SIGINT)", () => {
   it("closes every active Horizon SSE stream so none leak past process exit", async () => {
-    webhookService.registerWebhook(
+    await webhookService.registerWebhook(
       ACCOUNT_D,
       "https://x.test/shutdown",
-      "secret-shutdown"
+      "secret-shutdown",
     );
-    const closeHandle = mockStreamCloseHandles[mockStreamCloseHandles.length - 1];
+    const closeHandle =
+      mockStreamCloseHandles[mockStreamCloseHandles.length - 1];
     expect(closeHandle).not.toHaveBeenCalled();
 
     // Simulates what the process SIGTERM/SIGINT handler in server.js invokes.
@@ -213,13 +243,23 @@ describe("closeAllStreams (graceful shutdown on SIGTERM/SIGINT)", () => {
   });
 
   it("clears activeStreams so a later registration opens a fresh stream", async () => {
-    webhookService.registerWebhook(ACCOUNT_E, "https://x.test/a", "secret-a");
-    const firstCloseHandle = mockStreamCloseHandles[mockStreamCloseHandles.length - 1];
+    await webhookService.registerWebhook(
+      ACCOUNT_E,
+      "https://x.test/a",
+      "secret-a",
+    );
+    const firstCloseHandle =
+      mockStreamCloseHandles[mockStreamCloseHandles.length - 1];
 
     await webhookService.closeAllStreams();
 
-    webhookService.registerWebhook(ACCOUNT_E, "https://x.test/b", "secret-b");
-    const secondCloseHandle = mockStreamCloseHandles[mockStreamCloseHandles.length - 1];
+    await webhookService.registerWebhook(
+      ACCOUNT_E,
+      "https://x.test/b",
+      "secret-b",
+    );
+    const secondCloseHandle =
+      mockStreamCloseHandles[mockStreamCloseHandles.length - 1];
 
     expect(secondCloseHandle).not.toBe(firstCloseHandle);
     expect(firstCloseHandle).toHaveBeenCalledTimes(1);
@@ -246,13 +286,13 @@ describe("retry worker", () => {
 });
 
 describe("dead letter queue", () => {
-  it("retrieves dead deliveries", () => {
-    const deliveries = webhookService.getDeadDeliveries(ACCOUNT_A);
+  it("retrieves dead deliveries", async () => {
+    const deliveries = await webhookService.getDeadDeliveries(ACCOUNT_A);
     expect(Array.isArray(deliveries)).toBe(true);
   });
 
-  it("resets dead deliveries for retry", () => {
-    const result = webhookService.retryDeadDeliveries(ACCOUNT_A);
+  it("resets dead deliveries for retry", async () => {
+    const result = await webhookService.retryDeadDeliveries(ACCOUNT_A);
     expect(result).toHaveProperty("reset");
   });
 });

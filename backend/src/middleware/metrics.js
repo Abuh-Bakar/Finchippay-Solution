@@ -12,7 +12,10 @@
 "use strict";
 
 const metrics = require("../services/metricsService");
-const { formatErrorResponse, ERROR_CODES } = require("../../../shared/errorCodes");
+const {
+  formatErrorResponse,
+  ERROR_CODES,
+} = require("../../../shared/errorCodes");
 
 // ─── Route normalisation ──────────────────────────────────────────────────────
 
@@ -107,9 +110,11 @@ function requireMetricsToken(req, res, next) {
 
   const token = authHeader.split(" ")[1];
   if (token !== expectedToken) {
-    return res
-      .status(ERROR_CODES.AUTH_INVALID_TOKEN.httpStatus)
-      .json(formatErrorResponse("AUTH_INVALID_TOKEN", { reason: "Invalid metrics token." }));
+    return res.status(ERROR_CODES.AUTH_INVALID_TOKEN.httpStatus).json(
+      formatErrorResponse("AUTH_INVALID_TOKEN", {
+        reason: "Invalid metrics token.",
+      }),
+    );
   }
 
   next();

@@ -4,8 +4,13 @@ All notable changes to the Finchippay-Solution smart contract will be documented
 
 ## [Unreleased]
 
+### Added
+
+- **#240 (Issue #74): Server-side cursor pagination for list endpoints** — standardized cursor-based pagination across the backend list APIs. New `middleware/pagination.js` parses `?limit=` (default 20, capped at 100 server-side) and an opaque `?cursor=`, and a new `utils/paginate.js` helper builds pages, applies Knex keyset predicates, and emits RFC 5988 `Link` (`rel="next"`) plus `X-Total-Count` headers. Applied to tips (received/sent, true keyset), webhooks (list + failures), scheduled-transactions, and events (offset retained, opaque cursor added); the events router is now mounted. The reference `payments` endpoint was fully aligned to emit the same `Link` (from Horizon's native paging token) and `X-Total-Count` headers — the payments total is an approximate, bounded count (Horizon exposes no exact total; floored at 200 via `stellarService.countPaymentsApprox`). Analytics endpoints (`/summary`, `/top-recipients`, `/activity`) are documented as intentionally excluded — they are bounded aggregations, not unbounded lists. Added `VAL_INVALID_CURSOR` error code, Swagger docs (reusable `limit`/`cursor` params + pagination headers), and `__tests__/pagination.test.js` (16 cases).
+
 ### Security Fixes
 
+- **#58: Pauser role enforcement** — `pause` and `unpause` now accept either the stored admin or the designated pauser address (set via `set_pauser`), so the separate pause-only role is actually consulted instead of being ignored. This lets a low-exposure "hot key" trigger the emergency circuit breaker during an incident without bringing the admin key online. The pauser remains strictly pause-only — it cannot `upgrade`, `transfer_admin`, `set_pauser`, or `rescue_tokens`. Added unit tests covering pauser pause/unpause, stranger rejection, and pauser being denied upgrade/admin-transfer, and documented both roles in `docs/architecture.md`.
 - **#54: Mandatory multi-sig expiration** — `create_multisig` now requires `expiration_ledger` to be strictly greater than the current ledger sequence, and rejects a TTL longer than the new `MAX_MULTISIG_TTL` (518,400 ledgers, ≈ 30 days). The `expiration_ledger == 0` escape hatch ("no expiration") has been removed from `approve_multisig`, so every proposal now has a bounded lifetime and can no longer accumulate approvals indefinitely from signers whose keys may have since been rotated or compromised.
 
 ### Breaking Changes

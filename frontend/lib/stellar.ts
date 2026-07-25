@@ -241,6 +241,8 @@ export interface PaymentRecord {
   pagingToken?: string;
   /** Category of the transaction. */
   category?: TransactionCategory;
+  /** Whether this is an optimistic pending transaction (not yet confirmed on-chain). */
+  isPending?: boolean;
 }
 
 /**

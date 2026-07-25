@@ -109,6 +109,20 @@ function collectErrors(env) {
     }
   }
 
+  if (String(env.NODE_ENV || "").toLowerCase() === "production") {
+    const rateLimitHashSalt = String(env.RATE_LIMIT_IP_HASH_SALT || "").trim();
+
+    if (!rateLimitHashSalt) {
+      errors.push(
+        "RATE_LIMIT_IP_HASH_SALT is required in production for stable, privacy-preserving rate-limit analytics",
+      );
+    } else if (rateLimitHashSalt.length < 32) {
+      errors.push(
+        "RATE_LIMIT_IP_HASH_SALT must contain at least 32 characters in production",
+      );
+    }
+  }
+
   // ALLOWED_ORIGINS is optional (defaults to localhost:3000) but every entry
   // that is present must be a well-formed origin.
   const { warnings } = parseAllowedOrigins(env.ALLOWED_ORIGINS);
@@ -147,7 +161,11 @@ function collectErrors(env) {
   // REDIS_URL is optional but if set must be a valid redis:// URL.
   if (env.REDIS_URL) {
     const redisUrl = String(env.REDIS_URL).trim();
-    if (redisUrl.length > 0 && !redisUrl.startsWith("redis://") && !redisUrl.startsWith("rediss://")) {
+    if (
+      redisUrl.length > 0 &&
+      !redisUrl.startsWith("redis://") &&
+      !redisUrl.startsWith("rediss://")
+    ) {
       errors.push(
         `REDIS_URL must start with redis:// or rediss://, got "${redisUrl}"`,
       );

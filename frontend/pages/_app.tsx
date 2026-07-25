@@ -18,6 +18,8 @@ import { FeatureFlagProvider } from "@/lib/FeatureFlags";
 import { ThemeProvider } from "@/lib/ThemeContext";
 import OfflineBanner from "@/components/OfflineBanner";
 import MobileBottomNav from "@/components/MobileBottomNav";
+import OnboardingTour from "@/components/OnboardingTour";
+import { useOnboardingTour } from "@/hooks/useOnboardingTour";
 import {
   getStellarURIFromURL,
   registerProtocolHandler,
@@ -25,8 +27,28 @@ import {
 } from "@/lib/sep0007";
 import { I18nextProvider } from "react-i18next";
 import i18n from "@/lib/i18n";
+import { getDirection, syncDocumentDirection } from "@/lib/useDirection";
 import { initSdkAuth } from "@/lib/sdk-instance";
 import "@/styles/globals.css";
+
+function DirectionSync() {
+  const [locale, setLocale] = useState(i18n.resolvedLanguage || i18n.language || "en");
+
+  useEffect(() => {
+    const syncDirection = (nextLocale: string) => {
+      syncDocumentDirection(nextLocale);
+      setLocale(nextLocale);
+    };
+
+    syncDirection(i18n.resolvedLanguage || i18n.language || "en");
+    i18n.on("languageChanged", syncDirection);
+    return () => i18n.off("languageChanged", syncDirection);
+  }, []);
+
+  // Keeping this node in the tree lets React update immediately after a locale
+  // switch while the document attributes are synchronised imperatively above.
+  return <span className="sr-only" data-locale={locale} data-direction={getDirection(locale)} />;
+}
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -150,11 +172,18 @@ function AppShellInner({
   const { publicKey } = useWallet();
   const router = useRouter();
 
+  // ── Onboarding tour ───────────────────────────────────────────────────────
+  // The hook owns all tour state; we pass `startTour` to Navbar so the
+  // "Take a Tour" button can launch it from anywhere in the app.
+  const tour = useOnboardingTour();
+
   return (
     <MotionConfig reducedMotion="user">
       <div className="min-h-screen bg-white bg-grid transition-colors duration-300 dark:bg-cosmos-900">
         <OfflineBanner />
-        <Navbar />
+        <Navbar onTakeTour={tour.startTour} />
+        {/* OnboardingTour is rendered here so it overlays the entire page */}
+        <OnboardingTour tour={tour} />
         <main className="pb-20 md:pb-0">
           <AnimatePresence mode="wait">
             <motion.div
@@ -203,7 +232,6 @@ export default function App({ Component, pageProps }: AppProps) {
       saved ??
       (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
 
-    setTheme(preferred);
     document.documentElement.classList.toggle("dark", preferred === "dark");
   }, []);
 
@@ -238,6 +266,7 @@ export default function App({ Component, pageProps }: AppProps) {
 
   return (
     <I18nextProvider i18n={i18n}>
+      <DirectionSync />
       <ThemeProvider>
       <ToastProvider>
       <WalletProvider>

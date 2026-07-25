@@ -1,27 +1,19 @@
 /**
  * src/controllers/turretsController.js
  * HTTP handlers for Stellar Turrets txFunction deployment and monitoring.
- *
- * Turrets are decentralised signers that execute pre-approved transaction
- * functions on behalf of users. This controller exposes the management API
- * for deploying, listing, pausing, and resuming txFunctions on the Finchippay
- * Turrets side-server.
- *
- * All handlers follow the (req, res, next) Express convention and delegate
- * business logic entirely to `turretsService`. Errors are forwarded to the
- * global error handler via `next(err)`.
  */
 
 "use strict";
 
 const turretsService = require("../services/turretsService");
+const priceFeedService = require("../services/priceFeedService");
 
 /**
  * POST /api/turrets/challenge
- * Create a signing challenge that the client must sign to prove key ownership.
+ * Create a signing challenge for a new txFunction deployment.
  *
- * Body: { ownerPublicKey: string, type: string, config: object }
- * Response: { success: true, data: { challenge, expiresAt } }
+ * Body: { ownerPublicKey, type, config }
+ * Response: { success: true, data: ChallengeRecord }
  *
  * @param {import('express').Request}  req
  * @param {import('express').Response} res
@@ -29,7 +21,7 @@ const turretsService = require("../services/turretsService");
  */
 async function createChallenge(req, res, next) {
   try {
-    const { ownerPublicKey, type, config } = req.body;
+    const { ownerPublicKey, type, config } = req.validated;
     const data = await turretsService.createSigningChallenge({
       ownerPublicKey,
       type,
@@ -55,7 +47,7 @@ async function createChallenge(req, res, next) {
 async function deploy(req, res, next) {
   try {
     const { ownerPublicKey, type, config, deploymentHash, signedChallengeXDR } =
-      req.body;
+      req.validated;
     const data = await turretsService.deployTxFunction({
       ownerPublicKey,
       type,
@@ -82,7 +74,7 @@ async function deploy(req, res, next) {
  */
 async function list(req, res, next) {
   try {
-    const { ownerPublicKey } = req.query;
+    const { ownerPublicKey } = req.validated;
     const data = await turretsService.listDeployments(ownerPublicKey);
     res.json({ success: true, data });
   } catch (err) {
@@ -102,7 +94,7 @@ async function list(req, res, next) {
  */
 async function getOne(req, res, next) {
   try {
-    const { id } = req.params;
+    const { id } = req.validated;
     const data = await turretsService.getDeployment(id);
     res.json({ success: true, data });
   } catch (err) {
@@ -122,7 +114,7 @@ async function getOne(req, res, next) {
  */
 async function getHistory(req, res, next) {
   try {
-    const { id } = req.params;
+    const { id } = req.validated;
     await turretsService.getDeployment(id); // throws 404 if not found
     const data = await turretsService.getExecutionHistory(id);
     res.json({ success: true, data });
@@ -143,7 +135,7 @@ async function getHistory(req, res, next) {
  */
 async function pause(req, res, next) {
   try {
-    const { id } = req.params;
+    const { id } = req.validated;
     const data = await turretsService.setDeploymentStatus(id, "paused");
     res.json({ success: true, data });
   } catch (err) {
@@ -163,9 +155,27 @@ async function pause(req, res, next) {
  */
 async function resume(req, res, next) {
   try {
-    const { id } = req.params;
+    const { id } = req.validated;
     const data = await turretsService.setDeploymentStatus(id, "active");
     res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** GET /api/turrets/health — service-level health check for the turrets subsystem. */
+async function health(req, res, next) {
+  try {
+    const priceFeed = await priceFeedService.getHealth();
+    const activeDeployments =
+      await turretsService.countDeploymentsByStatus("active");
+    res.status(priceFeed.status === "ok" ? 200 : 503).json({
+      success: priceFeed.status === "ok",
+      service: "turrets",
+      status: priceFeed.status,
+      activeDeployments,
+      priceFeed,
+    });
   } catch (err) {
     next(err);
   }
@@ -179,4 +189,5 @@ module.exports = {
   getHistory,
   pause,
   resume,
+  health,
 };
