@@ -11,6 +11,13 @@
 
 const eventIndexer = require("../services/eventIndexer");
 const logger = require("../utils/logger");
+const { sendError } = require("../utils/errorResponse");
+const {
+  encodeCursor,
+  decodeCursor,
+  InvalidCursorError,
+  setPaginationHeaders,
+} = require("../utils/paginate");
 
 /**
  * GET /api/events/:publicKey
@@ -28,12 +35,40 @@ const logger = require("../utils/logger");
  */
 async function getEvents(req, res, next) {
   try {
-    const { publicKey, limit, offset } = req.validated;
+    const { publicKey, limit } = req.validated;
+    let { offset } = req.validated;
+
+    // An opaque cursor takes precedence over a raw offset and encodes the next
+    // offset (keyset-style navigation over the same ledger_sequence,id order).
+    const rawCursor = req.query.cursor;
+    if (rawCursor !== undefined && rawCursor !== "") {
+      let decoded;
+      try {
+        decoded = decodeCursor(rawCursor);
+      } catch (err) {
+        if (err instanceof InvalidCursorError) {
+          return sendError(res, "VAL_INVALID_CURSOR", {
+            details: { parameter: "cursor" },
+          });
+        }
+        throw err;
+      }
+      offset = Number(decoded.offset);
+      if (!Number.isSafeInteger(offset) || offset < 0) {
+        return sendError(res, "VAL_INVALID_CURSOR", {
+          details: { parameter: "cursor" },
+        });
+      }
+    }
 
     const { events, total } = await eventIndexer.queryEventsByPublicKey(
       publicKey,
       { limit, offset },
     );
+
+    const hasMore = offset + limit < total;
+    const nextCursor = hasMore ? encodeCursor({ offset: offset + limit }) : null;
+    setPaginationHeaders(req, res, { nextCursor, total, limit });
 
     res.json({
       success: true,
@@ -42,7 +77,8 @@ async function getEvents(req, res, next) {
         limit,
         offset,
         total,
-        hasMore: offset + limit < total,
+        hasMore,
+        nextCursor,
       },
     });
   } catch (err) {

@@ -7,6 +7,14 @@
 "use strict";
 
 const knex = require("../db/connection");
+const { applyKnexKeyset } = require("../utils/paginate");
+
+// Stable keyset ordering for tip lists: newest first, `id` as the unique
+// tiebreaker (created_at resolution is coarse and can collide).
+const TIP_KEYSET = [
+  ["created_at", "desc"],
+  ["id", "desc"],
+];
 
 /**
  * Record a tip sent to a creator.
@@ -62,9 +70,9 @@ async function recordTip({
  * Get all tips received by a creator.
  * @param {string} creatorPublicKey - The Stellar public key of the creator
  * @param {object} [options] - Optional filters
- * @param {number} [options.limit] - Maximum number of tips to return
- * @param {number} [options.offset] - Number of tips to skip (for pagination)
- * @returns {Promise<object>} Object with tips array and total count
+ * @param {number} [options.limit] - Page size (number of tips to return)
+ * @param {object|null} [options.cursor] - Keyset cursor from a previous page
+ * @returns {Promise<object>} Object with tips array (up to limit+1) and total count
  */
 async function getTipsReceived(creatorPublicKey, options = {}) {
   if (!creatorPublicKey) {
@@ -73,14 +81,17 @@ async function getTipsReceived(creatorPublicKey, options = {}) {
     throw error;
   }
 
-  const { limit = 50, offset = 0 } = options;
+  const { limit = 20, cursor = null } = options;
 
-  const query = knex("tips")
-    .where("creator_pk", creatorPublicKey)
-    .orderBy("created_at", "desc");
+  const base = knex("tips").where("creator_pk", creatorPublicKey);
 
-  const [{ count: total }] = await query.clone().count("* as count");
-  const rows = await query.clone().limit(limit).offset(offset);
+  const [{ count: total }] = await base.clone().count("* as count");
+
+  // Fetch limit+1 so the caller can detect whether another page exists.
+  const rows = await applyKnexKeyset(base.clone(), cursor, TIP_KEYSET)
+    .orderBy("created_at", "desc")
+    .orderBy("id", "desc")
+    .limit(limit + 1);
 
   const tips = rows.map((row) => ({
     id: row.id,
@@ -96,8 +107,6 @@ async function getTipsReceived(creatorPublicKey, options = {}) {
   return {
     tips,
     total: Number(total),
-    limit,
-    offset,
   };
 }
 
@@ -156,7 +165,9 @@ async function getTipsStats(creatorPublicKey) {
  * Get all tips sent by a user (for sender's history).
  * @param {string} senderPublicKey - The Stellar public key of the sender
  * @param {object} [options] - Optional filters
- * @returns {Promise<object>} Object with tips array and total count
+ * @param {number} [options.limit] - Page size (number of tips to return)
+ * @param {object|null} [options.cursor] - Keyset cursor from a previous page
+ * @returns {Promise<object>} Object with tips array (up to limit+1) and total count
  */
 async function getTipsSent(senderPublicKey, options = {}) {
   if (!senderPublicKey) {
@@ -165,14 +176,16 @@ async function getTipsSent(senderPublicKey, options = {}) {
     throw error;
   }
 
-  const { limit = 50, offset = 0 } = options;
+  const { limit = 20, cursor = null } = options;
 
-  const query = knex("tips")
-    .where("sender_pk", senderPublicKey)
-    .orderBy("created_at", "desc");
+  const base = knex("tips").where("sender_pk", senderPublicKey);
 
-  const [{ count: total }] = await query.clone().count("* as count");
-  const rows = await query.clone().limit(limit).offset(offset);
+  const [{ count: total }] = await base.clone().count("* as count");
+
+  const rows = await applyKnexKeyset(base.clone(), cursor, TIP_KEYSET)
+    .orderBy("created_at", "desc")
+    .orderBy("id", "desc")
+    .limit(limit + 1);
 
   const tips = rows.map((row) => ({
     id: row.id,
@@ -188,8 +201,6 @@ async function getTipsSent(senderPublicKey, options = {}) {
   return {
     tips,
     total: Number(total),
-    limit,
-    offset,
   };
 }
 

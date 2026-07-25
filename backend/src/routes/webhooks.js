@@ -13,11 +13,21 @@ const {
   ERROR_CODES,
 } = require("../../../shared/errorCodes");
 const { validate } = require("../validation/middleware");
+const { pagination } = require("../middleware/pagination");
+const { paginateInMemory, setPaginationHeaders } = require("../utils/paginate");
 const {
   registerWebhookSchema,
   publicKeyParamSchema,
   idParamSchema,
 } = require("../validation/schemas");
+
+// Newest-first ordering with `id` as the stable tiebreaker, used for the
+// cursor keyset on webhook and dead-delivery lists.
+const byCreatedDesc = (a, b) =>
+  String(b.createdAt || b.created_at || "").localeCompare(
+    String(a.createdAt || a.created_at || ""),
+  ) || String(b.id).localeCompare(String(a.id));
+const rowCursor = (r) => ({ created_at: r.createdAt || r.created_at, id: r.id });
 
 /**
  * POST /api/webhooks
@@ -51,11 +61,23 @@ router.post("/", validate(registerWebhookSchema), async (req, res, next) => {
 router.get(
   "/:publicKey",
   validate(publicKeyParamSchema, "params"),
+  pagination,
   async (req, res, next) => {
     try {
       const { publicKey } = req.validated;
       const hooks = await webhookService.getWebhooksByPublicKey(publicKey);
-      return res.json({ webhooks: hooks });
+      const { data, nextCursor, total } = paginateInMemory(
+        hooks,
+        req.pagination,
+        rowCursor,
+        byCreatedDesc,
+      );
+      setPaginationHeaders(req, res, {
+        nextCursor,
+        total,
+        limit: req.pagination.limit,
+      });
+      return res.json({ webhooks: data });
     } catch (err) {
       return next(err);
     }
@@ -69,11 +91,23 @@ router.get(
 router.get(
   "/:publicKey/failures",
   validate(publicKeyParamSchema, "params"),
+  pagination,
   async (req, res, next) => {
     try {
       const { publicKey } = req.validated;
       const failures = await webhookService.getDeadDeliveries(publicKey);
-      return res.json({ failures });
+      const { data, nextCursor, total } = paginateInMemory(
+        failures,
+        req.pagination,
+        rowCursor,
+        byCreatedDesc,
+      );
+      setPaginationHeaders(req, res, {
+        nextCursor,
+        total,
+        limit: req.pagination.limit,
+      });
+      return res.json({ failures: data });
     } catch (err) {
       return next(err);
     }

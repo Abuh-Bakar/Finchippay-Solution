@@ -16,6 +16,11 @@
 "use strict";
 
 const tipsService = require("../services/tipsService");
+const { buildPage, setPaginationHeaders } = require("../utils/paginate");
+
+// Extract the keyset cursor fields from a mapped tip record. `timestamp` holds
+// the row's `created_at`; `id` is the unique tiebreaker.
+const tipCursor = (tip) => ({ created_at: tip.timestamp, id: tip.id });
 
 // Lazy-loaded to avoid circular dependency at parse time
 function getCache() {
@@ -76,15 +81,24 @@ async function recordTip(req, res, next) {
  */
 async function getTipsReceived(req, res, next) {
   try {
-    const { creatorPublicKey, limit, offset } = req.validated;
+    const { creatorPublicKey } = req.validated;
+    const { limit, cursor } = req.pagination;
 
-    const result = await tipsService.getTipsReceived(creatorPublicKey, {
+    const { tips, total } = await tipsService.getTipsReceived(creatorPublicKey, {
       limit,
-      offset,
+      cursor,
     });
     const stats = await tipsService.getTipsStats(creatorPublicKey);
 
-    return res.json({ success: true, data: { ...result, stats } });
+    const { data, nextCursor } = buildPage(tips, limit, tipCursor);
+    setPaginationHeaders(req, res, { nextCursor, total, limit });
+
+    return res.json({
+      success: true,
+      data,
+      stats,
+      pagination: { nextCursor, total, limit },
+    });
   } catch (err) {
     next(err);
   }
@@ -110,13 +124,22 @@ async function getTipsStats(req, res, next) {
  */
 async function getTipsSent(req, res, next) {
   try {
-    const { senderPublicKey, limit, offset } = req.validated;
+    const { senderPublicKey } = req.validated;
+    const { limit, cursor } = req.pagination;
 
-    const result = await tipsService.getTipsSent(senderPublicKey, {
+    const { tips, total } = await tipsService.getTipsSent(senderPublicKey, {
       limit,
-      offset,
+      cursor,
     });
-    return res.json({ success: true, data: result });
+
+    const { data, nextCursor } = buildPage(tips, limit, tipCursor);
+    setPaginationHeaders(req, res, { nextCursor, total, limit });
+
+    return res.json({
+      success: true,
+      data,
+      pagination: { nextCursor, total, limit },
+    });
   } catch (err) {
     next(err);
   }
