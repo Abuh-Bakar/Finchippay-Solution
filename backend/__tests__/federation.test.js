@@ -125,7 +125,7 @@ describe("Federation API", () => {
           .expect(502);
 
         expect(response.body.error.details.reason).toBe(
-          "Invalid Stellar address returned from federation server"
+          "Invalid Stellar address returned from federation server",
         );
       });
     });

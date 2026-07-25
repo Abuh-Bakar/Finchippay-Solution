@@ -110,9 +110,7 @@ function collectErrors(env) {
   }
 
   if (String(env.NODE_ENV || "").toLowerCase() === "production") {
-    const rateLimitHashSalt = String(
-      env.RATE_LIMIT_IP_HASH_SALT || "",
-    ).trim();
+    const rateLimitHashSalt = String(env.RATE_LIMIT_IP_HASH_SALT || "").trim();
 
     if (!rateLimitHashSalt) {
       errors.push(
@@ -163,7 +161,11 @@ function collectErrors(env) {
   // REDIS_URL is optional but if set must be a valid redis:// URL.
   if (env.REDIS_URL) {
     const redisUrl = String(env.REDIS_URL).trim();
-    if (redisUrl.length > 0 && !redisUrl.startsWith("redis://") && !redisUrl.startsWith("rediss://")) {
+    if (
+      redisUrl.length > 0 &&
+      !redisUrl.startsWith("redis://") &&
+      !redisUrl.startsWith("rediss://")
+    ) {
       errors.push(
         `REDIS_URL must start with redis:// or rediss://, got "${redisUrl}"`,
       );

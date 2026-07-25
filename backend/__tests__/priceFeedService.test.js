@@ -48,7 +48,10 @@ describe("priceFeedService.getXLMPrice", () => {
     );
     global.fetch = fetchMock;
 
-    const { getXLMPrice, _resetForTests } = require("../src/services/priceFeedService");
+    const {
+      getXLMPrice,
+      _resetForTests,
+    } = require("../src/services/priceFeedService");
     _resetForTests();
 
     const result = await getXLMPrice({ forceRefresh: true });
@@ -76,7 +79,10 @@ describe("priceFeedService.getXLMPrice", () => {
       );
     global.fetch = fetchMock;
 
-    const { getXLMPrice, _resetForTests } = require("../src/services/priceFeedService");
+    const {
+      getXLMPrice,
+      _resetForTests,
+    } = require("../src/services/priceFeedService");
     _resetForTests();
 
     const result = await getXLMPrice({ forceRefresh: true });
@@ -90,12 +96,8 @@ describe("priceFeedService.getXLMPrice", () => {
     jest.resetModules();
     const fetchMock = jest
       .fn()
-      .mockResolvedValueOnce(
-        makeResponse({ ok: false, status: 500, body: {} }),
-      )
-      .mockResolvedValueOnce(
-        makeResponse({ ok: false, status: 503, body: {} }),
-      )
+      .mockResolvedValueOnce(makeResponse({ ok: false, status: 500, body: {} }))
+      .mockResolvedValueOnce(makeResponse({ ok: false, status: 503, body: {} }))
       .mockResolvedValueOnce(
         makeResponse({
           ok: true,
@@ -104,7 +106,10 @@ describe("priceFeedService.getXLMPrice", () => {
       );
     global.fetch = fetchMock;
 
-    const { getXLMPrice, _resetForTests } = require("../src/services/priceFeedService");
+    const {
+      getXLMPrice,
+      _resetForTests,
+    } = require("../src/services/priceFeedService");
     _resetForTests();
 
     const result = await getXLMPrice({ forceRefresh: true });
@@ -116,12 +121,15 @@ describe("priceFeedService.getXLMPrice", () => {
 
   test("throws PRICE_FEED_UNAVAILABLE when every provider fails", async () => {
     jest.resetModules();
-    const fetchMock = jest.fn().mockResolvedValue(
-      makeResponse({ ok: false, status: 500, body: {} }),
-    );
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue(makeResponse({ ok: false, status: 500, body: {} }));
     global.fetch = fetchMock;
 
-    const { getXLMPrice, _resetForTests } = require("../src/services/priceFeedService");
+    const {
+      getXLMPrice,
+      _resetForTests,
+    } = require("../src/services/priceFeedService");
     _resetForTests();
 
     await expect(getXLMPrice({ forceRefresh: true })).rejects.toMatchObject({
@@ -133,12 +141,17 @@ describe("priceFeedService.getXLMPrice", () => {
 
   test("returns the cached value without re-fetching within the TTL", async () => {
     jest.resetModules();
-    const fetchMock = jest.fn().mockResolvedValue(
-      makeResponse({ ok: true, body: { stellar: { usd: 0.42 } } }),
-    );
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue(
+        makeResponse({ ok: true, body: { stellar: { usd: 0.42 } } }),
+      );
     global.fetch = fetchMock;
 
-    const { getXLMPrice, _resetForTests } = require("../src/services/priceFeedService");
+    const {
+      getXLMPrice,
+      _resetForTests,
+    } = require("../src/services/priceFeedService");
     _resetForTests();
 
     const a = await getXLMPrice({ forceRefresh: true });
@@ -155,12 +168,17 @@ describe("priceFeedService.getXLMPrice", () => {
   test("forceRefresh=true bypasses the cache", async () => {
     jest.resetModules();
     let price = 0.1;
-    const fetchMock = jest.fn().mockImplementation(async () =>
-      makeResponse({ ok: true, body: { stellar: { usd: price } } }),
-    );
+    const fetchMock = jest
+      .fn()
+      .mockImplementation(async () =>
+        makeResponse({ ok: true, body: { stellar: { usd: price } } }),
+      );
     global.fetch = fetchMock;
 
-    const { getXLMPrice, _resetForTests } = require("../src/services/priceFeedService");
+    const {
+      getXLMPrice,
+      _resetForTests,
+    } = require("../src/services/priceFeedService");
     _resetForTests();
 
     const a = await getXLMPrice({ forceRefresh: true });
@@ -175,12 +193,17 @@ describe("priceFeedService.getXLMPrice", () => {
   test("uses the pro endpoint + x-cg-pro-api-key header when the API key is set", async () => {
     jest.resetModules();
     process.env.PRICE_FEED_COINGECKO_API_KEY = "test-pro-key";
-    const fetchMock = jest.fn().mockResolvedValue(
-      makeResponse({ ok: true, body: { stellar: { usd: 0.55 } } }),
-    );
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue(
+        makeResponse({ ok: true, body: { stellar: { usd: 0.55 } } }),
+      );
     global.fetch = fetchMock;
 
-    const { getXLMPrice, _resetForTests } = require("../src/services/priceFeedService");
+    const {
+      getXLMPrice,
+      _resetForTests,
+    } = require("../src/services/priceFeedService");
     _resetForTests();
 
     await getXLMPrice({ forceRefresh: true });
@@ -197,9 +220,7 @@ describe("priceFeedService.getPriceFeedStatus", () => {
     jest.resetModules();
     const fetchMock = jest
       .fn()
-      .mockResolvedValueOnce(
-        makeResponse({ ok: false, status: 500, body: {} }),
-      )
+      .mockResolvedValueOnce(makeResponse({ ok: false, status: 500, body: {} }))
       .mockResolvedValueOnce(
         makeResponse({ ok: true, body: { symbol: "XLMUSDT", price: "0.31" } }),
       );

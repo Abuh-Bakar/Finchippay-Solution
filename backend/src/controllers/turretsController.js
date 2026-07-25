@@ -167,7 +167,8 @@ async function resume(req, res, next) {
 async function health(req, res, next) {
   try {
     const priceFeed = await priceFeedService.getHealth();
-    const activeDeployments = await turretsService.countDeploymentsByStatus("active");
+    const activeDeployments =
+      await turretsService.countDeploymentsByStatus("active");
     res.status(priceFeed.status === "ok" ? 200 : 503).json({
       success: priceFeed.status === "ok",
       service: "turrets",

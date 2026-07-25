@@ -193,8 +193,7 @@ describe("setPaginationHeaders", () => {
 
 // ─── Integration: tips endpoint keyset navigation ──────────────────────────────
 describe("GET /api/tips/received/:creatorPublicKey (keyset)", () => {
-  const CREATOR =
-    "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUWDA";
+  const CREATOR = "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUWDA";
 
   // 3 tips, newest first; the service returns up to limit+1 rows.
   const ALL = [
@@ -221,7 +220,10 @@ describe("GET /api/tips/received/:creatorPublicKey (keyset)", () => {
             (t.timestamp === cursor.created_at && t.id < cursor.id),
         );
       }
-      return Promise.resolve({ tips: rows.slice(0, limit + 1), total: ALL.length });
+      return Promise.resolve({
+        tips: rows.slice(0, limit + 1),
+        total: ALL.length,
+      });
     });
   });
 

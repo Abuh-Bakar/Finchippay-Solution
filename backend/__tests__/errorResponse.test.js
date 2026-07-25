@@ -56,7 +56,9 @@ describe("buildErrorResponse()", () => {
   });
 
   it("falls back to GEN_UNKNOWN for an unregistered code", () => {
-    expect(buildErrorResponse("NOT_A_REAL_CODE").error.code).toBe("GEN_UNKNOWN");
+    expect(buildErrorResponse("NOT_A_REAL_CODE").error.code).toBe(
+      "GEN_UNKNOWN",
+    );
   });
 
   it("omits correlationId outside a request context", () => {

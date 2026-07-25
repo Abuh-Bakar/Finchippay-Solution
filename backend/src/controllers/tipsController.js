@@ -84,10 +84,13 @@ async function getTipsReceived(req, res, next) {
     const { creatorPublicKey } = req.validated;
     const { limit, cursor } = req.pagination;
 
-    const { tips, total } = await tipsService.getTipsReceived(creatorPublicKey, {
-      limit,
-      cursor,
-    });
+    const { tips, total } = await tipsService.getTipsReceived(
+      creatorPublicKey,
+      {
+        limit,
+        cursor,
+      },
+    );
     const stats = await tipsService.getTipsStats(creatorPublicKey);
 
     const { data, nextCursor } = buildPage(tips, limit, tipCursor);
