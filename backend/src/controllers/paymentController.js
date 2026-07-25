@@ -13,6 +13,7 @@
 "use strict";
 
 const stellarService = require("../services/stellarService");
+const { setPaginationHeaders } = require("../utils/paginate");
 
 /**
  * GET /api/payments/:publicKey
@@ -22,11 +23,16 @@ const stellarService = require("../services/stellarService");
  *   - `limit`  {number} 1–100 (default 20) — max records per page
  *   - `cursor` {string} Horizon paging token for cursor-based pagination
  *
+ * Emits the standardized pagination headers (#74): an RFC 5988 `Link`
+ * (rel="next") derived from the last record's Horizon paging token, and an
+ * `X-Total-Count` carrying a bounded, approximate total — Horizon exposes no
+ * exact count, so it is a floor capped at 200 (see `countPaymentsApprox`).
+ *
  * @param {import('express').Request}  req
  * @param {import('express').Response} res
  * @param {import('express').NextFunction} next
  *
- * @returns {200} { success: true, data: PaymentRecord[] }
+ * @returns {200} { success: true, data: PaymentRecord[], pagination }
  * @returns {400} Invalid public key format or invalid `limit` parameter.
  * @returns {404} Account not found on the Stellar network.
  */
@@ -36,11 +42,30 @@ async function getPayments(req, res, next) {
     // default 20) thanks to the paymentsQuerySchema validate() middleware.
     const { publicKey, limit, cursor } = req.validated;
 
-    const payments = await stellarService.getPayments(publicKey, {
-      limit,
-      cursor,
+    const [payments, total] = await Promise.all([
+      stellarService.getPayments(publicKey, { limit, cursor }),
+      stellarService.countPaymentsApprox(publicKey),
+    ]);
+
+    // A full page implies there may be more; the next cursor is Horizon's own
+    // paging token on the last record. A short page is treated as the last page.
+    // Caveat: getPayments fetches `limit` ops from Horizon's payments endpoint
+    // (which also includes create_account/account_merge) and filters to true
+    // payments, so a page containing such an op can be short even when more
+    // payments exist — a rare boundary case that may end paging one page early.
+    // This is still strictly better than the prior no-nextCursor behavior.
+    const nextCursor =
+      payments.length === limit && payments.length > 0
+        ? payments[payments.length - 1].pagingToken
+        : null;
+
+    setPaginationHeaders(req, res, { nextCursor, total, limit });
+
+    res.json({
+      success: true,
+      data: payments,
+      pagination: { nextCursor, total, limit },
     });
-    res.json({ success: true, data: payments });
   } catch (err) {
     next(err);
   }

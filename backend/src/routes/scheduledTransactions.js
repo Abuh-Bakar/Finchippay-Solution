@@ -7,12 +7,18 @@ const express = require("express");
 const router = express.Router();
 const scheduledTransactionService = require("../services/scheduledTransactionService");
 const { validate } = require("../validation/middleware");
+const { pagination } = require("../middleware/pagination");
+const { paginateInMemory, setPaginationHeaders } = require("../utils/paginate");
 const {
   scheduleTransactionSchema,
   loosePublicKeyParamSchema,
   idParamSchema,
 } = require("../validation/schemas");
 const { formatErrorResponse, ERROR_CODES } = require("../../../shared/errorCodes");
+
+// Preserve the service's own ordering; pagination only seeks/slices.
+const keepOrder = () => 0;
+const scheduleCursor = (t) => ({ id: t.id });
 
 /**
  * POST /api/scheduled-txns
@@ -62,12 +68,24 @@ router.post("/pending/:id/submit", async (req, res, next) => {
 router.get(
   "/:publicKey",
   validate(loosePublicKeyParamSchema, "params"),
-  (req, res, next) => {
+  pagination,
+  async (req, res, next) => {
     try {
       const { publicKey } = req.validated;
       const transactions =
-        scheduledTransactionService.listSchedules(publicKey);
-      res.json(transactions);
+        await scheduledTransactionService.listSchedules(publicKey);
+      const { data, nextCursor, total } = paginateInMemory(
+        transactions,
+        req.pagination,
+        scheduleCursor,
+        keepOrder,
+      );
+      setPaginationHeaders(req, res, {
+        nextCursor,
+        total,
+        limit: req.pagination.limit,
+      });
+      res.json(data);
     } catch (error) {
       next(error);
     }

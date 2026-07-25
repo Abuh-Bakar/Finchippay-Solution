@@ -10,11 +10,11 @@ const router = express.Router();
 const { strictLimiter } = require("../middleware/rateLimit");
 const { validate } = require("../validation/middleware");
 const { sanitizePublicKey } = require("../middleware/sanitization");
+const { pagination } = require("../middleware/pagination");
 const {
   tipSchema,
   creatorPublicKeyParamSchema,
   senderPublicKeyParamSchema,
-  tipsPaginationQuerySchema,
 } = require("../validation/schemas");
 const tipsController = require("../controllers/tipsController");
 
@@ -33,7 +33,7 @@ router.get(
   strictLimiter,
   sanitizePublicKey,
   validate(creatorPublicKeyParamSchema, "params"),
-  validate(tipsPaginationQuerySchema, "query"),
+  pagination,
   tipsController.getTipsReceived,
 );
 
@@ -58,7 +58,7 @@ router.get(
   strictLimiter,
   sanitizePublicKey,
   validate(senderPublicKeyParamSchema, "params"),
-  validate(tipsPaginationQuerySchema, "query"),
+  pagination,
   tipsController.getTipsSent,
 );
 
