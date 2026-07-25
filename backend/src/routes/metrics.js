@@ -14,7 +14,10 @@ const router = express.Router();
 const metrics = require("../services/metricsService");
 const { requireMetricsToken } = require("../middleware/metrics");
 const logger = require("../utils/logger");
-const { formatErrorResponse, ERROR_CODES } = require("../../../shared/errorCodes");
+const {
+  formatErrorResponse,
+  ERROR_CODES,
+} = require("../../../shared/errorCodes");
 
 // ─── Rate-limit exemption note ────────────────────────────────────────────────
 // The global rate limiter (applied in server.js before routes) caps at 100

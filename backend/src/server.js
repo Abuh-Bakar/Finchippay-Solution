@@ -24,7 +24,7 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const pinoHttp = require("pino-http");
-const { createInstrumentedLimiter } = require("./middleware/rateLimit");
+const rateLimit = require("express-rate-limit");
 const Sentry = require("@sentry/node");
 const { formatErrorResponse, ERROR_CODES } = require("../../shared/errorCodes");
 
@@ -41,28 +41,33 @@ const parsePaymentRoutes = require("./routes/parsePayment");
 const scheduledTransactionRoutes = require("./routes/scheduledTransactions");
 const sep24Routes = require("./routes/sep24");
 const sep12Routes = require("./routes/sep12");
+const sep38Routes = require("./routes/sep38");
+const eventRoutes = require("./routes/events");
 const featuresRoutes = require("./routes/features");
 const adminFeatureFlagsRoutes = require("./routes/adminFeatureFlags");
-const rateLimitStatsRoutes = require("./routes/rateLimitStats");
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./swagger");
 const { startTurretsServer } = require("./turretsServer");
 const eventIndexer = require("./services/eventIndexer");
-const { startRetryWorker } = require("./services/webhookService");
+const {
+  startRetryWorker,
+  closeAllStreams: closeWebhookStreams,
+} = require("./services/webhookService");
 const logger = require("./utils/logger");
 const { validateEnv, parseAllowedOrigins } = require("./config/validateEnv");
 const { requireJsonContentType } = require("./middleware/bodyParsing");
 const { trackHttpMetrics } = require("./middleware/metrics");
 const metricsRoutes = require("./routes/metrics");
-
 const {
   correlationMiddleware,
   getRequestId,
 } = require("./utils/correlationId");
-const { initRedis, closeRedis } = require("./services/cacheService");
-const { zodErrorHandler } = require("./validation/middleware");
 const { errorLogFields } = require("./utils/errorResponse");
-const { closeAll: closeAllStreams } = require("./services/balanceStreamService");
+const { initRedis, closeRedis } = require("./services/cacheService");
+const {
+  closeAll: closeBalanceStreams,
+} = require("./services/balanceStreamService");
+const { zodErrorHandler } = require("./validation/middleware");
 const traceContextMiddleware = require("./middleware/tracing");
 
 const app = express();
@@ -133,6 +138,12 @@ function getFederationServerUrl(req) {
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
+/**
+ * Content-Security-Policy directives for this JSON API.
+ *
+ * The backend serves no HTML pages of its own except Swagger UI at /api/docs,
+ * so the policy is intentionally restrictive.
+ */
 const helmetOptions = {
   contentSecurityPolicy: {
     directives: {
@@ -149,9 +160,12 @@ const helmetOptions = {
 };
 
 app.use(helmet(helmetOptions));
+// Prometheus HTTP metrics — track duration & count for every request.
 app.use(trackHttpMetrics);
+// Correlation ID middleware — generates/adopts X-Request-ID, stores in ALS.
 app.use(correlationMiddleware);
 app.use(traceContextMiddleware);
+// Structured JSON request logging (#269) — machine-parseable JSON logs.
 app.use(
   pinoHttp({
     logger,
@@ -163,8 +177,10 @@ app.use(
   }),
 );
 
+// Content-Type enforcement (#81)
 app.use(requireJsonContentType);
 
+// JSON body size limits (#81) — turrets gets larger limit for txFunction payloads.
 app.use("/api/turrets", express.json({ limit: "512kb" }));
 app.use(express.json({ limit: "100kb" }));
 
@@ -178,6 +194,7 @@ app.use((err, req, res, next) => {
   next();
 });
 
+// CORS
 const { origins: allowedOrigins } = parseAllowedOrigins(
   process.env.ALLOWED_ORIGINS,
 );
@@ -200,6 +217,7 @@ app.use(
 app.use("/health", healthRoutes);
 app.use("/api/health", healthRoutes);
 
+// Stellar SEP-0001 discovery document
 app.get("/.well-known/stellar.toml", (req, res) => {
   const domain = getFederationDomain(req);
   const protocol =
@@ -220,16 +238,14 @@ TRANSFER_SERVER_SEP0024="${transferServerUrl}"
   res.send(tomlContent);
 });
 
-const limiter = createInstrumentedLimiter(
-  {
-    windowMs: 15 * 60 * 1000,
-    limit: 100,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: formatErrorResponse("RATE_LIMITED_GLOBAL"),
-  },
-  "global",
-);
+// Global rate limiting — 100 requests per 15 minutes per IP.
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: formatErrorResponse("RATE_LIMITED_GLOBAL"),
+});
 app.use(limiter);
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
@@ -243,11 +259,12 @@ app.use("/api/turrets", turretsRoutes);
 app.use("/api/tips", tipsRoutes);
 app.use("/api/parse-payment", parsePaymentRoutes);
 app.use("/api/scheduled-transactions", scheduledTransactionRoutes);
+app.use("/api/events", eventRoutes);
 app.use("/api/sep24", sep24Routes);
 app.use("/api/sep12", sep12Routes);
+app.use("/sep38", sep38Routes);
 app.use("/api/features", featuresRoutes);
 app.use("/api/admin/feature-flags", adminFeatureFlagsRoutes);
-app.use("/api/admin/rate-limit-stats", rateLimitStatsRoutes);
 app.use("/federation", federationRoutes);
 app.use("/metrics", metricsRoutes);
 
@@ -282,6 +299,7 @@ app.use((req, res) => {
 
 Sentry.setupExpressErrorHandler(app);
 
+// Convert any stray ZodError into the standard 400 payload.
 app.use(zodErrorHandler);
 
 app.use((err, req, res, next) => {
@@ -297,8 +315,12 @@ app.use((err, req, res, next) => {
   }
 
   const status = err.status || 500;
-  const message = sanitizeMessage(err.message) || ERROR_CODES.SRV_INTERNAL.message;
-  logger.error({ ...errorLogFields("SRV_INTERNAL"), status, message }, "Request error");
+  const message =
+    sanitizeMessage(err.message) || ERROR_CODES.SRV_INTERNAL.message;
+  logger.error(
+    { ...errorLogFields("SRV_INTERNAL"), status, message },
+    "Request error",
+  );
 
   const fallback = formatErrorResponse("SRV_INTERNAL", {
     originalMessage: sanitizeMessage(err.message),
@@ -306,7 +328,7 @@ app.use((err, req, res, next) => {
   res.status(status).json(fallback);
 });
 
-// ─── Graceful shutdown ────────────────────────────────────────────────────────
+// ─── Graceful shutdown ────────────────────────────────────────────────        
 
 async function gracefulShutdown(signal, server, otelSdk) {
   logger.info({ signal }, "Received shutdown signal — draining…");
@@ -315,14 +337,24 @@ async function gracefulShutdown(signal, server, otelSdk) {
     if (err) logger.error({ err }, "Error closing HTTP server");
   });
 
+  // 2. Close webhook Horizon SSE streams (stops retry worker, waits for deliveries)
   try {
-    closeAllStreams();
+    await closeWebhookStreams();
   } catch (err) {
-    logger.error({ err }, "Error closing Horizon balance streams");
+    logger.error({ err }, "Error closing webhook streams");
   }
 
+  // 3. Close balance SSE streams
+  try {
+    closeBalanceStreams();
+  } catch (err) {
+    logger.error({ err }, "Error closing balance streams");
+  }
+
+  // 4. Close Redis connection
   await closeRedis();
 
+  // 5. Flush OTel spans (time-boxed at 5 s)
   if (otelSdk) {
     try {
       await Promise.race([
@@ -343,31 +375,57 @@ async function gracefulShutdown(signal, server, otelSdk) {
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 if (require.main === module) {
-  validateEnv();
-  initRedis().catch((err) => {
-    logger.error({ err }, "Redis initialisation failed");
-  });
-  require("./services/scheduledTransactionService").loadActiveSchedules();
-  const server = app.listen(PORT, () => {
-    console.log(`
-  ✨ Finchippay Solution API
-  🚀 Server running at http://localhost:${PORT}
-  🌐 Network: ${process.env.STELLAR_NETWORK || "testnet"}
-  `);
-  });
+  (async () => {
+    validateEnv();
 
-  startTurretsServer();
-  eventIndexer.start();
-  startRetryWorker();
+    // Auto-run pending migrations in development so the schema is always
+    // current for local work. Other environments migrate explicitly via the
+    // deploy pipeline (npm run migrate), not on boot.
+    if (process.env.NODE_ENV === "development") {
+      try {
+        const [batchNo, migrated] = await require("./db").migrate.latest();
+        if (migrated.length > 0) {
+          logger.info(
+            { batch: batchNo, migrations: migrated },
+            "Applied pending database migrations",
+          );
+        }
+      } catch (err) {
+        logger.error({ err }, "Auto-migration failed; aborting startup");
+        process.exit(1);
+      }
+    }
 
-  process.on("SIGTERM", () => {
-    eventIndexer.stop();
-    gracefulShutdown("SIGTERM", server, otelSdk);
-  });
-  process.on("SIGINT", () => {
-    eventIndexer.stop();
-    gracefulShutdown("SIGINT", server, otelSdk);
-  });
+    // Initialise Redis connection (non-blocking; degrades gracefully if unavailable)
+    initRedis().catch((err) => {
+      logger.error({ err }, "Redis initialisation failed");
+    });
+    require("./services/scheduledTransactionService")
+      .loadActiveSchedules()
+      .catch((err) => {
+        logger.error({ err }, "Failed to load active scheduled transactions");
+      });
+    const server = app.listen(PORT, () => {
+      console.log(`
+ ✨ Finchippay Solution API
+ 🚀 Server running at http://localhost:${PORT}
+ 🌐 Network: ${process.env.STELLAR_NETWORK || "testnet"}
+ `);
+    });
+
+    startTurretsServer();
+    eventIndexer.start();
+    startRetryWorker();
+
+    process.on("SIGTERM", () => {
+      eventIndexer.stop();
+      gracefulShutdown("SIGTERM", server, otelSdk);
+    });
+    process.on("SIGINT", () => {
+      eventIndexer.stop();
+      gracefulShutdown("SIGINT", server, otelSdk);
+    });
+  })();
 }
 
 module.exports = app;

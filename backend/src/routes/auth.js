@@ -12,7 +12,10 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const { Utils, Keypair } = require("@stellar/stellar-sdk");
-const { formatErrorResponse, ERROR_CODES } = require("../../../shared/errorCodes");
+const {
+  formatErrorResponse,
+  ERROR_CODES,
+} = require("../../../shared/errorCodes");
 const { validate } = require("../validation/middleware");
 const {
   authChallengeQuerySchema,
@@ -95,7 +98,7 @@ router.post("/", validate(authTokenBodySchema), (req, res) => {
 
     res.json({
       success: true,
-      token: accessToken, // for backward compatibility
+      token: accessToken, // backward compatibility
       accessToken,
       refreshToken,
     });
@@ -108,13 +111,15 @@ router.post("/", validate(authTokenBodySchema), (req, res) => {
   }
 });
 
-// POST /api/auth/refresh — Rotate access + refresh tokens
+// POST /api/auth/refresh — rotate access + refresh tokens
 router.post("/refresh", (req, res) => {
   const refreshToken = req.body.refreshToken || req.cookies?.refreshToken;
   if (!refreshToken) {
     return res
       .status(ERROR_CODES.VAL_MISSING_FIELD.httpStatus)
-      .json(formatErrorResponse("VAL_MISSING_FIELD", { fields: ["refreshToken"] }));
+      .json(
+        formatErrorResponse("VAL_MISSING_FIELD", { fields: ["refreshToken"] }),
+      );
   }
 
   const rotated = tokenService.rotateRefreshToken(refreshToken);
@@ -150,7 +155,7 @@ router.post("/refresh", (req, res) => {
   });
 });
 
-// POST /api/auth/logout — Revoke the token family
+// POST /api/auth/logout — revoke the token family
 router.post("/logout", (req, res) => {
   const refreshToken = req.body.refreshToken || req.cookies?.refreshToken;
   let publicKey = null;

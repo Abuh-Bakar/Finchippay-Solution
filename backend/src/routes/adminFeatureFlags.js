@@ -8,10 +8,12 @@
 
 "use strict";
 
-const express    = require("express");
-const router     = express.Router();
+const express = require("express");
+const router = express.Router();
 const { strictLimiter } = require("../middleware/rateLimit");
-const { verifyJWT }     = require("../middleware/auth");
+const { verifyJWT } = require("../middleware/auth");
+const { validate } = require("../validation/middleware");
+const { adminToggleFlagSchema } = require("../validation/schemas");
 const featureFlagsController = require("../controllers/featureFlagsController");
 
 /**
@@ -19,12 +21,7 @@ const featureFlagsController = require("../controllers/featureFlagsController");
  * List all flags with full metadata and current evaluated state.
  * Requires a valid JWT.
  */
-router.get(
-  "/",
-  strictLimiter,
-  verifyJWT,
-  featureFlagsController.adminGetFlags
-);
+router.get("/", strictLimiter, verifyJWT, featureFlagsController.adminGetFlags);
 
 /**
  * POST /api/admin/feature-flags/:key/toggle
@@ -36,7 +33,8 @@ router.post(
   "/:key/toggle",
   strictLimiter,
   verifyJWT,
-  featureFlagsController.adminToggleFlag
+  validate(adminToggleFlagSchema),
+  featureFlagsController.adminToggleFlag,
 );
 
 module.exports = router;

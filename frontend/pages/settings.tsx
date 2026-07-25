@@ -731,7 +731,7 @@ export default function SettingsPage({
                 Address Book
               </h2>
               <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
-                Manage your locally stored contacts. Contacts are stored in your browser's local storage and will be cleared when you disconnect your wallet.
+                Manage your locally stored contacts. Contacts are stored in your browser&apos;s local storage and will be cleared when you disconnect your wallet.
               </p>
               <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-cosmos-900 rounded-lg border border-slate-200 dark:border-slate-700">
                 <div>

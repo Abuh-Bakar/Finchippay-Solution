@@ -45,6 +45,36 @@ const options = {
       },
     ],
     components: {
+      parameters: {
+        PaginationLimit: {
+          name: "limit",
+          in: "query",
+          required: false,
+          description: "Page size. Defaults to 20; capped at 100 server-side.",
+          schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+        },
+        PaginationCursor: {
+          name: "cursor",
+          in: "query",
+          required: false,
+          description:
+            "Opaque cursor from a previous page's `Link` header or " +
+            "`pagination.nextCursor`. Omit for the first page.",
+          schema: { type: "string" },
+        },
+      },
+      headers: {
+        LinkHeader: {
+          description:
+            "RFC 5988 web-linking header. Present when another page exists: " +
+            '`</api/...?cursor=abc&limit=20>; rel="next"`.',
+          schema: { type: "string" },
+        },
+        XTotalCount: {
+          description: "Total number of records matching the query.",
+          schema: { type: "integer" },
+        },
+      },
       schemas: {
         ErrorResponse: {
           type: "object",
@@ -411,8 +441,7 @@ const options = {
             status: {
               type: "string",
               enum: ["ok", "error", "unknown"],
-              description:
-                "Outcome of the most recent probe to this provider",
+              description: "Outcome of the most recent probe to this provider",
             },
             latencyMs: {
               type: "number",
@@ -686,23 +715,21 @@ const options = {
               required: true,
               schema: { type: "string", pattern: "^G[A-Z0-9]{55}$" },
             },
-            {
-              name: "limit",
-              in: "query",
-              schema: { type: "integer", default: 20, maximum: 100 },
-              description: "Number of results per page",
-            },
-            {
-              name: "cursor",
-              in: "query",
-              schema: { type: "string" },
-              description: "Pagination cursor",
-            },
+            { $ref: "#/components/parameters/PaginationLimit" },
+            { $ref: "#/components/parameters/PaginationCursor" },
           ],
           responses: {
             200: {
-              description: "Payment history",
+              description: "Payment history (one page)",
               headers: {
+                Link: { $ref: "#/components/headers/LinkHeader" },
+                "X-Total-Count": {
+                  description:
+                    "Approximate, bounded total for this account's payments. " +
+                    "Horizon exposes no exact count, so this is a floor capped " +
+                    "at 200 (the value may be higher than reported).",
+                  schema: { type: "integer" },
+                },
                 "RateLimit-Limit": {
                   schema: { type: "integer", example: 100 },
                 },
@@ -718,6 +745,14 @@ const options = {
                       data: {
                         type: "array",
                         items: { $ref: "#/components/schemas/PaymentRecord" },
+                      },
+                      pagination: {
+                        type: "object",
+                        properties: {
+                          nextCursor: { type: "string", nullable: true },
+                          total: { type: "integer" },
+                          limit: { type: "integer" },
+                        },
                       },
                     },
                   },
@@ -859,7 +894,7 @@ const options = {
       "/api/tips/received/{creatorPublicKey}": {
         get: {
           tags: ["Tips"],
-          summary: "Get tips received by a creator",
+          summary: "Get tips received by a creator (cursor-paginated)",
           parameters: [
             {
               name: "creatorPublicKey",
@@ -867,10 +902,16 @@ const options = {
               required: true,
               schema: { type: "string", pattern: "^G[A-Z0-9]{55}$" },
             },
+            { $ref: "#/components/parameters/PaginationLimit" },
+            { $ref: "#/components/parameters/PaginationCursor" },
           ],
           responses: {
             200: {
-              description: "Received tips",
+              description: "Received tips (one page)",
+              headers: {
+                Link: { $ref: "#/components/headers/LinkHeader" },
+                "X-Total-Count": { $ref: "#/components/headers/XTotalCount" },
+              },
               content: {
                 "application/json": {
                   schema: {
@@ -880,6 +921,14 @@ const options = {
                       data: {
                         type: "array",
                         items: { $ref: "#/components/schemas/Tip" },
+                      },
+                      pagination: {
+                        type: "object",
+                        properties: {
+                          nextCursor: { type: "string", nullable: true },
+                          total: { type: "integer" },
+                          limit: { type: "integer" },
+                        },
                       },
                     },
                   },
@@ -892,7 +941,7 @@ const options = {
       "/api/tips/sent/{senderPublicKey}": {
         get: {
           tags: ["Tips"],
-          summary: "Get tips sent by an account",
+          summary: "Get tips sent by an account (cursor-paginated)",
           parameters: [
             {
               name: "senderPublicKey",
@@ -900,10 +949,16 @@ const options = {
               required: true,
               schema: { type: "string", pattern: "^G[A-Z0-9]{55}$" },
             },
+            { $ref: "#/components/parameters/PaginationLimit" },
+            { $ref: "#/components/parameters/PaginationCursor" },
           ],
           responses: {
             200: {
-              description: "Sent tips",
+              description: "Sent tips (one page)",
+              headers: {
+                Link: { $ref: "#/components/headers/LinkHeader" },
+                "X-Total-Count": { $ref: "#/components/headers/XTotalCount" },
+              },
               content: {
                 "application/json": {
                   schema: {
@@ -913,6 +968,171 @@ const options = {
                       data: {
                         type: "array",
                         items: { $ref: "#/components/schemas/Tip" },
+                      },
+                      pagination: {
+                        type: "object",
+                        properties: {
+                          nextCursor: { type: "string", nullable: true },
+                          total: { type: "integer" },
+                          limit: { type: "integer" },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/webhooks/{publicKey}": {
+        get: {
+          tags: ["Webhooks"],
+          summary: "List webhooks for an account (cursor-paginated)",
+          parameters: [
+            {
+              name: "publicKey",
+              in: "path",
+              required: true,
+              schema: { type: "string", pattern: "^G[A-Z2-7]{55}$" },
+            },
+            { $ref: "#/components/parameters/PaginationLimit" },
+            { $ref: "#/components/parameters/PaginationCursor" },
+          ],
+          responses: {
+            200: {
+              description: "Registered webhooks (one page)",
+              headers: {
+                Link: { $ref: "#/components/headers/LinkHeader" },
+                "X-Total-Count": { $ref: "#/components/headers/XTotalCount" },
+              },
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      webhooks: { type: "array", items: { type: "object" } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/webhooks/{publicKey}/failures": {
+        get: {
+          tags: ["Webhooks"],
+          summary: "List dead-letter deliveries (cursor-paginated)",
+          parameters: [
+            {
+              name: "publicKey",
+              in: "path",
+              required: true,
+              schema: { type: "string", pattern: "^G[A-Z2-7]{55}$" },
+            },
+            { $ref: "#/components/parameters/PaginationLimit" },
+            { $ref: "#/components/parameters/PaginationCursor" },
+          ],
+          responses: {
+            200: {
+              description: "Failed deliveries (one page)",
+              headers: {
+                Link: { $ref: "#/components/headers/LinkHeader" },
+                "X-Total-Count": { $ref: "#/components/headers/XTotalCount" },
+              },
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      failures: { type: "array", items: { type: "object" } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/scheduled-transactions/{publicKey}": {
+        get: {
+          tags: ["Scheduled Transactions"],
+          summary: "List scheduled transactions (cursor-paginated)",
+          parameters: [
+            {
+              name: "publicKey",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+            { $ref: "#/components/parameters/PaginationLimit" },
+            { $ref: "#/components/parameters/PaginationCursor" },
+          ],
+          responses: {
+            200: {
+              description: "Scheduled transactions (one page)",
+              headers: {
+                Link: { $ref: "#/components/headers/LinkHeader" },
+                "X-Total-Count": { $ref: "#/components/headers/XTotalCount" },
+              },
+              content: {
+                "application/json": {
+                  schema: { type: "array", items: { type: "object" } },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/events/{publicKey}": {
+        get: {
+          tags: ["Events"],
+          summary: "List contract events for a participant (paginated)",
+          description:
+            "Supports both `offset` and opaque `cursor` navigation. When more " +
+            'results exist, a `Link: rel="next"` header and ' +
+            "`pagination.nextCursor` are returned.",
+          parameters: [
+            {
+              name: "publicKey",
+              in: "path",
+              required: true,
+              schema: { type: "string", pattern: "^G[A-Z2-7]{55}$" },
+            },
+            { $ref: "#/components/parameters/PaginationLimit" },
+            { $ref: "#/components/parameters/PaginationCursor" },
+            {
+              name: "offset",
+              in: "query",
+              required: false,
+              description: "0-based offset (alternative to cursor).",
+              schema: { type: "integer", minimum: 0, default: 0 },
+            },
+          ],
+          responses: {
+            200: {
+              description: "Contract events (one page)",
+              headers: {
+                Link: { $ref: "#/components/headers/LinkHeader" },
+                "X-Total-Count": { $ref: "#/components/headers/XTotalCount" },
+              },
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      success: { type: "boolean" },
+                      data: { type: "array", items: { type: "object" } },
+                      pagination: {
+                        type: "object",
+                        properties: {
+                          limit: { type: "integer" },
+                          offset: { type: "integer" },
+                          total: { type: "integer" },
+                          hasMore: { type: "boolean" },
+                          nextCursor: { type: "string", nullable: true },
+                        },
                       },
                     },
                   },
@@ -1017,8 +1237,7 @@ const options = {
                               providers: {
                                 type: "object",
                                 additionalProperties: {
-                                  $ref:
-                                    "#/components/schemas/PriceFeedProviderStatus",
+                                  $ref: "#/components/schemas/PriceFeedProviderStatus",
                                 },
                               },
                               activePrice: {

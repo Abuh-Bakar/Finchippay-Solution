@@ -125,11 +125,6 @@ const safeParse = (text) => {
  * POST /api/parse-payment
  * Parse a natural language payment description into structured intent.
  */
- 140-issue-18-input-validation-with-zod-schemas-fix
- 140-issue-18-input-validation-with-zod-schemas-fix
-
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
- master
 router.post(
   "/",
   validate(parsePaymentSchema, "body", { errorResponse: INVALID_INTENT_ERROR }),
@@ -147,36 +142,6 @@ router.post(
             "AI payment parsing is not configured. Set ANTHROPIC_API_KEY.",
         });
       }
-
-router.post("/", async (req, res) => {
-  try {
-    const { input } = req.body;
-
-    if (!input || typeof input !== "string") {
-      return res.status(400).json({
-        amount: "",
-        recipient: "",
-        memo: "",
-        isValid: false,
-        clarification: "Please provide a payment description.",
-      });
-    }
-
-    if (!process.env.ANTHROPIC_API_KEY) {
-      return res.status(501).json({
-        amount: "",
-        recipient: "",
-        memo: "",
-        isValid: false,
-        clarification:
-          "AI payment parsing is not configured. Set ANTHROPIC_API_KEY.",
-      });
-    }
- 140-issue-18-input-validation-with-zod-schemas-fix
-master
-
- master
- master
 
       const prompt = `
 ${CORE_EXTRACTION_PROMPT(input)}
@@ -207,16 +172,7 @@ ${MULTI_INTENT_GUARD}
             "content-type": "application/json",
           },
         },
- 140-issue-18-input-validation-with-zod-schemas-fix
- 140-issue-18-input-validation-with-zod-schemas-fix
-
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
- master
       );
-
-      },
-    );
- master
 
       const text = response.data?.content?.[0]?.text || "{}";
       const parsed = safeParse(text);

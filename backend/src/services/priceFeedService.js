@@ -36,7 +36,12 @@ const COINCAP = "https://api.coincap.io/v2";
  * one. A single shared lastError also makes the health check cheap to read.
  */
 const providerState = {
-  coingecko: { value: null, fetchedAt: 0, lastError: null, lastLatencyMs: null },
+  coingecko: {
+    value: null,
+    fetchedAt: 0,
+    lastError: null,
+    lastLatencyMs: null,
+  },
   binance: { value: null, fetchedAt: 0, lastError: null, lastLatencyMs: null },
   coincap: { value: null, fetchedAt: 0, lastError: null, lastLatencyMs: null },
 };
@@ -244,7 +249,11 @@ function getPriceFeedStatus() {
     const state = providerState[name];
     const age = state.fetchedAt ? nowMs() - state.fetchedAt : null;
     providers[name] = {
-      status: state.lastError ? "error" : state.value !== null ? "ok" : "unknown",
+      status: state.lastError
+        ? "error"
+        : state.value !== null
+          ? "ok"
+          : "unknown",
       latencyMs: state.lastLatencyMs,
       lastError: state.lastError,
       lastSuccessAt:

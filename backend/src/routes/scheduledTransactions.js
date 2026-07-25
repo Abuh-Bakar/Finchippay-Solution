@@ -2,7 +2,9 @@
  * src/routes/scheduledTransactions.js
  * CRUD + execution routes for cron-based scheduled Stellar transactions.
  */
+
 "use strict";
+
 const express = require("express");
 const router = express.Router();
 const scheduledTransactionService = require("../services/scheduledTransactionService");
@@ -12,101 +14,28 @@ const {
   loosePublicKeyParamSchema,
   idParamSchema,
 } = require("../validation/schemas");
-const { formatErrorResponse, ERROR_CODES } = require("../../../shared/errorCodes");
+const {
+  formatErrorResponse,
+  ERROR_CODES,
+} = require("../../../shared/errorCodes");
 
- 140-issue-18-input-validation-with-zod-schemas-fix
-140-issue-18-input-validation-with-zod-schemas-fix
-
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
- master
 /**
- * POST /api/scheduled-txns
+ * POST /api/scheduled-transactions
  * Schedules a new transaction for future submission.
  * Body: { signedXDR: string, submitAt: string (ISO 8601), publicKey: string }
  */
-router.post("/", validate(scheduleTransactionSchema), (req, res, next) => {
-  try {
-    // submitAt is already confirmed to parse to a valid date by the schema.
-    const { signedXDR, submitAt, publicKey } = req.validated;
-
- #136-Issue-#14-Database-Backed-Turrets-with-Price-Feed-Fallbacks-FIX
-    const schedule = scheduledTransactionService.scheduleTransaction(
-
-// POST /api/scheduled-transactions
-router.post("/", (req, res, next) => {
-  try {
-    const { signedXDR, submitAt, publicKey } = req.body;
-
-    if (!signedXDR || !submitAt || !publicKey) {
-      return res
-        .status(400)
-        .json({ error: "Missing signedXDR, submitAt, or publicKey" });
-    }
-
-    const submitDate = new Date(submitAt);
-    if (isNaN(submitDate.getTime())) {
-      return res
-        .status(400)
-        .json({ error: "submitAt must be a valid ISO 8601 date string" });
-    const schedule = scheduledTransactionService.createSchedule(req.body);
-    res.status(201).json(schedule);
-  } catch (error) {
-    next(error);
-  }
-});
- master
-
-// POST /api/scheduled-transactions/pending/:id/submit
-router.post("/pending/:id/submit", async (req, res, next) => {
-  try {
-    const { signedXDR } = req.body;
-    if (!signedXDR) {
-      return res
-        .status(ERROR_CODES.VAL_MISSING_FIELD.httpStatus)
-        .json(formatErrorResponse("VAL_MISSING_FIELD", { fields: ["signedXDR"] }));
-    }
-    const result = await scheduledTransactionService.submitPendingExecution(
-      req.params.id,
- master
-      signedXDR,
- 140-issue-18-input-validation-with-zod-schemas-fix
- 140-issue-18-input-validation-with-zod-schemas-fix
-
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
- master
-      new Date(submitAt),
-      publicKey,
-
- master
-    );
- #136-Issue-#14-Database-Backed-Turrets-with-Price-Feed-Fallbacks-FIX
-    res.status(201).json(schedule);
-
-    res.json(result);
- master
-  } catch (error) {
-    next(error);
-  }
-});
-
- 140-issue-18-input-validation-with-zod-schemas-fix
- 140-issue-18-input-validation-with-zod-schemas-fix
-
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
- master
-/**
- * GET /api/scheduled-txns/:publicKey
- * Lists all pending scheduled transactions for a given public key.
- */
-router.get(
-  "/:publicKey",
-  validate(loosePublicKeyParamSchema, "params"),
-  (req, res, next) => {
+router.post(
+  "/",
+  validate(scheduleTransactionSchema),
+  async (req, res, next) => {
     try {
-      const { publicKey } = req.validated;
-      const transactions =
-        scheduledTransactionService.getPendingTransactions(publicKey);
-      res.json(transactions);
+      const { signedXDR, submitAt, publicKey } = req.validated;
+      const schedule = await scheduledTransactionService.createSchedule({
+        signedXDR,
+        submitAt: new Date(submitAt),
+        publicKey,
+      });
+      res.status(201).json(schedule);
     } catch (error) {
       next(error);
     }
@@ -114,66 +43,96 @@ router.get(
 );
 
 /**
- * DELETE /api/scheduled-txns/:id
- * Cancels a scheduled transaction.
+ * POST /api/scheduled-transactions/pending/:id/submit
+ * Submits a pending execution.
  */
-router.delete("/:id", validate(idParamSchema, "params"), (req, res, next) => {
+router.post("/pending/:id/submit", async (req, res, next) => {
   try {
-    const { id } = req.validated;
-    const cancelled = scheduledTransactionService.cancelTransaction(id);
-    if (cancelled) {
-      res.json({ message: `Transaction ${id} cancelled successfully.` });
-    } else {
-      res
-        .status(404)
-        .json({ error: `Transaction ${id} not found or not pending.` });
+    const { signedXDR } = req.body;
+    if (!signedXDR) {
+      return res
+        .status(ERROR_CODES.VAL_MISSING_FIELD.httpStatus)
+        .json(
+          formatErrorResponse("VAL_MISSING_FIELD", { fields: ["signedXDR"] }),
+        );
+    }
+    const result = await scheduledTransactionService.submitPendingExecution(
+      req.params.id,
+      signedXDR,
+    );
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
 
-// GET /api/scheduled-transactions/:publicKey/pending
-router.get("/:publicKey/pending", (req, res, next) => {
+/**
+ * GET /api/scheduled-transactions/:publicKey/pending
+ * Lists pending executions for a given public key.
+ */
+router.get("/:publicKey/pending", async (req, res, next) => {
   try {
-    const pending = scheduledTransactionService.listPendingExecutions(req.params.publicKey);
+    const pending = await scheduledTransactionService.listPendingExecutions(
+      req.params.publicKey,
+    );
     res.json(pending);
   } catch (error) {
     next(error);
   }
 });
 
-// GET /api/scheduled-transactions/:publicKey
-router.get("/:publicKey", (req, res, next) => {
-  try {
-    const schedules = scheduledTransactionService.listSchedules(req.params.publicKey);
-    res.json(schedules);
-  } catch (error) {
-    next(error);
-  }
-});
+/**
+ * GET /api/scheduled-transactions/:publicKey
+ * Lists all schedules for a given public key.
+ */
+router.get(
+  "/:publicKey",
+  validate(loosePublicKeyParamSchema, "params"),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validated;
+      const schedules =
+        await scheduledTransactionService.listSchedules(publicKey);
+      res.json(schedules);
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
-// PUT /api/scheduled-transactions/:id
-router.put("/:id", (req, res, next) => {
+/**
+ * PUT /api/scheduled-transactions/:id
+ * Updates an existing scheduled transaction.
+ */
+router.put("/:id", async (req, res, next) => {
   try {
-    const updated = scheduledTransactionService.updateSchedule(req.params.id, req.body);
+    const updated = await scheduledTransactionService.updateSchedule(
+      req.params.id,
+      req.body,
+    );
     res.json(updated);
   } catch (error) {
     next(error);
   }
 });
 
-// DELETE /api/scheduled-transactions/:id
-router.delete("/:id", (req, res, next) => {
+/**
+ * DELETE /api/scheduled-transactions/:id
+ * Deletes or cancels a scheduled transaction by ID.
+ */
+router.delete("/:id", validate(idParamSchema, "params"), async (req, res, next) => {
   try {
-    const deleted = scheduledTransactionService.deleteSchedule(req.params.id);
+    const { id } = req.validated;
+    const deleted = await scheduledTransactionService.deleteSchedule(id);
     if (deleted) {
-      res.json({ message: `Scheduled transaction ${req.params.id} deleted.` });
+      res.json({ message: `Scheduled transaction ${id} deleted.` });
     } else {
-      res
-        .status(ERROR_CODES.RES_NOT_FOUND.httpStatus)
-        .json(
-          formatErrorResponse("RES_NOT_FOUND", {
-            resourceType: "scheduledTransaction",
-            id: req.params.id,
-          }),
-        );
- master
+      res.status(ERROR_CODES.RES_NOT_FOUND.httpStatus).json(
+        formatErrorResponse("RES_NOT_FOUND", {
+          resourceType: "scheduledTransaction",
+          id,
+        }),
+      );
     }
   } catch (error) {
     next(error);

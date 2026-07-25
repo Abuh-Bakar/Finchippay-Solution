@@ -7,8 +7,8 @@
 
 "use strict";
 
-const express    = require("express");
-const router     = express.Router();
+const express = require("express");
+const router = express.Router();
 const { strictLimiter } = require("../middleware/rateLimit");
 const featureFlagsController = require("../controllers/featureFlagsController");
 

@@ -10,11 +10,18 @@ const priceFeedService = require("../services/priceFeedService");
 
 /**
  * POST /api/turrets/challenge
- * Create a signing challenge for txFunction deployment.
+ * Create a signing challenge for a new txFunction deployment.
+ *
+ * Body: { ownerPublicKey, type, config }
+ * Response: { success: true, data: ChallengeRecord }
+ *
+ * @param {import('express').Request}  req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
  */
 async function createChallenge(req, res, next) {
   try {
-    const { ownerPublicKey, type, config } = req.validated || req.body;
+    const { ownerPublicKey, type, config } = req.validated;
     const data = await turretsService.createSigningChallenge({
       ownerPublicKey,
       type,
@@ -40,7 +47,7 @@ async function createChallenge(req, res, next) {
 async function deploy(req, res, next) {
   try {
     const { ownerPublicKey, type, config, deploymentHash, signedChallengeXDR } =
-      req.validated || req.body;
+      req.validated;
     const data = await turretsService.deployTxFunction({
       ownerPublicKey,
       type,
@@ -67,7 +74,7 @@ async function deploy(req, res, next) {
  */
 async function list(req, res, next) {
   try {
-    const { ownerPublicKey } = req.validated || req.query;
+    const { ownerPublicKey } = req.validated;
     const data = await turretsService.listDeployments(ownerPublicKey);
     res.json({ success: true, data });
   } catch (err) {
@@ -87,7 +94,7 @@ async function list(req, res, next) {
  */
 async function getOne(req, res, next) {
   try {
-    const { id } = req.validated || req.params;
+    const { id } = req.validated;
     const data = await turretsService.getDeployment(id);
     res.json({ success: true, data });
   } catch (err) {
@@ -107,7 +114,7 @@ async function getOne(req, res, next) {
  */
 async function getHistory(req, res, next) {
   try {
-    const { id } = req.validated || req.params;
+    const { id } = req.validated;
     await turretsService.getDeployment(id); // throws 404 if not found
     const data = await turretsService.getExecutionHistory(id);
     res.json({ success: true, data });
@@ -128,7 +135,7 @@ async function getHistory(req, res, next) {
  */
 async function pause(req, res, next) {
   try {
-    const { id } = req.validated || req.params;
+    const { id } = req.validated;
     const data = await turretsService.setDeploymentStatus(id, "paused");
     res.json({ success: true, data });
   } catch (err) {
@@ -148,7 +155,7 @@ async function pause(req, res, next) {
  */
 async function resume(req, res, next) {
   try {
-    const { id } = req.validated || req.params;
+    const { id } = req.validated;
     const data = await turretsService.setDeploymentStatus(id, "active");
     res.json({ success: true, data });
   } catch (err) {
@@ -156,10 +163,12 @@ async function resume(req, res, next) {
   }
 }
 
+/** GET /api/turrets/health — service-level health check for the turrets subsystem. */
 async function health(req, res, next) {
   try {
     const priceFeed = await priceFeedService.getHealth();
-    const activeDeployments = await turretsService.countDeploymentsByStatus("active");
+    const activeDeployments =
+      await turretsService.countDeploymentsByStatus("active");
     res.status(priceFeed.status === "ok" ? 200 : 503).json({
       success: priceFeed.status === "ok",
       service: "turrets",

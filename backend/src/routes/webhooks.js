@@ -35,7 +35,7 @@ router.post("/", validate(registerWebhookSchema), async (req, res, next) => {
     );
     return res.status(201).json({ success: true, webhook });
   } catch (err) {
-    return next(err);
+    next(err);
   }
 });
 
@@ -52,7 +52,7 @@ router.get(
       const hooks = await webhookService.getWebhooksByPublicKey(publicKey);
       return res.json({ webhooks: hooks });
     } catch (err) {
-      return next(err);
+      next(err);
     }
   },
 );
@@ -70,7 +70,7 @@ router.get(
       const failures = await webhookService.getDeadDeliveries(publicKey);
       return res.json({ failures });
     } catch (err) {
-      return next(err);
+      next(err);
     }
   },
 );
@@ -88,7 +88,7 @@ router.post(
       const result = await webhookService.retryDeadDeliveries(publicKey);
       return res.json({ success: true, ...result });
     } catch (err) {
-      return next(err);
+      next(err);
     }
   },
 );
@@ -105,13 +105,16 @@ router.delete(
       const { id } = req.validated;
       const deleted = await webhookService.deleteWebhook(id);
       if (!deleted) {
-        return res
-          .status(404)
-          .json(formatErrorResponse("RES_NOT_FOUND", { resourceType: "webhook", id }));
+        return res.status(ERROR_CODES.RES_NOT_FOUND.httpStatus).json(
+          formatErrorResponse("RES_NOT_FOUND", {
+            resourceType: "webhook",
+            id,
+          }),
+        );
       }
-      return res.json({ success: true, message: `Webhook ${id} deleted` });
+      return res.json({ success: true, message: "Webhook " + id + " deleted" });
     } catch (err) {
-      return next(err);
+      next(err);
     }
   },
 );

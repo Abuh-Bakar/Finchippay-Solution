@@ -1,4 +1,4 @@
-const crypto = require('crypto');
+const crypto = require("crypto");
 
 // Map of recipient address to their list of active device keys
 const deviceKeysMap = new Map();
@@ -14,18 +14,18 @@ function wrapCEK(cek, deviceKey) {
     {
       key: deviceKey.publicKey,
       padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-      oaepHash: 'sha256',
+      oaepHash: "sha256",
     },
-    cek
+    cek,
   );
-  return encryptedKey.toString('base64');
+  return encryptedKey.toString("base64");
 }
 
 // Function to encrypt message content for multiple devices
 function encryptForRecipient(recipientAddress, message) {
   const deviceKeys = deviceKeysMap.get(recipientAddress) || [];
   if (deviceKeys.length === 0) {
-    throw new Error('No authorized device keys found for the recipient');
+    throw new Error("No authorized device keys found for the recipient");
   }
 
   const cek = generateCEK();
@@ -37,16 +37,16 @@ function encryptForRecipient(recipientAddress, message) {
 
   // Encrypt the payload with the CEK
   const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-gcm', cek, iv);
-  let encrypted = cipher.update(message, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
+  const cipher = crypto.createCipheriv("aes-256-gcm", cek, iv);
+  let encrypted = cipher.update(message, "utf8", "hex");
+  encrypted += cipher.final("hex");
   const tag = cipher.getAuthTag();
 
   return {
     wrappedCEKs,
     encryptedPayload: JSON.stringify({
-      iv: iv.toString('hex'),
-      tag: tag.toString('hex'),
+      iv: iv.toString("hex"),
+      tag: tag.toString("hex"),
       data: encrypted,
     }),
   };

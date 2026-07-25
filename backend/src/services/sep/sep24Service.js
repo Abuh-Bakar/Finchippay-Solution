@@ -249,11 +249,23 @@ function _buildForm(fields) {
   return form;
 }
 
-async function callAnchorDeposit({ account, assetCode, assetIssuer, amount, anchorName, token }) {
+async function callAnchorDeposit({
+  account,
+  assetCode,
+  assetIssuer,
+  amount,
+  anchorName,
+  token,
+}) {
   _validateInput({ assetCode, account });
   const anchor = getAnchor(anchorName);
 
-  const form = _buildForm({ asset_code: assetCode, account, asset_issuer: assetIssuer, amount });
+  const form = _buildForm({
+    asset_code: assetCode,
+    account,
+    asset_issuer: assetIssuer,
+    amount,
+  });
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
   let response;
@@ -268,7 +280,8 @@ async function callAnchorDeposit({ account, assetCode, assetIssuer, amount, anch
     const wrapped = new Error(
       `Anchor "${anchor.name}" deposit request failed: ${err.response?.data?.error || err.message}`,
     );
-    wrapped.status = upstreamStatus === 401 || upstreamStatus === 403 ? upstreamStatus : 502;
+    wrapped.status =
+      upstreamStatus === 401 || upstreamStatus === 403 ? upstreamStatus : 502;
     throw wrapped;
   }
 
@@ -321,7 +334,8 @@ async function callAnchorWithdraw({
     const wrapped = new Error(
       `Anchor "${anchor.name}" withdraw request failed: ${err.response?.data?.error || err.message}`,
     );
-    wrapped.status = upstreamStatus === 401 || upstreamStatus === 403 ? upstreamStatus : 502;
+    wrapped.status =
+      upstreamStatus === 401 || upstreamStatus === 403 ? upstreamStatus : 502;
     throw wrapped;
   }
 
