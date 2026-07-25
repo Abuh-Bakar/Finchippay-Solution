@@ -66,7 +66,7 @@ const options = {
       headers: {
         LinkHeader: {
           description:
-            'RFC 5988 web-linking header. Present when another page exists: ' +
+            "RFC 5988 web-linking header. Present when another page exists: " +
             '`</api/...?cursor=abc&limit=20>; rel="next"`.',
           schema: { type: "string" },
         },
@@ -441,8 +441,7 @@ const options = {
             status: {
               type: "string",
               enum: ["ok", "error", "unknown"],
-              description:
-                "Outcome of the most recent probe to this provider",
+              description: "Outcome of the most recent probe to this provider",
             },
             latencyMs: {
               type: "number",
@@ -1061,7 +1060,12 @@ const options = {
           tags: ["Scheduled Transactions"],
           summary: "List scheduled transactions (cursor-paginated)",
           parameters: [
-            { name: "publicKey", in: "path", required: true, schema: { type: "string" } },
+            {
+              name: "publicKey",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
             { $ref: "#/components/parameters/PaginationLimit" },
             { $ref: "#/components/parameters/PaginationCursor" },
           ],
@@ -1087,7 +1091,7 @@ const options = {
           summary: "List contract events for a participant (paginated)",
           description:
             "Supports both `offset` and opaque `cursor` navigation. When more " +
-            "results exist, a `Link: rel=\"next\"` header and " +
+            'results exist, a `Link: rel="next"` header and ' +
             "`pagination.nextCursor` are returned.",
           parameters: [
             {
@@ -1233,8 +1237,7 @@ const options = {
                               providers: {
                                 type: "object",
                                 additionalProperties: {
-                                  $ref:
-                                    "#/components/schemas/PriceFeedProviderStatus",
+                                  $ref: "#/components/schemas/PriceFeedProviderStatus",
                                 },
                               },
                               activePrice: {

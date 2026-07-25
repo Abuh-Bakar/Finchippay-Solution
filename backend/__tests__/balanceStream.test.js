@@ -111,7 +111,10 @@ function openStream(server, path) {
                 waiters.push(check);
               };
               const timer = setTimeout(
-                () => rej2(new Error(`Timed out. Frames: ${JSON.stringify(frames)}`)),
+                () =>
+                  rej2(
+                    new Error(`Timed out. Frames: ${JSON.stringify(frames)}`),
+                  ),
                 3000,
               );
               check();
@@ -217,7 +220,9 @@ describe("GET /api/accounts/:publicKey/stream (#157)", () => {
     await stream.waitFor((frames) => eventsOf(frames, "balance").length >= 2);
 
     const balanceEvents = eventsOf(stream.frames, "balance");
-    expect(balanceEvents[balanceEvents.length - 1].data.xlm).toBe("142.5000000");
+    expect(balanceEvents[balanceEvents.length - 1].data.xlm).toBe(
+      "142.5000000",
+    );
 
     stream.close();
   });
@@ -231,7 +236,9 @@ describe("GET /api/accounts/:publicKey/stream (#157)", () => {
 
     horizonStreams[0].handlers.onerror(new Error("horizon down"));
 
-    await stream.waitFor((frames) => eventsOf(frames, "stream-error").length >= 1);
+    await stream.waitFor(
+      (frames) => eventsOf(frames, "stream-error").length >= 1,
+    );
     expect(eventsOf(stream.frames, "stream-error")[0].data.message).toMatch(
       /Horizon/i,
     );
@@ -249,7 +256,9 @@ describe("GET /api/accounts/:publicKey/stream (#157)", () => {
       `/api/accounts/${ME}/stream?token=${tokenFor(ME)}`,
     );
 
-    await stream.waitFor((frames) => eventsOf(frames, "stream-error").length >= 1);
+    await stream.waitFor(
+      (frames) => eventsOf(frames, "stream-error").length >= 1,
+    );
     expect(eventsOf(stream.frames, "stream-error")[0].data.message).toMatch(
       /not found/i,
     );
@@ -259,10 +268,16 @@ describe("GET /api/accounts/:publicKey/stream (#157)", () => {
 
   it("shares one Horizon stream between multiple tabs on the same account", async () => {
     const token = tokenFor(ME);
-    const tabOne = await openStream(server, `/api/accounts/${ME}/stream?token=${token}`);
+    const tabOne = await openStream(
+      server,
+      `/api/accounts/${ME}/stream?token=${token}`,
+    );
     await tabOne.waitFor((frames) => eventsOf(frames, "balance").length >= 1);
 
-    const tabTwo = await openStream(server, `/api/accounts/${ME}/stream?token=${token}`);
+    const tabTwo = await openStream(
+      server,
+      `/api/accounts/${ME}/stream?token=${token}`,
+    );
     await tabTwo.waitFor((frames) => eventsOf(frames, "balance").length >= 1);
 
     expect(horizonStreams).toHaveLength(1);
@@ -282,9 +297,15 @@ describe("GET /api/accounts/:publicKey/stream (#157)", () => {
 
   it("closes the Horizon stream once the last client disconnects", async () => {
     const token = tokenFor(ME);
-    const tabOne = await openStream(server, `/api/accounts/${ME}/stream?token=${token}`);
+    const tabOne = await openStream(
+      server,
+      `/api/accounts/${ME}/stream?token=${token}`,
+    );
     await tabOne.waitFor((frames) => eventsOf(frames, "balance").length >= 1);
-    const tabTwo = await openStream(server, `/api/accounts/${ME}/stream?token=${token}`);
+    const tabTwo = await openStream(
+      server,
+      `/api/accounts/${ME}/stream?token=${token}`,
+    );
     await tabTwo.waitFor((frames) => eventsOf(frames, "balance").length >= 1);
 
     tabOne.close();
@@ -329,7 +350,8 @@ describe("GET /api/accounts/:publicKey/stream (#157)", () => {
     await stream.waitFor((frames) => eventsOf(frames, "balance").length >= 2);
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    const extraCalls = stellarService.getXLMBalance.mock.calls.length - callsBefore;
+    const extraCalls =
+      stellarService.getXLMBalance.mock.calls.length - callsBefore;
     expect(extraCalls).toBeLessThan(10);
 
     stream.close();

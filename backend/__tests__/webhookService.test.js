@@ -286,13 +286,13 @@ describe("retry worker", () => {
 });
 
 describe("dead letter queue", () => {
-  it("retrieves dead deliveries", () => {
-    const deliveries = webhookService.getDeadDeliveries(ACCOUNT_A);
+  it("retrieves dead deliveries", async () => {
+    const deliveries = await webhookService.getDeadDeliveries(ACCOUNT_A);
     expect(Array.isArray(deliveries)).toBe(true);
   });
 
-  it("resets dead deliveries for retry", () => {
-    const result = webhookService.retryDeadDeliveries(ACCOUNT_A);
+  it("resets dead deliveries for retry", async () => {
+    const result = await webhookService.retryDeadDeliveries(ACCOUNT_A);
     expect(result).toHaveProperty("reset");
   });
 });

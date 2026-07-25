@@ -82,7 +82,10 @@ async function adminToggleFlag(req, res, next) {
     if (!updated) {
       return res.status(404).json({
         success: false,
-        error: { code: "NOT_FOUND", message: `Feature flag "${key}" not found.` },
+        error: {
+          code: "NOT_FOUND",
+          message: `Feature flag "${key}" not found.`,
+        },
       });
     }
 

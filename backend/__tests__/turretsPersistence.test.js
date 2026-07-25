@@ -39,7 +39,8 @@ const turretsService = require("../src/services/turretsService");
 const turretsDeploymentService = require("../src/services/turretsDeploymentService");
 
 const VALID_OWNER = "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUWDA";
-const VALID_OWNER_2 = "GDUKMGUGDZQK6YHYA5Z6AY2G4XDSZPSZ3SW5UN3ARVMO6QSRDWP5YLEX";
+const VALID_OWNER_2 =
+  "GDUKMGUGDZQK6YHYA5Z6AY2G4XDSZPSZ3SW5UN3ARVMO6QSRDWP5YLEX";
 
 afterAll(async () => {
   await knex.destroy();
@@ -168,7 +169,10 @@ describe("turretsService — DB persistence", () => {
         deployment_id: id,
         status: "executed",
         message: "DCA txFunction generated",
-        result: JSON.stringify({ action: "buy_xlm_dca", quoteAmount: "1.0000000" }),
+        result: JSON.stringify({
+          action: "buy_xlm_dca",
+          quoteAmount: "1.0000000",
+        }),
         created_at: new Date(Date.now() + 1_000).toISOString(),
       },
     ]);
@@ -202,9 +206,9 @@ describe("turretsService — DB persistence", () => {
   });
 
   test("getDeployment throws 404 for an unknown id", async () => {
-    await expect(turretsService.getDeployment("does-not-exist")).rejects.toMatchObject(
-      { status: 404 },
-    );
+    await expect(
+      turretsService.getDeployment("does-not-exist"),
+    ).rejects.toMatchObject({ status: 404 });
   });
 
   test("deployments survive a server restart (new Knex on the same file)", async () => {

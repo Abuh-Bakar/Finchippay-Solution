@@ -328,11 +328,10 @@ const sep12CustomerQuerySchema = z.object({
 
 /** POST /api/admin/feature-flags/:key/toggle */
 const adminToggleFlagSchema = z.object({
-  enabled: z
-    .union([z.boolean(), z.null()], {
-      required_error: "Body must include \"enabled\" as true, false, or null.",
-      message: "Body must include \"enabled\" as true, false, or null.",
-    }),
+  enabled: z.union([z.boolean(), z.null()], {
+    required_error: 'Body must include "enabled" as true, false, or null.',
+    message: 'Body must include "enabled" as true, false, or null.',
+  }),
 });
 
 // ─── SEP-0024 deposit / withdraw ──────────────────────────────────────────────

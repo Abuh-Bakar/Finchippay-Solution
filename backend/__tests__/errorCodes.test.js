@@ -143,9 +143,7 @@ describe("getError()", () => {
     const entry = getError("AUTH_MISSING_TOKEN");
     expect(entry.code).toBe("AUTH_MISSING_TOKEN");
     expect(entry.httpStatus).toBe(401);
-    expect(entry.message).toBe(
-      "Authentication token is required.",
-    );
+    expect(entry.message).toBe("Authentication token is required.");
   });
 
   it("falls back to GEN_UNKNOWN for an unknown code", () => {

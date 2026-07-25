@@ -192,7 +192,11 @@ async function attemptDelivery(webhook, payload) {
  * Creates a delivery record and manages retry logic with exponential
  * backoff.
  */
-async function deliverWebhook(webhook, payload, eventType = "payment.received") {
+async function deliverWebhook(
+  webhook,
+  payload,
+  eventType = "payment.received",
+) {
   const span = tracer.startSpan("webhook.delivery");
   span.setAttributes({
     "webhook.id": webhook.id,
@@ -228,12 +232,10 @@ async function deliverWebhook(webhook, payload, eventType = "payment.received") 
     const result = await attemptDelivery(webhook, payload);
 
     if (result.ok) {
-      await knex("webhook_deliveries")
-        .where("id", deliveryId)
-        .update({
-          status: "delivered",
-          last_attempt_at: new Date().toISOString(),
-        });
+      await knex("webhook_deliveries").where("id", deliveryId).update({
+        status: "delivered",
+        last_attempt_at: new Date().toISOString(),
+      });
       logger.info({
         type: "webhook_delivered",
         id: webhook.id,
@@ -242,11 +244,7 @@ async function deliverWebhook(webhook, payload, eventType = "payment.received") 
       });
       span.setStatus({ code: 1 });
     } else {
-      await handleDeliveryFailure(
-        deliveryId,
-        webhook,
-        result.error,
-      );
+      await handleDeliveryFailure(deliveryId, webhook, result.error);
     }
   } catch (err) {
     await handleDeliveryFailure(deliveryId, webhook, err.message);
@@ -267,13 +265,15 @@ async function handleDeliveryFailure(deliveryId, webhook, errorMsg) {
   const isDead = currentAttempt >= MAX_RETRIES;
 
   try {
-    await knex("webhook_deliveries").where("id", deliveryId).update({
-      attempts: currentAttempt,
-      last_attempt_at: new Date().toISOString(),
-      last_error: errorMsg,
-      next_retry_at: isDead ? null : nextRetryAt,
-      status: isDead ? "dead" : "pending",
-    });
+    await knex("webhook_deliveries")
+      .where("id", deliveryId)
+      .update({
+        attempts: currentAttempt,
+        last_attempt_at: new Date().toISOString(),
+        last_error: errorMsg,
+        next_retry_at: isDead ? null : nextRetryAt,
+        status: isDead ? "dead" : "pending",
+      });
   } catch (err) {
     logger.error({
       type: "webhook_retry_update_error",
@@ -358,12 +358,10 @@ async function processRetryQueue() {
         const result = await attemptDelivery(webhook, payload);
 
         if (result.ok) {
-          await knex("webhook_deliveries")
-            .where("id", delivery.id)
-            .update({
-              status: "delivered",
-              last_attempt_at: new Date().toISOString(),
-            });
+          await knex("webhook_deliveries").where("id", delivery.id).update({
+            status: "delivered",
+            last_attempt_at: new Date().toISOString(),
+          });
           logger.info({
             type: "webhook_retry_delivered",
             id: webhook.id,
@@ -391,7 +389,10 @@ async function processRetryQueue() {
 function startRetryWorker() {
   if (retryWorkerTimer) return;
   retryWorkerTimer = setInterval(processRetryQueue, RETRY_WORKER_INTERVAL);
-  logger.info({ type: "retry_worker_started", intervalMs: RETRY_WORKER_INTERVAL });
+  logger.info({
+    type: "retry_worker_started",
+    intervalMs: RETRY_WORKER_INTERVAL,
+  });
 }
 
 /**
@@ -425,7 +426,9 @@ async function getDeadDeliveries(publicKey) {
  * @returns {Promise<{ reset: number }>}
  */
 async function retryDeadDeliveries(publicKey) {
-  const ids = await knex("webhooks").where("public_key", publicKey).select("id");
+  const ids = await knex("webhooks")
+    .where("public_key", publicKey)
+    .select("id");
   if (ids.length === 0) return { reset: 0 };
   const webhookIds = ids.map((r) => r.id);
   const count = await knex("webhook_deliveries")
@@ -495,9 +498,11 @@ function startMonitoring(webhook) {
 
         const hooks = await getWebhooksByPublicKey(webhook.publicKey);
         const deliveries = hooks.map((h) => {
-          const promise = deliverWebhook(h, payload, "payment.received").finally(
-            () => pendingDeliveries.delete(promise),
-          );
+          const promise = deliverWebhook(
+            h,
+            payload,
+            "payment.received",
+          ).finally(() => pendingDeliveries.delete(promise));
           pendingDeliveries.add(promise);
           return promise;
         });
@@ -538,7 +543,11 @@ async function closeAllStreams(timeoutMs = 5000) {
     try {
       close();
     } catch (err) {
-      logger.error({ type: "stream_close_error", publicKey, error: err.message });
+      logger.error({
+        type: "stream_close_error",
+        publicKey,
+        error: err.message,
+      });
     }
   }
   activeStreams.clear();

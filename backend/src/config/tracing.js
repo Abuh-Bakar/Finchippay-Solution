@@ -24,8 +24,15 @@ const { NodeSDK } = require("@opentelemetry/sdk-node");
 const {
   getNodeAutoInstrumentations,
 } = require("@opentelemetry/auto-instrumentations-node");
-const { OTLPTraceExporter } = require("@opentelemetry/exporter-trace-otlp-http");
-const { diag, DiagConsoleLogger, DiagLogLevel, trace } = require("@opentelemetry/api");
+const {
+  OTLPTraceExporter,
+} = require("@opentelemetry/exporter-trace-otlp-http");
+const {
+  diag,
+  DiagConsoleLogger,
+  DiagLogLevel,
+  trace,
+} = require("@opentelemetry/api");
 const logger = require("../utils/logger");
 
 // ─── Guard: skip in test environment or when no endpoint is configured ────────
@@ -53,7 +60,9 @@ if (NODE_ENV === "test") {
   // ─── SDK initialisation ──────────────────────────────────────────────────
 
   const traceExporter = new OTLPTraceExporter({
-    url: OTLP_ENDPOINT.endsWith("/v1/traces") ? OTLP_ENDPOINT : `${OTLP_ENDPOINT}/v1/traces`,
+    url: OTLP_ENDPOINT.endsWith("/v1/traces")
+      ? OTLP_ENDPOINT
+      : `${OTLP_ENDPOINT}/v1/traces`,
   });
 
   sdk = new NodeSDK({

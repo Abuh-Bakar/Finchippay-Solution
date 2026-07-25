@@ -23,7 +23,6 @@ const stellarService = require("../services/stellarService");
 const usernameService = require("../services/usernameService");
 const balanceStreamService = require("../services/balanceStreamService");
 const logger = require("../utils/logger");
-const { formatErrorResponse, ERROR_CODES } = require("../../../shared/errorCodes");
 
 /** Comment frames keep proxies and load balancers from idling the connection out. */
 const SSE_HEARTBEAT_INTERVAL_MS = 30_000;
