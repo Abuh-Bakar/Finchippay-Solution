@@ -13,9 +13,10 @@
     "test:unit": "jest --testPathIgnorePatterns='/(integration|federation)\\.test\\.'",
     "test:integration": "jest --testPathPattern='integration|federation'",
     "lint": "eslint 'src/**/*.js'",
-    "migrate": "node src/db/migrate.js",
-    "migrate:rollback": "node src/db/migrate.js rollback",
-    "migrate:seed": "node src/db/migrate.js seed"
+    "migrate": "knex migrate:latest",
+    "migrate:rollback": "knex migrate:rollback",
+    "migrate:status": "node src/db/migrate-status.js",
+    "seed": "knex seed:run"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.1",

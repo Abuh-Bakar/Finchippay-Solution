@@ -365,34 +365,55 @@ async function gracefulShutdown(signal, server, otelSdk) {
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 if (require.main === module) {
-  validateEnv();
-  // Initialise Redis connection (non-blocking; degrades gracefully if unavailable)
-  initRedis().catch((err) => {
-    logger.error({ err }, "Redis initialisation failed");
-  });
-  require("./services/scheduledTransactionService").loadActiveSchedules().catch((err) => {
-    logger.error({ err }, "Failed to load active scheduled transactions");
-  });
-  const server = app.listen(PORT, () => {
-    console.log(`
+  (async () => {
+    validateEnv();
+
+    // Auto-run pending migrations in development so the schema is always
+    // current for local work. Other environments migrate explicitly via the
+    // deploy pipeline (npm run migrate), not on boot.
+    if (process.env.NODE_ENV === "development") {
+      try {
+        const [batchNo, migrated] = await require("./db").migrate.latest();
+        if (migrated.length > 0) {
+          logger.info(
+            { batch: batchNo, migrations: migrated },
+            "Applied pending database migrations",
+          );
+        }
+      } catch (err) {
+        logger.error({ err }, "Auto-migration failed; aborting startup");
+        process.exit(1);
+      }
+    }
+
+    // Initialise Redis connection (non-blocking; degrades gracefully if unavailable)
+    initRedis().catch((err) => {
+      logger.error({ err }, "Redis initialisation failed");
+    });
+    require("./services/scheduledTransactionService").loadActiveSchedules().catch((err) => {
+      logger.error({ err }, "Failed to load active scheduled transactions");
+    });
+    const server = app.listen(PORT, () => {
+      console.log(`
   ✨ Finchippay Solution API
   🚀 Server running at http://localhost:${PORT}
   🌐 Network: ${process.env.STELLAR_NETWORK || "testnet"}
   `);
-  });
+    });
 
-  startTurretsServer();
-  eventIndexer.start();
-  startRetryWorker();
+    startTurretsServer();
+    eventIndexer.start();
+    startRetryWorker();
 
-  process.on("SIGTERM", () => {
-    eventIndexer.stop();
-    gracefulShutdown("SIGTERM", server, otelSdk);
-  });
-  process.on("SIGINT", () => {
-    eventIndexer.stop();
-    gracefulShutdown("SIGINT", server, otelSdk);
-  });
+    process.on("SIGTERM", () => {
+      eventIndexer.stop();
+      gracefulShutdown("SIGTERM", server, otelSdk);
+    });
+    process.on("SIGINT", () => {
+      eventIndexer.stop();
+      gracefulShutdown("SIGINT", server, otelSdk);
+    });
+  })();
 }
 
 module.exports = app;

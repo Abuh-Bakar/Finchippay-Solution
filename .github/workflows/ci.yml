@@ -154,6 +154,12 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Run migrations
+        run: npm run migrate
+
+      - name: Migration status (fails if pending)
+        run: npm run migrate:status
+
       - name: Unit tests
         run: npm run test:unit
 
