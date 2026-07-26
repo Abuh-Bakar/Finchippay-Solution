@@ -89,7 +89,8 @@ pub enum ContractError {
 // ─── Shared data types ────────────────────────────────────────────────────────
 
 #[contracttype]
-#[derive(Clone, Debug)]    pub struct TipRecord {
+#[derive(Clone, Debug)]
+pub struct TipRecord {
     pub from: Address,
     pub to: Address,
     pub amount: i128,
@@ -130,7 +131,8 @@ pub enum EscrowStatus {
 }
 
 #[contracttype]
-#[derive(Clone, Debug)]    pub struct Escrow {
+#[derive(Clone, Debug)]
+pub struct Escrow {
     pub id: u32,
     pub from: Address,
     pub to: Address,
