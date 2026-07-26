@@ -36,7 +36,21 @@ const metrics = require("./metricsService");
 const tracer = require("../config/tracing").getTracer("webhook-service");
 const { propagation, context } = require("@opentelemetry/api");
 const { getRequestIdHeader } = require("../utils/correlationId");
-const { generateWebhookSignature } = require("../utils/webhookSignature");
+const webhookSignature = require("../utils/webhookSignature");
+const { generateWebhookSignature } = webhookSignature;
+function buildSep45Payload(eventType, data, secret) {
+  const payload = {
+    id: crypto.randomUUID(),
+    timestamp: new Date().toISOString(),
+    type: eventType,
+    data,
+  };
+  const signature = generateWebhookSignature(JSON.stringify(payload), secret);
+  return { ...payload, signature };
+}
+function getSep45Signature(payload, secret) {
+  return generateWebhookSignature(JSON.stringify(payload), secret);
+}
 const knex = require("../db/connection");
 require("dotenv").config();
 
@@ -159,18 +173,34 @@ function signPayload(secret, payload) {
   return generateWebhookSignature(payload, secret);
 }
 
+function buildPayload(eventType, data, secret, version = "v2") {
+  if (version === "v1") {
+    return { eventType, data };
+  }
+
+  return buildSep45Payload(eventType, data, secret);
+}
+
+function getDeliveryHeaders(secret, payload, version = "v2") {
+  const signature = version === "v1"
+    ? generateWebhookSignature(payload, secret)
+    : getSep45Signature(payload, secret);
+
+  return {
+    "Content-Type": "application/json",
+    "X-Webhook-Signature": signature,
+    "X-Stellar-Webhook-Signature": signature,
+    ...getRequestIdHeader(),
+  };
+}
+
 // ─── Delivery ─────────────────────────────────────────────────────────────────
 
 /**
  * Attempt to deliver a signed webhook payload to a single endpoint.
  */
-async function attemptDelivery(webhook, payload) {
-  const signature = signPayload(webhook.secret, payload);
-  const headers = {
-    "Content-Type": "application/json",
-    "X-Webhook-Signature": signature,
-    ...getRequestIdHeader(),
-  };
+async function attemptDelivery(webhook, payload, version = "v2") {
+  const headers = getDeliveryHeaders(webhook.secret, payload, version);
 
   propagation.inject(context.active(), headers);
 
@@ -196,6 +226,7 @@ async function deliverWebhook(
   webhook,
   payload,
   eventType = "payment.received",
+  version = "v2",
 ) {
   const span = tracer.startSpan("webhook.delivery");
   span.setAttributes({
@@ -229,7 +260,8 @@ async function deliverWebhook(
   }
 
   try {
-    const result = await attemptDelivery(webhook, payload);
+    const deliveryPayload = version === "v1" ? payload : buildPayload(eventType, payload, webhook.secret, version);
+    const result = await attemptDelivery(webhook, deliveryPayload, version);
 
     if (result.ok) {
       await knex("webhook_deliveries").where("id", deliveryId).update({
@@ -355,7 +387,12 @@ async function processRetryQueue() {
       });
 
       try {
-        const result = await attemptDelivery(webhook, payload);
+        const version = webhook.version || "v2";
+        const deliveryPayload =
+          version === "v1"
+            ? payload
+            : buildPayload(delivery.event_type || "payment.received", payload, webhook.secret, version);
+        const result = await attemptDelivery(webhook, deliveryPayload, version);
 
         if (result.ok) {
           await knex("webhook_deliveries").where("id", delivery.id).update({
@@ -567,6 +604,7 @@ module.exports = {
   getWebhooksByPublicKey,
   deleteWebhook,
   signPayload,
+  buildPayload,
   deliverWebhook,
   getDeadDeliveries,
   retryDeadDeliveries,
