@@ -19,6 +19,7 @@ const { sdk: otelSdk } = require("./config/tracing");
 // Must load before any route requiring axios so the global interceptor
 // can forward the correlation ID on every outbound HTTP call.
 require("./config/axiosInterceptors");
+require("./config/fetchInterceptor");
 
 const express = require("express");
 const cors = require("cors");
@@ -69,6 +70,9 @@ const {
 } = require("./services/balanceStreamService");
 const { zodErrorHandler } = require("./validation/middleware");
 const traceContextMiddleware = require("./middleware/tracing");
+const correlationIdMiddleware = require("./middleware/correlationId");
+const { setCorrelationIdProvider } = require("../../shared/errorCodes");
+setCorrelationIdProvider(correlationIdMiddleware.getCorrelationId);
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -165,6 +169,7 @@ app.use(trackHttpMetrics);
 // Correlation ID middleware — generates/adopts X-Request-ID, stores in ALS.
 app.use(correlationMiddleware);
 app.use(traceContextMiddleware);
+app.use(correlationIdMiddleware);
 // Structured JSON request logging (#269) — machine-parseable JSON logs.
 app.use(
   pinoHttp({
@@ -172,7 +177,8 @@ app.use(
     genReqId: (req) => req.id || crypto.randomUUID(),
     customProps: () => {
       const requestId = getRequestId();
-      return requestId ? { requestId } : {};
+      const correlationId = correlationIdMiddleware.getCorrelationId();
+      return { ...(requestId ? { requestId } : {}), ...(correlationId ? { correlationId } : {}) };
     },
   }),
 );
