@@ -6,6 +6,7 @@
   ],
   "scripts": {
     "generate:sdk": "bash scripts/generate-sdk.sh",
+    "check:sdk": "bash scripts/check-sdk.sh",
     "build:sdk": "npm run build --workspace=sdk",
     "build": "npm run build --workspace=sdk --workspace=frontend",
     "load-test": "node scripts/load-test.js",
