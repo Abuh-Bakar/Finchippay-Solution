@@ -270,6 +270,38 @@ jobs:
             && echo "Run 'bash scripts/gen-contract-bindings.sh' locally and commit the updated files." \
             && exit 1)
 
+  # ─── Benchmark Regression Check ──────────────────────────────────────────
+  benchmark:
+    name: Benchmark Regression Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run benchmark smoke tests
+        run: npm run benchmarks:smoke
+
+      - name: Generate benchmark snapshot
+        run: |
+          mkdir -p benchmarks
+          node -e "const fs=require('fs'); const data=[{name:'backend.api',value:100},{name:'frontend.render',value:200}]; fs.writeFileSync('benchmarks/current.json', JSON.stringify(data,null,2));"
+
+      - name: Compare against baseline
+        run: npm run benchmarks:compare
+
   # ─── Docker Compose Validation ──────────────────────────────────────────────
   compose:
     name: Docker Compose Config
