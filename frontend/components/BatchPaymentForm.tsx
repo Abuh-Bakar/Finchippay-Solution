@@ -8,7 +8,6 @@ import {
   truncateMemoText,
 } from "@/lib/stellar";
 import { signTransactionWithWallet } from "@/lib/wallet";
-import CSVUpload from "./CSVUpload";
 
 const MAX_RECIPIENTS = 10;
 
@@ -70,7 +69,6 @@ export default function BatchPaymentForm({
   ]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [batchMessage, setBatchMessage] = useState<string | null>(null);
-  const [showCSVUpload, setShowCSVUpload] = useState(false);
 
   const xlmBalanceValue = parseFloat(xlmBalance || "0");
   const availableXLM = Math.max(
@@ -125,26 +123,6 @@ export default function BatchPaymentForm({
   const handleRemoveRecipient = (id: string) => {
     setRecipients((current) => current.filter((recipient) => recipient.id !== id));
     setBatchMessage(null);
-  };
-
-  const handleCSVImport = (parsedRows: any[]) => {
-    const newRecipients = parsedRows.map((row) => ({
-      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      address: row.recipient || "",
-      amount: row.amount || "",
-      memo: row.memo || "",
-      token: AVAILABLE_TOKENS.find((t) => t.code === (row.asset || "XLM")) || AVAILABLE_TOKENS[0],
-      status: "idle" as RecipientStatus,
-    }));
-
-    setRecipients((current) => {
-      // Remove the first empty recipient if it's the only one
-      const filtered = current.filter((r) => r.address || r.amount);
-      return [...filtered, ...newRecipients].slice(0, MAX_RECIPIENTS);
-    });
-
-    setShowCSVUpload(false);
-    setBatchMessage(`Imported ${newRecipients.length} recipients from CSV.`);
   };
 
   const validateRecipient = (recipient: BatchRecipient) => {
@@ -250,14 +228,14 @@ export default function BatchPaymentForm({
     <div className="card animate-fade-in border-stellar-400/20">
       <div className="flex items-center justify-between mb-6 gap-3">
         <div>
-          <h2 className="font-display text-lg font-semibold text-slate-900 dark:text-white">
+          <h2 className="font-display text-lg font-semibold text-white">
             Batch Send
           </h2>
-          <p className="text-sm text-slate-600 dark:text-slate-400">
+          <p className="text-sm text-slate-400">
             Send multiple tokens (XLM, USDC) to up to {MAX_RECIPIENTS} recipients in a single transaction.
           </p>
         </div>
-        <div className="rounded-full bg-slate-50 dark:bg-white/5 px-3 py-1 text-xs font-semibold text-slate-700 dark:text-slate-300">
+        <div className="rounded-full bg-white/5 px-3 py-1 text-xs font-semibold text-slate-300">
           {recipientCount} / {MAX_RECIPIENTS}
         </div>
       </div>
@@ -266,7 +244,7 @@ export default function BatchPaymentForm({
         {recipients.map((recipient, index) => (
           <div
             key={recipient.id}
-            className="rounded-3xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4"
+            className="rounded-3xl border border-white/10 bg-white/5 p-4"
           >
             <div className="flex flex-col gap-3">
               <div className="grid gap-3 sm:grid-cols-3">
@@ -322,7 +300,7 @@ export default function BatchPaymentForm({
                       })
                     }
                     disabled={isProcessing}
-                    className="input-field w-full border-white/20 focus:border-stellar-500/60 dark:border-slate-700/50"
+                    className="input-field w-full"
                     placeholder="0.5"
                   />
                 </label>
@@ -346,13 +324,13 @@ export default function BatchPaymentForm({
               </label>
 
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-sm text-slate-700 dark:text-slate-300">
+                <div className="text-sm text-slate-300">
                   Status: 
                   {recipient.status === "idle" && (
-                    <span className="text-slate-600 dark:text-slate-400">Waiting</span>
+                    <span className="text-slate-400">Waiting</span>
                   )}
                   {recipient.status === "pending" && (
-                    <span className="text-amber-700 dark:text-amber-300">Processing</span>
+                    <span className="text-amber-300">Processing</span>
                   )}
                   {recipient.status === "success" && (
                     <span className="text-emerald-400">Sent ✓</span>
@@ -366,7 +344,7 @@ export default function BatchPaymentForm({
                     type="button"
                     onClick={() => handleRemoveRecipient(recipient.id)}
                     disabled={isProcessing || recipients.length <= 1}
-                    className="text-xs text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white disabled:opacity-50"
+                    className="text-xs text-slate-400 hover:text-white disabled:opacity-50"
                   >
                     Remove
                   </button>
@@ -382,7 +360,7 @@ export default function BatchPaymentForm({
           </div>
         ))}
 
-        <div className="grid gap-3 sm:grid-cols-2 items-center">
+        <div className="grid gap-3 sm:grid-cols-[1fr_auto] items-center">
           <button
             type="button"
             onClick={handleAddRecipient}
@@ -391,17 +369,9 @@ export default function BatchPaymentForm({
           >
             Add recipient
           </button>
-          <button
-            type="button"
-            onClick={() => setShowCSVUpload(true)}
-            disabled={isProcessing}
-            className="btn-secondary w-full py-2.5"
-          >
-            📥 Import CSV
-          </button>
-          <div className="rounded-3xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-4 py-3 text-sm text-slate-700 dark:text-slate-300 sm:col-span-2">
+          <div className="rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
             Total:{" "}
-            <span className="font-semibold text-slate-900 dark:text-white">
+            <span className="font-semibold text-white">
               {Object.entries(totalByToken)
                 .map(([token, amount]) => `${(amount as number).toFixed(7)} ${token}`)
                 .join(", ")}
@@ -439,21 +409,6 @@ export default function BatchPaymentForm({
             Retry failed payments
           </button>
         </div>
-
-        {showCSVUpload && (
-          <div className="rounded-3xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-6 mt-6">
-            <div className="mb-4">
-              <h3 className="font-semibold text-slate-900 dark:text-white">Import from CSV</h3>
-              <p className="text-sm text-slate-600 dark:text-slate-400">
-                Upload a CSV file to import multiple recipients at once.
-              </p>
-            </div>
-            <CSVUpload
-              onImport={handleCSVImport}
-              onCancel={() => setShowCSVUpload(false)}
-            />
-          </div>
-        )}
       </div>
     </div>
   );
