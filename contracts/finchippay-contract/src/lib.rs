@@ -1287,6 +1287,7 @@ impl FinchippayContract {
         }
     }
 
+
     /// Verify that a receipt at `payer` + `index` matches the given `expected_amount`
     /// and `expected_memo`. Returns `true` only if all fields match exactly, proving
     /// the receipt was minted on-chain by this contract.
