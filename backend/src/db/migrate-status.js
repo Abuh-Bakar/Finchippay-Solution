@@ -27,26 +27,28 @@ async function main() {
 
     const [completed, pending] = await knex.migrate.list();
 
-    console.log(`Completed migrations: ${completed.length}`);
-    completed.forEach((m) => console.log(`  ✔ ${label(m)}`));
+    const logger = require("../utils/logger");
 
-    console.log(`Pending migrations: ${pending.length}`);
-    pending.forEach((m) => console.log(`  ✗ ${label(m)}`));
+    logger.info(`Completed migrations: ${completed.length}`);
+    completed.forEach((m) => logger.info(`  ✔ ${label(m)}`));
+
+    logger.info(`Pending migrations: ${pending.length}`);
+    pending.forEach((m) => logger.info(`  ✗ ${label(m)}`));
 
     await knex.destroy();
 
     if (pending.length > 0) {
-      console.error(
+      logger.error(
         `\n${pending.length} pending migration(s). Run \`npm run migrate\`.`,
       );
       process.exit(1);
     }
 
-    console.log("\nDatabase schema is up to date.");
+    logger.info("\nDatabase schema is up to date.");
     process.exit(0);
   } catch (err) {
-    console.error("Failed to read migration status:", err.message);
-    console.error(err.stack);
+    const logger = require("../utils/logger");
+    logger.error({ err }, "Failed to read migration status");
     await knex.destroy();
     process.exit(1);
   }
