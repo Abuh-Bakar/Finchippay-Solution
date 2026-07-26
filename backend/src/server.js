@@ -24,7 +24,7 @@ require("./config/fetchInterceptor");
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
-const pinoHttp = require("pino-http");
+const requestLogger = require("./middleware/requestLogger");
 const rateLimit = require("express-rate-limit");
 const Sentry = require("@sentry/node");
 const { formatErrorResponse, ERROR_CODES } = require("../../shared/errorCodes");
@@ -170,18 +170,8 @@ app.use(trackHttpMetrics);
 app.use(correlationMiddleware);
 app.use(traceContextMiddleware);
 app.use(correlationIdMiddleware);
-// Structured JSON request logging (#269) — machine-parseable JSON logs.
-app.use(
-  pinoHttp({
-    logger,
-    genReqId: (req) => req.id || crypto.randomUUID(),
-    customProps: () => {
-      const requestId = getRequestId();
-      const correlationId = correlationIdMiddleware.getCorrelationId();
-      return { ...(requestId ? { requestId } : {}), ...(correlationId ? { correlationId } : {}) };
-    },
-  }),
-);
+// Structured JSON request logging
+app.use(requestLogger);
 
 // Content-Type enforcement (#81)
 app.use(requireJsonContentType);
@@ -413,7 +403,7 @@ if (require.main === module) {
       });
     require("./services/dataRetentionService").startRetentionCron();
     const server = app.listen(PORT, () => {
-      console.log(`
+      logger.info(`
  ✨ Finchippay Solution API
  🚀 Server running at http://localhost:${PORT}
  🌐 Network: ${process.env.STELLAR_NETWORK || "testnet"}
