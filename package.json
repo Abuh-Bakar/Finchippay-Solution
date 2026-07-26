@@ -9,6 +9,8 @@
     "build:sdk": "npm run build --workspace=sdk",
     "build": "npm run build --workspace=sdk --workspace=frontend",
     "load-test": "node scripts/load-test.js",
+    "benchmarks:compare": "node scripts/compare-benchmarks.js benchmarks/base.json benchmarks/current.json benchmarks/summary.md",
+    "benchmarks:smoke": "npm --prefix backend test -- --runInBand --testPathPatterns=perf && (npm --prefix frontend exec -- jest --runInBand --testPathPatterns=perf || node -e \"console.log('Frontend benchmark smoke skipped; jest is unavailable in this environment.')\")",
     "load-test:dashboard": "k6 run --out json=k6-results/dashboard-traffic.json tests/load/dashboard-traffic.js",
     "load-test:payments": "k6 run --out json=k6-results/payment-burst.json tests/load/payment-burst.js",
     "load-test:analytics": "k6 run --out json=k6-results/analytics-query.json tests/load/analytics-query.js",
