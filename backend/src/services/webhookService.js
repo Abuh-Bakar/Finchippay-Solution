@@ -159,16 +159,24 @@ function signPayload(secret, payload) {
   return generateWebhookSignature(payload, secret);
 }
 
+function generateIdempotencyKey(webhookId, eventType, payloadStr, timestamp) {
+  return crypto
+    .createHash("sha256")
+    .update(webhookId + eventType + payloadStr + timestamp)
+    .digest("hex");
+}
+
 // ─── Delivery ─────────────────────────────────────────────────────────────────
 
 /**
  * Attempt to deliver a signed webhook payload to a single endpoint.
  */
-async function attemptDelivery(webhook, payload) {
+async function attemptDelivery(webhook, payload, idempotencyKey) {
   const signature = signPayload(webhook.secret, payload);
   const headers = {
     "Content-Type": "application/json",
     "X-Webhook-Signature": signature,
+    "X-Idempotency-Key": idempotencyKey || "legacy-retry",
     ...getRequestIdHeader(),
   };
 
@@ -206,6 +214,28 @@ async function deliverWebhook(
 
   const deliveryId = crypto.randomUUID();
   const payloadStr = JSON.stringify(payload);
+  const timestamp = new Date().toISOString();
+  
+  const idempotencyKey = generateIdempotencyKey(webhook.id, eventType, payloadStr, timestamp);
+
+  try {
+    await knex("webhook_events").insert({
+      id: crypto.randomUUID(),
+      webhook_id: webhook.id,
+      event_type: eventType,
+      payload: payloadStr,
+      idempotency_key: idempotencyKey,
+      created_at: timestamp,
+    });
+  } catch (err) {
+    if (err.code !== '23505' && err.code !== 'SQLITE_CONSTRAINT') {
+      logger.error({
+        type: "webhook_event_db_error",
+        webhookId: webhook.id,
+        error: err.message,
+      });
+    }
+  }
 
   try {
     await knex("webhook_deliveries").insert({
@@ -213,9 +243,10 @@ async function deliverWebhook(
       webhook_id: webhook.id,
       event_type: eventType,
       payload: payloadStr,
+      idempotency_key: idempotencyKey,
       status: "pending",
       attempts: 0,
-      created_at: new Date().toISOString(),
+      created_at: timestamp,
     });
   } catch (err) {
     logger.error({
@@ -229,12 +260,15 @@ async function deliverWebhook(
   }
 
   try {
-    const result = await attemptDelivery(webhook, payload);
+    const result = await attemptDelivery(webhook, payload, idempotencyKey);
 
     if (result.ok) {
       await knex("webhook_deliveries").where("id", deliveryId).update({
         status: "delivered",
         last_attempt_at: new Date().toISOString(),
+      });
+      await knex("webhook_events").where("idempotency_key", idempotencyKey).update({
+        delivered_at: new Date().toISOString(),
       });
       logger.info({
         type: "webhook_delivered",
@@ -355,13 +389,18 @@ async function processRetryQueue() {
       });
 
       try {
-        const result = await attemptDelivery(webhook, payload);
+        const result = await attemptDelivery(webhook, payload, delivery.idempotency_key);
 
         if (result.ok) {
           await knex("webhook_deliveries").where("id", delivery.id).update({
             status: "delivered",
             last_attempt_at: new Date().toISOString(),
           });
+          if (delivery.idempotency_key) {
+            await knex("webhook_events").where("idempotency_key", delivery.idempotency_key).update({
+              delivered_at: new Date().toISOString(),
+            });
+          }
           logger.info({
             type: "webhook_retry_delivered",
             id: webhook.id,
@@ -562,6 +601,75 @@ async function closeAllStreams(timeoutMs = 5000) {
   pendingDeliveries.clear();
 }
 
+
+// ─── Event Replay & Querying ──────────────────────────────────────────────────
+
+/**
+ * Get paginated events for a webhook.
+ */
+async function getEvents(publicKey, { since, until, type, limit = 50, cursor } = {}) {
+  const query = knex("webhook_events as e")
+    .join("webhooks as w", "e.webhook_id", "w.id")
+    .where("w.public_key", publicKey)
+    .orderBy("e.created_at", "desc")
+    .select("e.*");
+
+  if (since) query.andWhere("e.created_at", ">=", since);
+  if (until) query.andWhere("e.created_at", "<=", until);
+  if (type) query.andWhere("e.event_type", type);
+  if (cursor) query.andWhere("e.id", "<", cursor);
+  
+  query.limit(limit);
+
+  return query;
+}
+
+/**
+ * Replay selected events.
+ */
+async function replayEvents(publicKey, { eventIds, since, until }) {
+  const query = knex("webhook_events as e")
+    .join("webhooks as w", "e.webhook_id", "w.id")
+    .where("w.public_key", publicKey)
+    .select("e.*");
+
+  if (eventIds && eventIds.length > 0) {
+    query.whereIn("e.id", eventIds);
+  } else {
+    if (since) query.andWhere("e.created_at", ">=", since);
+    if (until) query.andWhere("e.created_at", "<=", until);
+  }
+
+  const eventsToReplay = await query;
+  if (!eventsToReplay.length) return { replayed: 0 };
+
+  let replayCount = 0;
+  for (const event of eventsToReplay) {
+    const webhook = await getWebhookById(event.webhook_id);
+    if (!webhook) continue;
+    
+    const payload = typeof event.payload === 'string' ? JSON.parse(event.payload) : event.payload;
+    deliverWebhook(webhook, payload, event.event_type);
+    replayCount++;
+  }
+  
+  return { replayed: replayCount };
+}
+
+/**
+ * Get event stats by type.
+ */
+async function getEventStats(publicKey) {
+  const stats = await knex("webhook_events as e")
+    .join("webhooks as w", "e.webhook_id", "w.id")
+    .where("w.public_key", publicKey)
+    .groupBy("e.event_type")
+    .select("e.event_type")
+    .count("e.id as count");
+    
+  return stats;
+}
+
 module.exports = {
   registerWebhook,
   getWebhooksByPublicKey,
@@ -573,4 +681,8 @@ module.exports = {
   startRetryWorker,
   stopRetryWorker,
   closeAllStreams,
+  getEvents,
+  replayEvents,
+  getEventStats,
 };
+
