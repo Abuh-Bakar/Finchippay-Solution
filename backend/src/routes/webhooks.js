@@ -17,6 +17,8 @@ const {
   registerWebhookSchema,
   publicKeyParamSchema,
   idParamSchema,
+  getEventsQuerySchema,
+  replayEventsBodySchema,
 } = require("../validation/schemas");
 
 /**
@@ -51,6 +53,64 @@ router.get(
       const { publicKey } = req.validated;
       const hooks = await webhookService.getWebhooksByPublicKey(publicKey);
       return res.json({ webhooks: hooks });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * GET /api/webhooks/:publicKey/events
+ * Get paginated past events for a Stellar account.
+ */
+router.get(
+  "/:publicKey/events",
+  validate(publicKeyParamSchema, "params"),
+  validate(getEventsQuerySchema, "query"),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validatedParams || req.params;
+      const options = req.validatedQuery || req.query;
+      const events = await webhookService.getEvents(publicKey, options);
+      return res.json({ events });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * POST /api/webhooks/:publicKey/replay
+ * Replay selected events.
+ */
+router.post(
+  "/:publicKey/replay",
+  validate(publicKeyParamSchema, "params"),
+  validate(replayEventsBodySchema),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validatedParams || req.params;
+      const options = req.validated;
+      const result = await webhookService.replayEvents(publicKey, options);
+      return res.json({ success: true, ...result });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * GET /api/webhooks/:publicKey/events/stats
+ * Get event stats by type.
+ */
+router.get(
+  "/:publicKey/events/stats",
+  validate(publicKeyParamSchema, "params"),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validatedParams || req.params;
+      const stats = await webhookService.getEventStats(publicKey);
+      return res.json({ stats });
     } catch (err) {
       next(err);
     }

@@ -54,6 +54,7 @@ const {
   startRetryWorker,
   closeAllStreams: closeWebhookStreams,
 } = require("./services/webhookService");
+const { startCleanupWorker, stopCleanupWorker } = require("./services/eventCleanupService");
 const logger = require("./utils/logger");
 const { validateEnv, parseAllowedOrigins } = require("./config/validateEnv");
 const { requireJsonContentType } = require("./middleware/bodyParsing");

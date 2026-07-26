@@ -216,6 +216,23 @@ const registerWebhookSchema = z.object({
     .min(8, "Secret must be at least 8 characters for HMAC-SHA256 security"),
 });
 
+
+const getEventsQuerySchema = z.object({
+  since: z.string().datetime().optional(),
+  until: z.string().datetime().optional(),
+  type: z.string().optional(),
+  limit: z.preprocess((val) => parseInt(val, 10), z.number().int().min(1).max(100).optional()).optional(),
+  cursor: z.string().optional(),
+});
+
+const replayEventsBodySchema = z.object({
+  eventIds: z.array(z.string()).optional(),
+  since: z.string().datetime().optional(),
+  until: z.string().datetime().optional(),
+}).refine(data => (data.eventIds && data.eventIds.length > 0) || data.since, {
+  message: "Either eventIds or since must be provided",
+});
+
 // ─── parse-payment (AI intent parser) ─────────────────────────────────────────
 
 /** POST /api/parse-payment */
@@ -379,6 +396,8 @@ module.exports = {
   turretsListQuerySchema,
   // webhooks
   registerWebhookSchema,
+  getEventsQuerySchema,
+  replayEventsBodySchema,
   // parse-payment
   parsePaymentSchema,
   // scheduled transactions
