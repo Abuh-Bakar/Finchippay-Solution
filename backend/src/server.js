@@ -405,6 +405,7 @@ if (require.main === module) {
       .catch((err) => {
         logger.error({ err }, "Failed to load active scheduled transactions");
       });
+    require("./services/dataRetentionService").startRetentionCron();
     const server = app.listen(PORT, () => {
       console.log(`
  ✨ Finchippay Solution API

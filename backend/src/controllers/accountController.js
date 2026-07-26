@@ -215,7 +215,59 @@ async function streamBalance(req, res) {
   }
 }
 
+async function gdprDelete(req, res, next) {
+  try {
+    const { publicKey } = req.validated.params;
+    const crypto = require("crypto");
+    const db = require("../db");
+    const { writeAuditLog } = require("../services/dataRetentionService");
+
+    const hash = crypto.createHash("sha256").update(publicKey).digest("hex");
+    const anonymized = {};
+
+    anonymized.tipsAsSender = await db("tips").where("sender_pk", publicKey).update({ sender_pk: hash, memo: "[redacted]" });
+    anonymized.tipsAsCreator = await db("tips").where("creator_pk", publicKey).update({ creator_pk: hash, memo: "[redacted]" });
+    anonymized.usernameMappings = await db("usernames").where("public_key", publicKey).del();
+
+    await writeAuditLog("gdpr_delete", { anonymized }, publicKey);
+
+    res.json({ success: true, data: { publicKey, anonymized } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function gdprExport(req, res, next) {
+  try {
+    const { publicKey } = req.validated.params;
+    const db = require("../db");
+    const { writeAuditLog } = require("../services/dataRetentionService");
+
+    const [tipsSent, tipsReceived, usernameRow] = await Promise.all([
+      db("tips").where("sender_pk", publicKey).select("*"),
+      db("tips").where("creator_pk", publicKey).select("*"),
+      db("usernames").where("public_key", publicKey).first(),
+    ]);
+
+    const data = {
+      publicKey,
+      tipsSent,
+      tipsReceived,
+      username: usernameRow?.username || null,
+      exportedAt: new Date().toISOString(),
+    };
+
+    await writeAuditLog("gdpr_export", { fieldsExported: Object.keys(data) }, publicKey);
+
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
+  gdprDelete,
+  gdprExport,
   getAccount,
   getBalance,
   registerUsername,
