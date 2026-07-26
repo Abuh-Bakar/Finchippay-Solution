@@ -1,15 +1,13 @@
+/**
+ * src/routes/webhooks.js
+ * Webhook management API endpoints.
+ */
+
 "use strict";
 
 const express = require("express");
 const router = express.Router();
-const {
-  registerWebhook,
-  getWebhooksByPublicKey,
-  deleteWebhook,
-  getDeadDeliveries,
-  retryDeadDeliveries,
-} = require("../services/webhookService");
-
+const webhookService = require("../services/webhookService");
 const {
   formatErrorResponse,
   ERROR_CODES,
@@ -24,11 +22,17 @@ const {
 /**
  * POST /api/webhooks
  * Register a webhook for a Stellar account.
+ *
+ * Body: { publicKey: "G...", url: "https://...", secret: "whsec_..." }
  */
 router.post("/", validate(registerWebhookSchema), async (req, res, next) => {
   try {
     const { publicKey, url, secret } = req.validated;
-    const webhook = await registerWebhook(publicKey, url, secret);
+    const webhook = await webhookService.registerWebhook(
+      publicKey,
+      url,
+      secret,
+    );
     return res.status(201).json({ success: true, webhook });
   } catch (err) {
     next(err);
@@ -45,7 +49,7 @@ router.get(
   async (req, res, next) => {
     try {
       const { publicKey } = req.validated;
-      const hooks = await getWebhooksByPublicKey(publicKey);
+      const hooks = await webhookService.getWebhooksByPublicKey(publicKey);
       return res.json({ webhooks: hooks });
     } catch (err) {
       next(err);
@@ -63,7 +67,7 @@ router.get(
   async (req, res, next) => {
     try {
       const { publicKey } = req.validated;
-      const failures = await getDeadDeliveries(publicKey);
+      const failures = await webhookService.getDeadDeliveries(publicKey);
       return res.json({ failures });
     } catch (err) {
       next(err);
@@ -81,7 +85,7 @@ router.post(
   async (req, res, next) => {
     try {
       const { publicKey } = req.validated;
-      const result = await retryDeadDeliveries(publicKey);
+      const result = await webhookService.retryDeadDeliveries(publicKey);
       return res.json({ success: true, ...result });
     } catch (err) {
       next(err);
@@ -99,7 +103,7 @@ router.delete(
   async (req, res, next) => {
     try {
       const { id } = req.validated;
-      const deleted = await deleteWebhook(id);
+      const deleted = await webhookService.deleteWebhook(id);
       if (!deleted) {
         return res.status(ERROR_CODES.RES_NOT_FOUND.httpStatus).json(
           formatErrorResponse("RES_NOT_FOUND", {

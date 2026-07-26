@@ -8,22 +8,44 @@
 const express = require("express");
 const router = express.Router();
 const scheduledTransactionService = require("../services/scheduledTransactionService");
+const { validate } = require("../validation/middleware");
+const {
+  scheduleTransactionSchema,
+  loosePublicKeyParamSchema,
+  idParamSchema,
+} = require("../validation/schemas");
 const {
   formatErrorResponse,
   ERROR_CODES,
 } = require("../../../shared/errorCodes");
 
-// POST /api/scheduled-transactions
-router.post("/", async (req, res, next) => {
-  try {
-    const schedule = await scheduledTransactionService.createSchedule(req.body);
-    res.status(201).json(schedule);
-  } catch (error) {
-    next(error);
-  }
-});
+/**
+ * POST /api/scheduled-transactions
+ * Schedules a new transaction for future submission.
+ * Body: { signedXDR: string, submitAt: string (ISO 8601), publicKey: string }
+ */
+router.post(
+  "/",
+  validate(scheduleTransactionSchema),
+  async (req, res, next) => {
+    try {
+      const { signedXDR, submitAt, publicKey } = req.validated;
+      const schedule = await scheduledTransactionService.createSchedule({
+        signedXDR,
+        submitAt: new Date(submitAt),
+        publicKey,
+      });
+      res.status(201).json(schedule);
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
-// POST /api/scheduled-transactions/pending/:id/submit
+/**
+ * POST /api/scheduled-transactions/pending/:id/submit
+ * Submits a pending execution.
+ */
 router.post("/pending/:id/submit", async (req, res, next) => {
   try {
     const { signedXDR } = req.body;
@@ -44,7 +66,10 @@ router.post("/pending/:id/submit", async (req, res, next) => {
   }
 });
 
-// GET /api/scheduled-transactions/:publicKey/pending
+/**
+ * GET /api/scheduled-transactions/:publicKey/pending
+ * Lists pending executions for a given public key.
+ */
 router.get("/:publicKey/pending", async (req, res, next) => {
   try {
     const pending = await scheduledTransactionService.listPendingExecutions(
@@ -56,19 +81,29 @@ router.get("/:publicKey/pending", async (req, res, next) => {
   }
 });
 
-// GET /api/scheduled-transactions/:publicKey
-router.get("/:publicKey", async (req, res, next) => {
-  try {
-    const schedules = await scheduledTransactionService.listSchedules(
-      req.params.publicKey,
-    );
-    res.json(schedules);
-  } catch (error) {
-    next(error);
-  }
-});
+/**
+ * GET /api/scheduled-transactions/:publicKey
+ * Lists all schedules for a given public key.
+ */
+router.get(
+  "/:publicKey",
+  validate(loosePublicKeyParamSchema, "params"),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validated;
+      const schedules =
+        await scheduledTransactionService.listSchedules(publicKey);
+      res.json(schedules);
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
-// PUT /api/scheduled-transactions/:id
+/**
+ * PUT /api/scheduled-transactions/:id
+ * Updates an existing scheduled transaction.
+ */
 router.put("/:id", async (req, res, next) => {
   try {
     const updated = await scheduledTransactionService.updateSchedule(
@@ -81,19 +116,21 @@ router.put("/:id", async (req, res, next) => {
   }
 });
 
-// DELETE /api/scheduled-transactions/:id
-router.delete("/:id", async (req, res, next) => {
+/**
+ * DELETE /api/scheduled-transactions/:id
+ * Deletes or cancels a scheduled transaction by ID.
+ */
+router.delete("/:id", validate(idParamSchema, "params"), async (req, res, next) => {
   try {
-    const deleted = await scheduledTransactionService.deleteSchedule(
-      req.params.id,
-    );
+    const { id } = req.validated;
+    const deleted = await scheduledTransactionService.deleteSchedule(id);
     if (deleted) {
-      res.json({ message: `Scheduled transaction ${req.params.id} deleted.` });
+      res.json({ message: `Scheduled transaction ${id} deleted.` });
     } else {
       res.status(ERROR_CODES.RES_NOT_FOUND.httpStatus).json(
         formatErrorResponse("RES_NOT_FOUND", {
           resourceType: "scheduledTransaction",
-          id: req.params.id,
+          id,
         }),
       );
     }

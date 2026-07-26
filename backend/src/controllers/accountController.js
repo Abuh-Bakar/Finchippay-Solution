@@ -3,7 +3,7 @@
  * HTTP handlers for Stellar account data and username registration.
  *
  * Routes handled:
- *   GET  /api/accounts/:publicKey           → account details + balances
+ *   GET  /api/accounts/:publicKey          → account details + balances
  *   GET  /api/accounts/:publicKey/balance   → XLM balance only
  *   POST /api/accounts/register             → register username ↔ public key
  *   GET  /api/accounts/resolve/:username    → resolve username → public key

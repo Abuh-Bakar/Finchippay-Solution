@@ -7,10 +7,10 @@
  * (Knex-backed SQLite/PostgreSQL).
  *
  * Routes handled:
- *   POST /api/tips                            → record a new tip
- *   GET  /api/tips/received/:creatorPublicKey → list tips received + stats
- *   GET  /api/tips/stats/:creatorPublicKey    → tip statistics only
- *   GET  /api/tips/sent/:senderPublicKey      → list tips sent by a user
+ *   POST /api/tips                               → record a new tip
+ *   GET  /api/tips/received/:creatorPublicKey    → list tips received + stats
+ *   GET  /api/tips/stats/:creatorPublicKey     → tip statistics only
+ *   GET  /api/tips/sent/:senderPublicKey       → list tips sent by a user
  */
 
 "use strict";

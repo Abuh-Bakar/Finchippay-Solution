@@ -184,7 +184,6 @@ app.use(requireJsonContentType);
 app.use("/api/turrets", express.json({ limit: "512kb" }));
 app.use(express.json({ limit: "100kb" }));
 
-// JSON body parsing error handler
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
     return res.status(400).json({ error: "Invalid JSON body" });
@@ -214,8 +213,6 @@ app.use(
     credentials: true,
   }),
 );
-
-// ─── Health route (exempt from rate limiting) ─────────────────────────────────
 
 app.use("/health", healthRoutes);
 app.use("/api/health", healthRoutes);
@@ -300,7 +297,6 @@ app.use((req, res) => {
 
 // ─── Error Handling ────────────────────────────────────────────────────────────
 
-// Sentry must capture errors before the generic handler responds
 Sentry.setupExpressErrorHandler(app);
 
 // Convert any stray ZodError into the standard 400 payload.
@@ -308,7 +304,6 @@ app.use(zodErrorHandler);
 
 app.use((err, req, res, next) => {
   void next;
-  // If the error already has a code from our registry, use it directly.
   if (err.errorCode) {
     const entry = formatErrorResponse(err.errorCode, err.details);
     const status = err.status || ERROR_CODES[err.errorCode]?.httpStatus || 500;
@@ -333,12 +328,11 @@ app.use((err, req, res, next) => {
   res.status(status).json(fallback);
 });
 
-// ─── Graceful shutdown ────────────────────────────────────────────────────────
+// ─── Graceful shutdown ────────────────────────────────────────────────        
 
 async function gracefulShutdown(signal, server, otelSdk) {
   logger.info({ signal }, "Received shutdown signal — draining…");
 
-  // 1. Stop accepting new connections
   server.close((err) => {
     if (err) logger.error({ err }, "Error closing HTTP server");
   });
@@ -413,10 +407,10 @@ if (require.main === module) {
       });
     const server = app.listen(PORT, () => {
       console.log(`
-  ✨ Finchippay Solution API
-  🚀 Server running at http://localhost:${PORT}
-  🌐 Network: ${process.env.STELLAR_NETWORK || "testnet"}
-  `);
+ ✨ Finchippay Solution API
+ 🚀 Server running at http://localhost:${PORT}
+ 🌐 Network: ${process.env.STELLAR_NETWORK || "testnet"}
+ `);
     });
 
     startTurretsServer();
