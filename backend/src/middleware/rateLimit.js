@@ -10,6 +10,8 @@ const {
 let redisClient;
 let RedisStore;
 
+const logger = require("../utils/logger");
+
 if (process.env.REDIS_URL) {
   const Redis = require("ioredis");
   RedisStore = require("rate-limit-redis").default;
@@ -20,7 +22,7 @@ if (process.env.REDIS_URL) {
   });
 
   redisClient.on("error", (err) => {
-    console.error("Redis rate-limit client error:", err);
+    logger.error({ err }, "Redis rate-limit client error");
   });
 }
 

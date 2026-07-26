@@ -214,13 +214,8 @@ function validateEnv(env = process.env) {
     return;
   }
 
-  console.error("\nEnvironment validation failed:\n");
-  for (const message of errors) {
-    console.error(`  - ${message}`);
-  }
-  console.error(
-    "\nCopy backend/.env.example to backend/.env and set the required values.\n",
-  );
+  const logger = require("../utils/logger");
+  logger.fatal({ errors }, "Environment validation failed. Copy backend/.env.example to backend/.env and set the required values.");
   process.exit(1);
 }
 
