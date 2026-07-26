@@ -110,6 +110,15 @@ pub struct ReceiptMetadata {
     pub ledger: u32,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeEstimate {
+    pub cpu_instructions: u64,
+    pub ledger_read_bytes: u32,
+    pub ledger_write_bytes: u32,
+    pub estimated_stroops: i128,
+}
+
 /// Off-chain verifiable proof referencing an on-chain receipt.
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -789,6 +798,91 @@ impl FinchippayContract {
             (Symbol::new(&env, "upgraded"),),
             (current_ver + 1, new_wasm_hash, new_layout_version),
         );
+    }
+
+  /// Estimates resource bounds for `send_tip`
+    pub fn estimate_send_tip(
+        _env: Env,
+        _token: Address,
+        _from: Address,
+        _to: Address,
+        _amount: i128,
+    ) -> FeeEstimate {
+        FeeEstimate {
+            cpu_instructions: 500_000,
+            ledger_read_bytes: 1_500,
+            ledger_write_bytes: 500,
+            estimated_stroops: 10_000, // Conservative 0.001 XLM upper-bound
+        }
+    }
+
+    /// Estimates resource bounds for `create_escrow`
+    pub fn estimate_create_escrow(
+        _env: Env,
+        _token: Address,
+        _from: Address,
+        _to: Address,
+        _amount: i128,
+        _release_ledger: u32,
+    ) -> FeeEstimate {
+        FeeEstimate {
+            cpu_instructions: 750_000,
+            ledger_read_bytes: 2_000,
+            ledger_write_bytes: 1_000,
+            estimated_stroops: 15_000,
+        }
+    }
+
+    /// Estimates resource bounds for `open_stream`
+    pub fn estimate_open_stream(
+        _env: Env,
+        _token: Address,
+        _payer: Address,
+        _recipient: Address,
+        _rate: i128,
+        _deposit: i128,
+    ) -> FeeEstimate {
+        FeeEstimate {
+            cpu_instructions: 750_000,
+            ledger_read_bytes: 2_000,
+            ledger_write_bytes: 1_000,
+            estimated_stroops: 15_000,
+        }
+    }
+
+    /// Estimates resource bounds for `batch_send` (scales linearly with recipient count)
+    pub fn estimate_batch_send(
+        _env: Env,
+        _token: Address,
+        _from: Address,
+        recipient_count: u32,
+    ) -> FeeEstimate {
+        let count_u64 = recipient_count as u64;
+        let count_i128 = recipient_count as i128;
+
+        FeeEstimate {
+            cpu_instructions: 300_000 + (count_u64 * 250_000),
+            ledger_read_bytes: 1_000 + (recipient_count * 500),
+            ledger_write_bytes: 300 + (recipient_count * 300),
+            estimated_stroops: 5_000 + (count_i128 * 5_000),
+        }
+    }
+
+    /// Estimates resource bounds for `create_multisig`
+    pub fn estimate_create_multisig(
+        _env: Env,
+        signers_count: u32,
+        _threshold: u32,
+    ) -> FeeEstimate {
+        let count_u64 = signers_count as u64;
+        let count_i128 = signers_count as i128;
+
+        FeeEstimate {
+            cpu_instructions: 400_000 + (count_u64 * 100_000),
+            ledger_read_bytes: 1_200 + (signers_count * 200),
+            ledger_write_bytes: 600 + (signers_count * 100),
+            estimated_stroops: 8_000 + (count_i128 * 2_000),
+        }
     }
 
     /// Admin: rescue tokens accidentally sent directly to the contract address.
