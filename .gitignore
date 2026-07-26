@@ -49,5 +49,10 @@ playwright-report/
 test-results/
 test_snapshots
 
+# ─── SBOM outputs (generated at build time; keep directory, ignore contents) ──
+sbom/*.json
+sbom/*.xml
+sbom/*.spdx
+
 # ─── Local scripts (never push) ───────────────────────────────────────────────
 scripts/create_issues.py

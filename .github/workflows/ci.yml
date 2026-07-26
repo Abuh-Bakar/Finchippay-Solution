@@ -304,3 +304,84 @@ jobs:
           else
             echo "✅ No suspicious hardcoded secrets detected"
           fi
+
+  # ─── SBOM Generation ───────────────────────────────────────────────────────
+  sbom:
+    name: Generate SBOMs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate frontend SBOM (CycloneDX)
+        uses: anchore/sbom-action@v0
+        with:
+          path: ./frontend
+          artifact-name: sbom-frontend-cdx.json
+          output-file: sbom/frontend.cdx.json
+          format: cyclonedx-json
+
+      - name: Generate frontend SBOM (SPDX)
+        uses: anchore/sbom-action@v0
+        with:
+          path: ./frontend
+          artifact-name: sbom-frontend-spdx.json
+          output-file: sbom/frontend.spdx.json
+          format: spdx-json
+
+      - name: Generate backend SBOM (CycloneDX)
+        uses: anchore/sbom-action@v0
+        with:
+          path: ./backend
+          artifact-name: sbom-backend-cdx.json
+          output-file: sbom/backend.cdx.json
+          format: cyclonedx-json
+
+      - name: Generate backend SBOM (SPDX)
+        uses: anchore/sbom-action@v0
+        with:
+          path: ./backend
+          artifact-name: sbom-backend-spdx.json
+          output-file: sbom/backend.spdx.json
+          format: spdx-json
+
+      - name: Generate contracts SBOM (CycloneDX)
+        uses: anchore/sbom-action@v0
+        with:
+          path: ./contracts/finchippay-contract
+          artifact-name: sbom-contract-cdx.json
+          output-file: sbom/contract.cdx.json
+          format: cyclonedx-json
+
+      - name: Generate contracts SBOM (SPDX)
+        uses: anchore/sbom-action@v0
+        with:
+          path: ./contracts/finchippay-contract
+          artifact-name: sbom-contract-spdx.json
+          output-file: sbom/contract.spdx.json
+          format: spdx-json
+
+      - name: Upload SBOM bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-bundle-ci-${{ github.sha }}
+          path: sbom/
+          retention-days: 90
+
+      - name: Scan SBOMs for critical vulnerabilities (Grype)
+        uses: anchore/scan-action@v6
+        with:
+          sbom: sbom/frontend.cdx.json
+          fail-build: true
+          severity-cutoff: critical
+          output-format: sarif
+
+      - name: Upload Grype SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+          category: grype-ci
