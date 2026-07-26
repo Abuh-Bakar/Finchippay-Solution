@@ -181,7 +181,16 @@ function collectErrors(env) {
       );
     }
   }
-  // ANCHORS_CONFIG is optional but if set must be valid JSON.
+  // DATA_RETENTION_DAYS is optional; default is 365.
+  if (env.DATA_RETENTION_DAYS) {
+    const days = parseInt(env.DATA_RETENTION_DAYS, 10);
+    if (isNaN(days) || days < 1) {
+      errors.push(
+        `DATA_RETENTION_DAYS must be a positive integer, got "${env.DATA_RETENTION_DAYS}"`,
+      );
+    }
+  }
+    // ANCHORS_CONFIG is optional but if set must be valid JSON.
   if (env.ANCHORS_CONFIG) {
     try {
       JSON.parse(env.ANCHORS_CONFIG);
