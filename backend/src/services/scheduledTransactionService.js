@@ -22,7 +22,7 @@ const {
 const knex = require("../db/connection");
 const { server } = require("../config/stellar");
 const { validatePublicKey } = require("./stellarService");
-const webhookService = require("./webhookService");
+const webhookService = require("./webhookSubscriptionService");
 const logger = require("../utils/logger");
 
 const NETWORK_PASSPHRASE =
@@ -30,10 +30,7 @@ const NETWORK_PASSPHRASE =
     ? Networks.PUBLIC
     : Networks.TESTNET;
 
-// scheduleId -> node-cron task handle
 const activeCronJobs = new Map();
-
-// ─── Helpers ──────────────────────────────────────────────────────────────
 
 function toAsset(assetStr) {
   if (!assetStr || assetStr === "XLM") return Asset.native();
@@ -83,7 +80,7 @@ function estimateNextRun(frequency, fromDate) {
   if (frequency === "daily") next.setUTCDate(next.getUTCDate() + 1);
   else if (frequency === "weekly") next.setUTCDate(next.getUTCDate() + 7);
   else if (frequency === "monthly") next.setUTCMonth(next.getUTCMonth() + 1);
-  else return null; // raw cron: fired by node-cron directly, not tracked here
+  else return null;
   return next.toISOString();
 }
 
@@ -114,8 +111,6 @@ async function buildUnsignedPaymentXDR({
   return tx.toXDR();
 }
 
-// ─── Cron registry ────────────────────────────────────────────────────────
-
 function registerCronJob(schedule) {
   unregisterCronJob(schedule.id);
   const task = cron.schedule(
@@ -142,8 +137,6 @@ async function loadActiveSchedules() {
   logger.info({ count: rows.length }, "Loaded active scheduled transactions");
 }
 
-// ─── Execution ────────────────────────────────────────────────────────────
-
 async function notifyOwner(schedule, pendingId) {
   const hooks = await webhookService.getWebhooksByPublicKey(schedule.owner_pk);
 
@@ -156,7 +149,13 @@ async function notifyOwner(schedule, pendingId) {
     asset: schedule.asset,
   };
   await Promise.allSettled(
-    hooks.map((h) => webhookService.deliverWebhook(h, payload)),
+    hooks.map((hook) =>
+      webhookService.deliverWebhook(
+        hook,
+        payload,
+        "scheduled_transaction.pending_signature",
+      ),
+    ),
   );
 }
 
@@ -199,8 +198,6 @@ async function executeSchedule(scheduleId) {
     );
   }
 }
-
-// ─── CRUD ─────────────────────────────────────────────────────────────────
 
 async function createSchedule(body) {
   const {
