@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import Papa from "papaparse";
 import { isValidStellarAddress } from "@/lib/stellar";
 
@@ -93,38 +93,68 @@ export default function CSVUpload({ onImport, onCancel }: CSVUploadProps) {
   const [parsedRows, setParsedRows] = useState<ParsedRow[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [uploadedBytes, setUploadedBytes] = useState(0);
+  const [totalBytes, setTotalBytes] = useState(0);
 
-  const handleFileSelect = (file: File) => {
+  const handleFileSelect = useCallback((file: File) => {
     if (!file.name.endsWith(".csv")) {
       setUploadError("Please select a CSV file");
       return;
+    }
+
+    // Show progress for large files
+    const fileSize = file.size;
+    setTotalBytes(fileSize);
+    setUploadedBytes(0);
+    setUploadProgress(0);
+
+    // Simulate progress for large files (PapaParse doesn't have progress for local files)
+    if (fileSize > 500 * 1024) {
+      const progressInterval = setInterval(() => {
+        setUploadedBytes((prev) => {
+          const next = Math.min(prev + 50 * 1024, fileSize);
+          setUploadProgress((next / fileSize) * 100);
+          if (next >= fileSize) {
+            clearInterval(progressInterval);
+          }
+          return next;
+        });
+      }, 100);
     }
 
     Papa.parse(file, {
       header: false,
       skipEmptyLines: true,
       complete: (results) => {
+        setUploadProgress(100);
+        setUploadedBytes(fileSize);
+
         if (!results.data || results.data.length === 0) {
           setUploadError("CSV file is empty");
+          setUploadProgress(null);
           return;
         }
 
         const data = results.data as string[][];
         if (data.length < 2) {
           setUploadError("CSV must have headers and at least one data row");
+          setUploadProgress(null);
           return;
         }
 
         setHeaders(data[0]);
         setCSVData(data.slice(1));
         setUploadError(null);
+        setUploadProgress(null);
         setStep("mapping");
       },
       error: (error) => {
+        setUploadProgress(null);
         setUploadError(`CSV parsing error: ${error.message}`);
       },
     });
-  };
+  }, []);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -241,6 +271,34 @@ export default function CSVUpload({ onImport, onCancel }: CSVUploadProps) {
               </p>
             </div>
           </div>
+
+          {/* Upload progress indicator */}
+          {uploadProgress !== null && (
+            <div className="mt-4 space-y-2">
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                <span>
+                  {uploadedBytes < totalBytes
+                    ? "Uploading..."
+                    : "Processing..."}
+                </span>
+                <span>{Math.round(uploadProgress)}%</span>
+              </div>
+              <div className="h-2 rounded-full bg-white/5 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-stellar-500 transition-all duration-300 ease-out"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+              {totalBytes > 0 && (
+                <p className="text-xs text-slate-500">
+                  {(totalBytes / 1024).toFixed(1)} KB —{" "}
+                  {uploadProgress < 100
+                    ? `${(uploadedBytes / 1024).toFixed(1)} KB uploaded`
+                    : "Parsing rows..."}
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex gap-2">

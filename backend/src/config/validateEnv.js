@@ -205,6 +205,39 @@ function collectErrors(env) {
       'WEBHOOK_ENCRYPTION_KEY is required in production — generate one with: openssl rand -hex 32',
     );
   }
+
+  // BODY_LIMIT_JSON is optional (default: "1mb").
+  if (env.BODY_LIMIT_JSON) {
+    const val = String(env.BODY_LIMIT_JSON).trim();
+    const match = val.match(/^(\d+)(kb|mb|gb)$/i);
+    if (!match) {
+      errors.push(
+        `BODY_LIMIT_JSON must be a valid size string (e.g. "1mb", "512kb"), got "${val}"`,
+      );
+    }
+  }
+
+  // BODY_LIMIT_URLENCODED is optional (default: "100kb").
+  if (env.BODY_LIMIT_URLENCODED) {
+    const val = String(env.BODY_LIMIT_URLENCODED).trim();
+    const match = val.match(/^(\d+)(kb|mb|gb)$/i);
+    if (!match) {
+      errors.push(
+        `BODY_LIMIT_URLENCODED must be a valid size string (e.g. "100kb", "1mb"), got "${val}"`,
+      );
+    }
+  }
+
+  // CSV_UPLOAD_MAX_SIZE is optional (default: 10485760 for 10MB).
+  if (env.CSV_UPLOAD_MAX_SIZE) {
+    const val = parseInt(env.CSV_UPLOAD_MAX_SIZE, 10);
+    if (isNaN(val) || val < 1) {
+      errors.push(
+        `CSV_UPLOAD_MAX_SIZE must be a positive integer (bytes), got "${env.CSV_UPLOAD_MAX_SIZE}"`,
+      );
+    }
+  }
+
   return errors;
 }
 

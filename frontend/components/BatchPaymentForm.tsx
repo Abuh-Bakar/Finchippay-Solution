@@ -8,6 +8,9 @@ import {
   truncateMemoText,
 } from "@/lib/stellar";
 import { signTransactionWithWallet } from "@/lib/wallet";
+import PaymentBuilder, { type BuilderRecipient } from "@/components/PaymentBuilder";
+import QuickAddPanel from "@/components/QuickAddPanel";
+import BatchSummary from "@/components/BatchSummary";
 
 const MAX_RECIPIENTS = 10;
 
@@ -41,6 +44,7 @@ type BatchRecipient = {
 interface BatchPaymentFormProps {
   publicKey: string;
   xlmBalance: string;
+  usdcBalance?: string | null;
   onBatchSuccess?: () => void;
   services?: {
     buildPaymentTransaction?: typeof buildPaymentTransaction;
@@ -61,6 +65,7 @@ function createRecipient(): BatchRecipient {
 export default function BatchPaymentForm({
   publicKey,
   xlmBalance,
+  usdcBalance,
   onBatchSuccess,
   services,
 }: BatchPaymentFormProps) {
@@ -69,6 +74,8 @@ export default function BatchPaymentForm({
   ]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [batchMessage, setBatchMessage] = useState<string | null>(null);
+  const [useBuilderMode, setUseBuilderMode] = useState(false);
+  const [builderRecipients, setBuilderRecipients] = useState<BuilderRecipient[]>([]);
 
   const xlmBalanceValue = parseFloat(xlmBalance || "0");
   const availableXLM = Math.max(
@@ -378,6 +385,64 @@ export default function BatchPaymentForm({
             </span>
           </div>
         </div>
+
+        {/* Builder mode toggle */}
+        <div className="flex items-center justify-center gap-3 pt-2">
+          <button
+            type="button"
+            onClick={() => setUseBuilderMode(!useBuilderMode)}
+            className="text-xs text-stellar-400 hover:text-stellar-300 transition-colors"
+          >
+            {useBuilderMode ? "Switch to form mode" : "Switch to drag-and-drop builder"}
+          </button>
+        </div>
+
+        {/* Builder mode content */}
+        {useBuilderMode && (
+          <>
+            <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
+              <div className="space-y-4">
+                <PaymentBuilder
+                  publicKey={publicKey}
+                  onRecipientsChange={(bRecipients) => {
+                    setBuilderRecipients(bRecipients);
+                    // Sync builder recipients to form state for processing
+                    const synced = bRecipients
+                      .filter((r) => r.address && r.amount)
+                      .map((r) => {
+                        const existing = recipients.find((er) => er.id === r.id);
+                        return {
+                          id: r.id,
+                          address: r.address,
+                          amount: r.amount,
+                          memo: r.memo,
+                          token: { code: r.token.code, issuer: r.token.issuer, type: r.token.code === "XLM" ? "XLM" as const : "USDC" as const },
+                          status: existing?.status || ("idle" as RecipientStatus),
+                          error: existing?.error,
+                          transactionHash: existing?.transactionHash,
+                        };
+                      });
+                    setRecipients(synced);
+                  }}
+                />
+              </div>
+              <div className="space-y-4">
+                <QuickAddPanel
+                  xlmBalance={xlmBalance}
+                  usdcBalance={usdcBalance}
+                />
+                <BatchSummary
+                  recipients={builderRecipients.map((r) => ({
+                    token: { code: r.token.code, issuer: r.token.issuer },
+                    amount: r.amount,
+                    address: r.address,
+                  }))}
+                  maxRecipients={MAX_RECIPIENTS}
+                />
+              </div>
+            </div>
+          </>
+        )}
 
         {exceedsBalance ? (
           <div className="rounded-2xl bg-amber-500/10 border border-amber-500/20 px-4 py-3 text-sm text-amber-100">
