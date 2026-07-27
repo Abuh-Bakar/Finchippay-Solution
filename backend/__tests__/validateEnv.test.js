@@ -5,7 +5,10 @@
 
 "use strict";
 
-const { collectErrors, parseAllowedOrigins } = require("../src/config/validateEnv");
+const {
+  collectErrors,
+  parseAllowedOrigins,
+} = require("../src/config/validateEnv");
 
 // ─── collectErrors ────────────────────────────────────────────────────────────
 
@@ -15,7 +18,7 @@ describe("validateEnv.collectErrors", () => {
       collectErrors({
         STELLAR_NETWORK: "testnet",
         HORIZON_URL: "https://horizon-testnet.stellar.org",
-      })
+      }),
     ).toEqual([]);
   });
 
@@ -25,7 +28,7 @@ describe("validateEnv.collectErrors", () => {
       expect.arrayContaining([
         expect.stringContaining("STELLAR_NETWORK is required"),
         expect.stringContaining("HORIZON_URL is required"),
-      ])
+      ]),
     );
   });
 
@@ -36,8 +39,10 @@ describe("validateEnv.collectErrors", () => {
     });
     expect(errors).toEqual(
       expect.arrayContaining([
-        expect.stringContaining('STELLAR_NETWORK must be "testnet" or "mainnet"'),
-      ])
+        expect.stringContaining(
+          'STELLAR_NETWORK must be "testnet" or "mainnet"',
+        ),
+      ]),
     );
   });
 
@@ -47,8 +52,46 @@ describe("validateEnv.collectErrors", () => {
       HORIZON_URL: "not-a-url",
     });
     expect(errors).toEqual(
-      expect.arrayContaining([expect.stringContaining("HORIZON_URL must be a valid URL")])
+      expect.arrayContaining([
+        expect.stringContaining("HORIZON_URL must be a valid URL"),
+      ]),
     );
+  });
+
+  it("requires a strong rate-limit hash salt in production", () => {
+    const missingSalt = collectErrors({
+      NODE_ENV: "production",
+      STELLAR_NETWORK: "mainnet",
+      HORIZON_URL: "https://horizon.stellar.org",
+    });
+    const shortSalt = collectErrors({
+      NODE_ENV: "production",
+      STELLAR_NETWORK: "mainnet",
+      HORIZON_URL: "https://horizon.stellar.org",
+      RATE_LIMIT_IP_HASH_SALT: "too-short",
+    });
+
+    expect(missingSalt).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("RATE_LIMIT_IP_HASH_SALT is required"),
+      ]),
+    );
+    expect(shortSalt).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("must contain at least 32 characters"),
+      ]),
+    );
+  });
+
+  it("accepts a strong rate-limit hash salt in production", () => {
+    expect(
+      collectErrors({
+        NODE_ENV: "production",
+        STELLAR_NETWORK: "mainnet",
+        HORIZON_URL: "https://horizon.stellar.org",
+        RATE_LIMIT_IP_HASH_SALT: "a".repeat(32),
+      }),
+    ).toEqual([]);
   });
 
   it("returns no errors when ALLOWED_ORIGINS is absent (uses default)", () => {
@@ -57,7 +100,7 @@ describe("validateEnv.collectErrors", () => {
         STELLAR_NETWORK: "testnet",
         HORIZON_URL: "https://horizon-testnet.stellar.org",
         // ALLOWED_ORIGINS intentionally omitted
-      })
+      }),
     ).toEqual([]);
   });
 
@@ -67,7 +110,7 @@ describe("validateEnv.collectErrors", () => {
         STELLAR_NETWORK: "testnet",
         HORIZON_URL: "https://horizon-testnet.stellar.org",
         ALLOWED_ORIGINS: "https://app.example.com,http://localhost:3000",
-      })
+      }),
     ).toEqual([]);
   });
 
@@ -78,7 +121,9 @@ describe("validateEnv.collectErrors", () => {
       ALLOWED_ORIGINS: "https://app.example.com/,http://localhost:3000",
     });
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatch(/ALLOWED_ORIGINS entry "https:\/\/app\.example\.com\/" is malformed/);
+    expect(errors[0]).toMatch(
+      /ALLOWED_ORIGINS entry "https:\/\/app\.example\.com\/" is malformed/,
+    );
   });
 
   it("surfaces every malformed entry when multiple are present", () => {
@@ -99,7 +144,7 @@ describe("validateEnv.collectErrors", () => {
       collectErrors({
         STELLAR_NETWORK: "testnet",
         HORIZON_URL: "https://horizon-testnet.stellar.org",
-      })
+      }),
     ).toEqual([]);
   });
 
@@ -109,7 +154,7 @@ describe("validateEnv.collectErrors", () => {
         STELLAR_NETWORK: "testnet",
         HORIZON_URL: "https://horizon-testnet.stellar.org",
         OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4318",
-      })
+      }),
     ).toEqual([]);
   });
 
@@ -121,8 +166,10 @@ describe("validateEnv.collectErrors", () => {
     });
     expect(errors).toEqual(
       expect.arrayContaining([
-        expect.stringContaining("OTEL_EXPORTER_OTLP_ENDPOINT must be a valid URL"),
-      ])
+        expect.stringContaining(
+          "OTEL_EXPORTER_OTLP_ENDPOINT must be a valid URL",
+        ),
+      ]),
     );
   });
 
@@ -132,6 +179,42 @@ describe("validateEnv.collectErrors", () => {
         STELLAR_NETWORK: "testnet",
         HORIZON_URL: "https://horizon-testnet.stellar.org",
         OTEL_EXPORTER_OTLP_ENDPOINT: "https://tempo-prod.example.com:443",
+      }),
+    ).toEqual([]);
+  });
+
+  // ─── WEBHOOK_ENCRYPTION_KEY validation ─────────────────────────────────
+
+  it("does not require WEBHOOK_ENCRYPTION_KEY in non-production", () => {
+    expect(
+      collectErrors({
+        STELLAR_NETWORK: "testnet",
+        HORIZON_URL: "https://horizon-testnet.stellar.org",
+        NODE_ENV: "development",
+      })
+    ).toEqual([]);
+  });
+
+  it("requires WEBHOOK_ENCRYPTION_KEY in production", () => {
+    const errors = collectErrors({
+      STELLAR_NETWORK: "testnet",
+      HORIZON_URL: "https://horizon-testnet.stellar.org",
+      NODE_ENV: "production",
+    });
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("WEBHOOK_ENCRYPTION_KEY is required"),
+      ])
+    );
+  });
+
+  it("passes when WEBHOOK_ENCRYPTION_KEY is set in production", () => {
+    expect(
+      collectErrors({
+        STELLAR_NETWORK: "testnet",
+        HORIZON_URL: "https://horizon-testnet.stellar.org",
+        NODE_ENV: "production",
+        WEBHOOK_ENCRYPTION_KEY: "aaabbbcccdddeeefff000111222333444555666777888999000aaabbbcccdddee",
       })
     ).toEqual([]);
   });
@@ -153,7 +236,9 @@ describe("parseAllowedOrigins", () => {
   });
 
   it("parses a single valid https origin", () => {
-    const { origins, warnings } = parseAllowedOrigins("https://app.example.com");
+    const { origins, warnings } = parseAllowedOrigins(
+      "https://app.example.com",
+    );
     expect(origins).toEqual(["https://app.example.com"]);
     expect(warnings).toEqual([]);
   });
@@ -166,29 +251,39 @@ describe("parseAllowedOrigins", () => {
 
   it("parses multiple valid origins separated by commas", () => {
     const { origins, warnings } = parseAllowedOrigins(
-      "https://app.example.com,http://localhost:3000"
+      "https://app.example.com,http://localhost:3000",
     );
-    expect(origins).toEqual(["https://app.example.com", "http://localhost:3000"]);
+    expect(origins).toEqual([
+      "https://app.example.com",
+      "http://localhost:3000",
+    ]);
     expect(warnings).toEqual([]);
   });
 
   it("trims whitespace around each entry", () => {
     const { origins, warnings } = parseAllowedOrigins(
-      "  https://app.example.com , http://localhost:3000  "
+      "  https://app.example.com , http://localhost:3000  ",
     );
-    expect(origins).toEqual(["https://app.example.com", "http://localhost:3000"]);
+    expect(origins).toEqual([
+      "https://app.example.com",
+      "http://localhost:3000",
+    ]);
     expect(warnings).toEqual([]);
   });
 
   it("flags a trailing slash", () => {
-    const { origins, warnings } = parseAllowedOrigins("https://app.example.com/");
+    const { origins, warnings } = parseAllowedOrigins(
+      "https://app.example.com/",
+    );
     expect(origins).toEqual(["https://app.example.com/"]);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toMatch(/trailing slash/);
   });
 
   it("flags a path component", () => {
-    const { origins, warnings } = parseAllowedOrigins("https://app.example.com/sub");
+    const { origins, warnings } = parseAllowedOrigins(
+      "https://app.example.com/sub",
+    );
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toMatch(/"https:\/\/app\.example\.com\/sub"/);
   });
@@ -206,7 +301,9 @@ describe("parseAllowedOrigins", () => {
   });
 
   it("flags an ftp scheme as malformed", () => {
-    const { origins, warnings } = parseAllowedOrigins("ftp://files.example.com");
+    const { origins, warnings } = parseAllowedOrigins(
+      "ftp://files.example.com",
+    );
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toMatch(/"ftp:\/\/files\.example\.com"/);
   });
@@ -219,13 +316,17 @@ describe("parseAllowedOrigins", () => {
   });
 
   it("skips empty segments from double commas", () => {
-    const { origins, warnings } = parseAllowedOrigins("https://a.com,,https://b.com");
+    const { origins, warnings } = parseAllowedOrigins(
+      "https://a.com,,https://b.com",
+    );
     expect(origins).toEqual(["https://a.com", "https://b.com"]);
     expect(warnings).toEqual([]);
   });
 
   it("produces one warning per malformed entry", () => {
-    const { warnings } = parseAllowedOrigins("https://a.com/,*.evil.com,https://ok.com");
+    const { warnings } = parseAllowedOrigins(
+      "https://a.com/,*.evil.com,https://ok.com",
+    );
     expect(warnings).toHaveLength(2);
   });
 });

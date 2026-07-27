@@ -3,12 +3,13 @@ import React from "react";
 interface SkeletonProps {
   className?: string;
   height?: string;
+  width?: string;
 }
 
-export default function Skeleton({ className = "", height = "h-40" }: SkeletonProps) {
+export default function Skeleton({ className = "", height = "h-40", width }: SkeletonProps) {
   return (
     <div
-      className={`card border-white/10 bg-white/[0.03] animate-pulse flex flex-col justify-between p-6 ${height} ${className}`}
+      className={`card border-white/10 bg-white/[0.03] animate-pulse flex flex-col justify-between p-6 ${height} ${width ?? ""} ${className}`.trim()}
       role="status"
       aria-label="Loading content..."
     >

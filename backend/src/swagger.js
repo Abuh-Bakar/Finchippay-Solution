@@ -6,6 +6,10 @@
 "use strict";
 
 const swaggerJsdoc = require("swagger-jsdoc");
+const { ERROR_CODES } = require("../../shared/errorCodes");
+
+// Every code in the catalogue, so the spec can never drift from the registry.
+const ERROR_CODE_NAMES = Object.keys(ERROR_CODES).sort();
 
 const options = {
   definition: {
@@ -41,12 +45,90 @@ const options = {
       },
     ],
     components: {
+      parameters: {
+        PaginationLimit: {
+          name: "limit",
+          in: "query",
+          required: false,
+          description: "Page size. Defaults to 20; capped at 100 server-side.",
+          schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+        },
+        PaginationCursor: {
+          name: "cursor",
+          in: "query",
+          required: false,
+          description:
+            "Opaque cursor from a previous page's `Link` header or " +
+            "`pagination.nextCursor`. Omit for the first page.",
+          schema: { type: "string" },
+        },
+      },
+      headers: {
+        LinkHeader: {
+          description:
+            "RFC 5988 web-linking header. Present when another page exists: " +
+            '`</api/...?cursor=abc&limit=20>; rel="next"`.',
+          schema: { type: "string" },
+        },
+        XTotalCount: {
+          description: "Total number of records matching the query.",
+          schema: { type: "integer" },
+        },
+      },
       schemas: {
-        Error: {
+        ErrorResponse: {
           type: "object",
+          required: ["error"],
+          description:
+            "Canonical error body returned by every endpoint. The `error` key " +
+            "is always at the top level, so consumers written against the " +
+            "original `{ error }` contract keep working.",
           properties: {
-            error: { type: "string", description: "Error message" },
+            error: {
+              type: "object",
+              required: ["code", "message"],
+              properties: {
+                code: {
+                  $ref: "#/components/schemas/ErrorCode",
+                },
+                message: {
+                  type: "string",
+                  description: "Human-readable description of the failure.",
+                  example: "Invalid Stellar public key format.",
+                },
+                correlationId: {
+                  type: "string",
+                  description:
+                    "Matches the `X-Request-ID` response header and the " +
+                    "`correlationId` field in the server logs. Quote this " +
+                    "value when reporting a problem.",
+                  example: "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8",
+                },
+                details: {
+                  type: "object",
+                  additionalProperties: true,
+                  description:
+                    "Optional, code-specific context — the offending field, " +
+                    "the received value, and so on.",
+                  example: { fields: ["anchorName"] },
+                },
+              },
+            },
           },
+        },
+        ErrorCode: {
+          type: "string",
+          description:
+            "Machine-readable error code from the shared catalogue. The " +
+            "category prefix identifies the owning layer: CONTRACT_* is " +
+            "on-chain, WALLET_* is the browser wallet, and the rest are the " +
+            "API. See docs/error-codes.md.",
+          enum: ERROR_CODE_NAMES,
+          example: "VAL_INVALID_PUBLIC_KEY",
+        },
+        // Retained so any existing $ref to `Error` still resolves.
+        Error: {
+          allOf: [{ $ref: "#/components/schemas/ErrorResponse" }],
         },
         SuccessResponse: {
           type: "object",
@@ -353,6 +435,40 @@ const options = {
             createdAt: { type: "string", format: "date-time" },
           },
         },
+        PriceFeedProviderStatus: {
+          type: "object",
+          properties: {
+            status: {
+              type: "string",
+              enum: ["ok", "error", "unknown"],
+              description: "Outcome of the most recent probe to this provider",
+            },
+            latencyMs: {
+              type: "number",
+              nullable: true,
+              description: "Most recent probe latency in milliseconds",
+            },
+            lastError: {
+              type: "string",
+              nullable: true,
+              description: "Most recent error message, if any",
+            },
+            lastSuccessAt: {
+              type: "string",
+              format: "date-time",
+              nullable: true,
+            },
+            cacheAgeMs: {
+              type: "number",
+              nullable: true,
+              description: "Age of the cached price, in milliseconds",
+            },
+            cachedPrice: {
+              type: "number",
+              nullable: true,
+            },
+          },
+        },
       },
     },
     paths: {
@@ -599,23 +715,21 @@ const options = {
               required: true,
               schema: { type: "string", pattern: "^G[A-Z0-9]{55}$" },
             },
-            {
-              name: "limit",
-              in: "query",
-              schema: { type: "integer", default: 20, maximum: 100 },
-              description: "Number of results per page",
-            },
-            {
-              name: "cursor",
-              in: "query",
-              schema: { type: "string" },
-              description: "Pagination cursor",
-            },
+            { $ref: "#/components/parameters/PaginationLimit" },
+            { $ref: "#/components/parameters/PaginationCursor" },
           ],
           responses: {
             200: {
-              description: "Payment history",
+              description: "Payment history (one page)",
               headers: {
+                Link: { $ref: "#/components/headers/LinkHeader" },
+                "X-Total-Count": {
+                  description:
+                    "Approximate, bounded total for this account's payments. " +
+                    "Horizon exposes no exact count, so this is a floor capped " +
+                    "at 200 (the value may be higher than reported).",
+                  schema: { type: "integer" },
+                },
                 "RateLimit-Limit": {
                   schema: { type: "integer", example: 100 },
                 },
@@ -631,6 +745,14 @@ const options = {
                       data: {
                         type: "array",
                         items: { $ref: "#/components/schemas/PaymentRecord" },
+                      },
+                      pagination: {
+                        type: "object",
+                        properties: {
+                          nextCursor: { type: "string", nullable: true },
+                          total: { type: "integer" },
+                          limit: { type: "integer" },
+                        },
                       },
                     },
                   },
@@ -772,7 +894,7 @@ const options = {
       "/api/tips/received/{creatorPublicKey}": {
         get: {
           tags: ["Tips"],
-          summary: "Get tips received by a creator",
+          summary: "Get tips received by a creator (cursor-paginated)",
           parameters: [
             {
               name: "creatorPublicKey",
@@ -780,10 +902,16 @@ const options = {
               required: true,
               schema: { type: "string", pattern: "^G[A-Z0-9]{55}$" },
             },
+            { $ref: "#/components/parameters/PaginationLimit" },
+            { $ref: "#/components/parameters/PaginationCursor" },
           ],
           responses: {
             200: {
-              description: "Received tips",
+              description: "Received tips (one page)",
+              headers: {
+                Link: { $ref: "#/components/headers/LinkHeader" },
+                "X-Total-Count": { $ref: "#/components/headers/XTotalCount" },
+              },
               content: {
                 "application/json": {
                   schema: {
@@ -793,6 +921,14 @@ const options = {
                       data: {
                         type: "array",
                         items: { $ref: "#/components/schemas/Tip" },
+                      },
+                      pagination: {
+                        type: "object",
+                        properties: {
+                          nextCursor: { type: "string", nullable: true },
+                          total: { type: "integer" },
+                          limit: { type: "integer" },
+                        },
                       },
                     },
                   },
@@ -805,7 +941,7 @@ const options = {
       "/api/tips/sent/{senderPublicKey}": {
         get: {
           tags: ["Tips"],
-          summary: "Get tips sent by an account",
+          summary: "Get tips sent by an account (cursor-paginated)",
           parameters: [
             {
               name: "senderPublicKey",
@@ -813,10 +949,16 @@ const options = {
               required: true,
               schema: { type: "string", pattern: "^G[A-Z0-9]{55}$" },
             },
+            { $ref: "#/components/parameters/PaginationLimit" },
+            { $ref: "#/components/parameters/PaginationCursor" },
           ],
           responses: {
             200: {
-              description: "Sent tips",
+              description: "Sent tips (one page)",
+              headers: {
+                Link: { $ref: "#/components/headers/LinkHeader" },
+                "X-Total-Count": { $ref: "#/components/headers/XTotalCount" },
+              },
               content: {
                 "application/json": {
                   schema: {
@@ -826,6 +968,171 @@ const options = {
                       data: {
                         type: "array",
                         items: { $ref: "#/components/schemas/Tip" },
+                      },
+                      pagination: {
+                        type: "object",
+                        properties: {
+                          nextCursor: { type: "string", nullable: true },
+                          total: { type: "integer" },
+                          limit: { type: "integer" },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/webhooks/{publicKey}": {
+        get: {
+          tags: ["Webhooks"],
+          summary: "List webhooks for an account (cursor-paginated)",
+          parameters: [
+            {
+              name: "publicKey",
+              in: "path",
+              required: true,
+              schema: { type: "string", pattern: "^G[A-Z2-7]{55}$" },
+            },
+            { $ref: "#/components/parameters/PaginationLimit" },
+            { $ref: "#/components/parameters/PaginationCursor" },
+          ],
+          responses: {
+            200: {
+              description: "Registered webhooks (one page)",
+              headers: {
+                Link: { $ref: "#/components/headers/LinkHeader" },
+                "X-Total-Count": { $ref: "#/components/headers/XTotalCount" },
+              },
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      webhooks: { type: "array", items: { type: "object" } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/webhooks/{publicKey}/failures": {
+        get: {
+          tags: ["Webhooks"],
+          summary: "List dead-letter deliveries (cursor-paginated)",
+          parameters: [
+            {
+              name: "publicKey",
+              in: "path",
+              required: true,
+              schema: { type: "string", pattern: "^G[A-Z2-7]{55}$" },
+            },
+            { $ref: "#/components/parameters/PaginationLimit" },
+            { $ref: "#/components/parameters/PaginationCursor" },
+          ],
+          responses: {
+            200: {
+              description: "Failed deliveries (one page)",
+              headers: {
+                Link: { $ref: "#/components/headers/LinkHeader" },
+                "X-Total-Count": { $ref: "#/components/headers/XTotalCount" },
+              },
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      failures: { type: "array", items: { type: "object" } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/scheduled-transactions/{publicKey}": {
+        get: {
+          tags: ["Scheduled Transactions"],
+          summary: "List scheduled transactions (cursor-paginated)",
+          parameters: [
+            {
+              name: "publicKey",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+            { $ref: "#/components/parameters/PaginationLimit" },
+            { $ref: "#/components/parameters/PaginationCursor" },
+          ],
+          responses: {
+            200: {
+              description: "Scheduled transactions (one page)",
+              headers: {
+                Link: { $ref: "#/components/headers/LinkHeader" },
+                "X-Total-Count": { $ref: "#/components/headers/XTotalCount" },
+              },
+              content: {
+                "application/json": {
+                  schema: { type: "array", items: { type: "object" } },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/events/{publicKey}": {
+        get: {
+          tags: ["Events"],
+          summary: "List contract events for a participant (paginated)",
+          description:
+            "Supports both `offset` and opaque `cursor` navigation. When more " +
+            'results exist, a `Link: rel="next"` header and ' +
+            "`pagination.nextCursor` are returned.",
+          parameters: [
+            {
+              name: "publicKey",
+              in: "path",
+              required: true,
+              schema: { type: "string", pattern: "^G[A-Z2-7]{55}$" },
+            },
+            { $ref: "#/components/parameters/PaginationLimit" },
+            { $ref: "#/components/parameters/PaginationCursor" },
+            {
+              name: "offset",
+              in: "query",
+              required: false,
+              description: "0-based offset (alternative to cursor).",
+              schema: { type: "integer", minimum: 0, default: 0 },
+            },
+          ],
+          responses: {
+            200: {
+              description: "Contract events (one page)",
+              headers: {
+                Link: { $ref: "#/components/headers/LinkHeader" },
+                "X-Total-Count": { $ref: "#/components/headers/XTotalCount" },
+              },
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      success: { type: "boolean" },
+                      data: { type: "array", items: { type: "object" } },
+                      pagination: {
+                        type: "object",
+                        properties: {
+                          limit: { type: "integer" },
+                          offset: { type: "integer" },
+                          total: { type: "integer" },
+                          hasMore: { type: "boolean" },
+                          nextCursor: { type: "string", nullable: true },
+                        },
                       },
                     },
                   },
@@ -890,6 +1197,87 @@ const options = {
           responses: {
             200: { description: "Tip recorded" },
             400: { description: "Invalid tip data" },
+          },
+        },
+      },
+      "/api/turrets/health": {
+        get: {
+          tags: ["Turrets"],
+          summary: "Turrets subsystem health (incl. price feed)",
+          description:
+            "Reports deployment counts, per-provider price-feed status, the active provider, and the freshness of the price cache. Returns 200 when at least one provider is healthy, 503 when every provider is currently down (the runner cannot evaluate stop-loss or DCA txFunctions without a price).",
+          responses: {
+            200: {
+              description: "Turrets subsystem is healthy",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      success: { type: "boolean", example: true },
+                      data: {
+                        type: "object",
+                        properties: {
+                          status: { type: "string", enum: ["ok", "degraded"] },
+                          priceFeed: {
+                            type: "object",
+                            properties: {
+                              activeProvider: {
+                                type: "string",
+                                nullable: true,
+                                enum: ["coingecko", "binance", "coincap"],
+                              },
+                              activeProviderAt: {
+                                type: "string",
+                                format: "date-time",
+                                nullable: true,
+                              },
+                              cacheTtlMs: { type: "integer", example: 30000 },
+                              timeoutMs: { type: "integer", example: 5000 },
+                              providers: {
+                                type: "object",
+                                additionalProperties: {
+                                  $ref: "#/components/schemas/PriceFeedProviderStatus",
+                                },
+                              },
+                              activePrice: {
+                                type: "object",
+                                nullable: true,
+                                properties: {
+                                  price: { type: "number" },
+                                  source: { type: "string" },
+                                  timestamp: {
+                                    type: "string",
+                                    format: "date-time",
+                                  },
+                                },
+                              },
+                            },
+                          },
+                          deployments: {
+                            type: "object",
+                            properties: {
+                              active: { type: "integer" },
+                              paused: { type: "integer" },
+                              total: { type: "integer" },
+                            },
+                          },
+                          uptime: { type: "number" },
+                          timestamp: {
+                            type: "string",
+                            format: "date-time",
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            503: {
+              description:
+                "Every price provider is currently unreachable. Stop-loss and DCA evaluations will fail until at least one provider recovers.",
+            },
           },
         },
       },
@@ -1481,5 +1869,87 @@ const options = {
   },
   apis: [],
 };
+
+// ─── Error responses ─────────────────────────────────────────────────────────
+
+/**
+ * Reusable error responses, one per HTTP status the API can return.
+ * Referenced as `$ref: "#/components/responses/BadRequest"` and used as the
+ * default content for any documented error status that lacks its own schema.
+ */
+const ERROR_RESPONSES = {
+  400: ["BadRequest", "The request was rejected by validation."],
+  401: ["Unauthorized", "Authentication is missing, invalid, or expired."],
+  403: ["Forbidden", "The caller may not access this resource."],
+  404: ["NotFound", "The requested resource does not exist."],
+  409: ["Conflict", "The resource is in a state that blocks this operation."],
+  410: ["Gone", "The resource is no longer available."],
+  413: ["PayloadTooLarge", "The request body exceeds the maximum size."],
+  415: ["UnsupportedMediaType", "Content-Type must be application/json."],
+  422: ["UnprocessableEntity", "An upstream service rejected the request."],
+  429: ["TooManyRequests", "The rate limit for this route was exceeded."],
+  500: ["InternalServerError", "An unexpected server error occurred."],
+  501: ["NotImplemented", "The feature is not enabled on this deployment."],
+  502: ["BadGateway", "An upstream service (Horizon, anchor) failed."],
+  503: ["ServiceUnavailable", "The service is temporarily unavailable."],
+  504: ["GatewayTimeout", "An upstream service did not respond in time."],
+};
+
+/** Response object carrying the canonical error body. */
+function errorResponseObject(description) {
+  return {
+    description,
+    headers: {
+      "X-Request-ID": {
+        description:
+          "Correlation ID for this request. Matches `error.correlationId`.",
+        schema: { type: "string" },
+      },
+    },
+    content: {
+      "application/json": {
+        schema: { $ref: "#/components/schemas/ErrorResponse" },
+      },
+    },
+  };
+}
+
+options.definition.components.responses = Object.fromEntries(
+  Object.values(ERROR_RESPONSES).map(([name, description]) => [
+    name,
+    errorResponseObject(description),
+  ]),
+);
+
+/**
+ * Give every documented error status a response schema.
+ *
+ * Most path entries declare error statuses as a bare `{ description: "..." }`,
+ * which renders in Swagger UI without a body. Rather than restate the schema at
+ * every one of them — and require every future endpoint to remember to — this
+ * walks the spec once and fills in the canonical error content, keeping each
+ * endpoint's own description. Entries that already define `content` are left
+ * untouched.
+ */
+function attachErrorSchemas(paths) {
+  for (const pathItem of Object.values(paths || {})) {
+    for (const operation of Object.values(pathItem)) {
+      const responses = operation?.responses;
+      if (!responses) continue;
+
+      for (const [status, response] of Object.entries(responses)) {
+        const code = Number(status);
+        if (!ERROR_RESPONSES[code]) continue;
+        if (!response || response.$ref || response.content) continue;
+
+        responses[status] = errorResponseObject(
+          response.description || ERROR_RESPONSES[code][1],
+        );
+      }
+    }
+  }
+}
+
+attachErrorSchemas(options.definition.paths);
 
 module.exports = swaggerJsdoc(options);

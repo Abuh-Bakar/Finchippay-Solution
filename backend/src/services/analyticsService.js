@@ -7,6 +7,8 @@
 
 "use strict";
 
+const logger = require("../utils/logger");
+
 const stellarService = require("./stellarService");
 
 // Lazy-loaded cache service (avoids circular dependency at parse time)
@@ -41,7 +43,9 @@ async function withCache(key, fn) {
  */
 async function getSummary(publicKey) {
   return withCache(`analytics:summary:${publicKey}`, async () => {
-    const payments = await stellarService.getPayments(publicKey, { limit: 200 });
+    const payments = await stellarService.getPayments(publicKey, {
+      limit: 200,
+    });
 
     let totalSent = 0;
     let totalReceived = 0;
@@ -81,7 +85,9 @@ async function getSummary(publicKey) {
  */
 async function getTopRecipients(publicKey) {
   return withCache(`analytics:top-recipients:${publicKey}`, async () => {
-    const payments = await stellarService.getPayments(publicKey, { limit: 200 });
+    const payments = await stellarService.getPayments(publicKey, {
+      limit: 200,
+    });
 
     // Map to track total sent per recipient
     const recipientTotals = new Map();
@@ -126,7 +132,9 @@ async function getTopRecipients(publicKey) {
  */
 async function getActivityByDay(publicKey) {
   return withCache(`analytics:activity:${publicKey}`, async () => {
-    const payments = await stellarService.getPayments(publicKey, { limit: 200 });
+    const payments = await stellarService.getPayments(publicKey, {
+      limit: 200,
+    });
 
     // Initialize counters for all 7 days
     const dayActivity = {
@@ -161,8 +169,65 @@ async function getActivityByDay(publicKey) {
   });
 }
 
+/**
+ * Clear all cached analytics entries for a public key.
+ *
+ * Used by tests and by internal callers that need to force a refresh after
+ * on-chain activity they know about (e.g. a newly recorded tip).
+ *
+ * @param {string} publicKey
+ */
+async function clearCache(publicKey) {
+  const cache = getCache();
+  await cache.del(`analytics:summary:${publicKey}`);
+  await cache.del(`analytics:top-recipients:${publicKey}`);
+  await cache.del(`analytics:activity:${publicKey}`);
+}
+
+/**
+ * Get platform-wide receipt count from the on-chain contract.
+ * This uses the total_receipt_count() view function from the FinchippayContract.
+ *
+ * Note: This requires the Soroban contract to be deployed and accessible.
+ * The contract address should be configured via environment variable CONTRACT_ADDRESS.
+ *
+ * @returns {Promise<{totalReceiptCount: number}>}
+ */
+async function getTotalReceiptCount() {
+  return withCache("analytics:total-receipt-count", async () => {
+    const contractAddress = process.env.CONTRACT_ADDRESS;
+
+    if (!contractAddress) {
+      return { totalReceiptCount: 0 };
+    }
+
+    try {
+      const { Server } = require("@stellar/soroban-sdk");
+
+      const server = new Server(process.env.SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org");
+      const contract = new Contract(contractAddress);
+
+      const result = await server.simulateTransaction(
+        new TransactionBuilder(new Account("GAAAA", "0"), { fee: "100" })
+          .addOperation(contract.call("total_receipt_count"))
+          .setTimeout(30)
+          .build()
+      );
+
+      const totalReceiptCount = Number(result.result.toXdr("base64"));
+
+      return { totalReceiptCount };
+    } catch (error) {
+      logger.error({ error }, "Failed to fetch total receipt count from contract");
+      return { totalReceiptCount: 0 };
+    }
+  });
+}
+
 module.exports = {
   getSummary,
   getTopRecipients,
   getActivityByDay,
+  clearCache,
+  getTotalReceiptCount,
 };
