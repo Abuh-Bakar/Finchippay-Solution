@@ -2,6 +2,7 @@
   "nav": {
     "home": "Accueil",
     "dashboard": "Tableau de Bord",
+    "portfolio": "Portefeuille",
     "trade": "Échange",
     "transactions": "Transactions",
     "network": "Réseau",
@@ -150,6 +151,24 @@
     "balanceLive": "En direct",
     "balancePolling": "Mise a jour toutes les 30 s"
   },
+  "portfolio": {
+    "title": "Portefeuille",
+    "addToken": "Ajouter un jeton",
+    "addTokenPlaceholder": "Contract ID (C...)",
+    "addTokenInvalid": "Cela ne ressemble pas a un contract ID Soroban valide.",
+    "addTokenButton": "Ajouter",
+    "currency": "Devise",
+    "totalValue": "Valeur Totale",
+    "change24h": "Variation 24h",
+    "allocation": "Répartition",
+    "priceHistory": "Historique des Prix",
+    "range7d": "7J",
+    "range30d": "30J",
+    "range90d": "90J",
+    "noHoldings": "Aucun jeton dans le portefeuille pour le moment.",
+    "priceUnavailable": "Prix indisponible",
+    "priceHistoryUnavailable": "Historique de prix indisponible pour ce jeton."
+  },
   "sendPayment": {
     "title": "Envoyer un Paiement",
     "destination": "Destination",
@@ -174,6 +193,10 @@
     "confirmPayment": "Confirmer le Paiement",
     "to": "À",
     "estimatedFee": "Frais Estimés",
+    "networkFee": "Frais de Réseau",
+    "feeEconomy": "Économique",
+    "feeStandard": "Standard",
+    "feeFast": "Rapide",
     "confirmAndSign": "Confirmer et Signer",
     "successTitle": "Paiement envoyé !",
     "successMessage": "Votre paiement a été confirmé sur le réseau Stellar.",

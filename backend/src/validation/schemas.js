@@ -394,6 +394,20 @@ const sep24DepositWithdrawSchema = z.object({
   token: z.string().optional(),
 });
 
+// ─── tokens ───────────────────────────────────────────────────────────────────
+
+/** GET /api/v1/tokens/:contractId/price-history — path params */
+const tokenContractIdParamSchema = z.object({
+  contractId: z
+    .string({ required_error: "contractId is required" })
+    .regex(/^C[A-Z2-7]{55}$/, "Invalid Soroban contract ID format"),
+});
+
+/** GET /api/v1/tokens/:contractId/price-history — query params */
+const tokenPriceHistoryQuerySchema = z.object({
+  range: z.enum(["7d", "30d", "90d"]).default("30d"),
+});
+
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -446,4 +460,7 @@ module.exports = {
   adminToggleFlagSchema,
   // sep24 deposit/withdraw
   sep24DepositWithdrawSchema,
+  // tokens
+  tokenContractIdParamSchema,
+  tokenPriceHistoryQuerySchema,
 };

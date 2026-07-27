@@ -1202,6 +1202,24 @@ export async function getContractTipTotal(recipient: string): Promise<string> {
   }
 }
 
+/**
+ * Query the number of tips recorded on-chain for a specific recipient.
+ *
+ * @param recipient - The Stellar public key of the recipient.
+ * @returns A promise resolving to the tip count.
+ */
+export async function getContractTipCount(recipient: string): Promise<number> {
+  if (!CONTRACT_ID) return 0;
+
+  try {
+    const client = new FinchippayContractClient(CONTRACT_ID);
+    return await client.getTipCount(recipient);
+  } catch (err) {
+    console.error("Failed to query tip count:", err);
+    return 0;
+  }
+}
+
 // ─── NFT Receipts ───────────────────────────────────────────────────────────
 
 /**

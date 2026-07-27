@@ -47,6 +47,7 @@ const sep38Routes = require("./routes/sep38");
 const eventRoutes = require("./routes/events");
 const featuresRoutes = require("./routes/features");
 const adminFeatureFlagsRoutes = require("./routes/adminFeatureFlags");
+const tokensRoutes = require("./routes/tokens");
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./swagger");
 const { startTurretsServer } = require("./turretsServer");
@@ -207,7 +208,9 @@ app.use(
       }
     },
     methods: ["GET", "POST", "DELETE"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    // traceparent/tracestate: W3C Trace Context headers the frontend's
+    // OpenTelemetry instrumentation attaches to every fetch() call.
+    allowedHeaders: ["Content-Type", "Authorization", "traceparent", "tracestate"],
     credentials: true,
   }),
 );
@@ -264,6 +267,7 @@ app.use("/api/sep12", sep12Routes);
 app.use("/sep38", sep38Routes);
 app.use("/api/features", featuresRoutes);
 app.use("/api/admin/feature-flags", adminFeatureFlagsRoutes);
+app.use("/api/v1/tokens", tokensRoutes);
 app.use("/federation", federationRoutes);
 app.use("/metrics", metricsRoutes);
 
