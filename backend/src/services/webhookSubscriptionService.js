@@ -75,7 +75,13 @@ async function registerWebhook(publicKey, url, secret, topics = ["all"]) {
 
 async function getWebhooksByPublicKey(publicKey) {
   const hooks = await getWebhookRecordsByPublicKey(publicKey);
-  return hooks.map(({ secret: _secret, ...hook }) => hook);
+  return hooks.map(({ id, publicKey: key, url, topics, createdAt }) => ({
+    id,
+    publicKey: key,
+    url,
+    topics,
+    createdAt,
+  }));
 }
 
 async function deliverWebhook(webhook, payload, eventType = "payment.received") {
