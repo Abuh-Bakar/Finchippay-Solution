@@ -1,4 +1,4 @@
-# Workflow for Issue #110: Contributor Onboarding Guide and Dev Environment Setup
+# Workflow for Issue #110: Contributors Onboarding Guide and Dev Environment Setup
 
 This document outlines the steps to address Issue #110, focusing on creating a comprehensive contributor onboarding guide and an automated development environment setup script.
 
