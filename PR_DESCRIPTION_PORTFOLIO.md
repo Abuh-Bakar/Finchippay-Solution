@@ -1,6 +1,6 @@
 ## Summary
 
-Adds an interactive token portfolio dashboard (`/portfolio`): total value, 24h change, an allocation donut chart, and per-token price history (7d/30d/90d), backed by a new cached price-history endpoint. Also includes six small, isolated fixes for pre-existing bugs that were blocking the build and manual QA of this feature.
+Adds an interactive token portfolio dashboard (`/portfolio`): total value, 24h change, an allocation donut chart, and per-token price history (7d/30d/90d), backed by a new cached price-history endpoint. Also includes seven small, isolated fixes for pre-existing bugs that were blocking the build and manual QA of this feature.
 
 ## Type of change
 
@@ -39,6 +39,7 @@ Closes #362
 4. `frontend/lib/stellar.ts` — added the missing `getContractTipCount()` wrapper (`CreatorTipsDashboard.tsx` called it; the underlying contract-client method already existed).
 5. `frontend/pages/settings.tsx` — duplicate `signTransactionWithWallet` import broke compilation of `/settings`.
 6. `backend/src/server.js` — CORS `allowedHeaders` was missing `traceparent`/`tracestate` (headers the frontend's OpenTelemetry instrumentation attaches to every request), which was silently blocking `/api/features` and the SEP-10 login flow in the browser.
+7. `frontend/jest.config.js` / `frontend/jest.config.ts` — merging in `upstream/master` (23 commits this branch was missing) brought a duplicate, incomplete `jest.config.js` that shadowed the working `jest.config.ts` and broke every `.tsx` test suite. Removed the redundant config and aligned `jest.config.ts` with how `upstream/master` now loads `jest.setup.ts`/`@testing-library/jest-dom`.
 
 ## Testing
 
@@ -57,7 +58,7 @@ Closes #362
 ## Known limitations (out of scope for this PR)
 
 - Custom tokens added by contract ID show "Price unavailable" unless they're XLM or USDC — there's no way in this codebase yet to resolve an arbitrary Soroban contract to a price feed or to its symbol/name. This was a deliberate scope decision made during planning, not an oversight.
-- `npm run build` still fails for the repo as a whole — a pre-existing chain of ~75 unrelated TypeScript errors (e.g. `components/HighlightedTransactionRow.tsx`, `components/RecurringPayments.tsx`'s missing `listStreamsByPayer`) blocks it. None of these files are touched by this PR. Because the E2E CI job serves a production build, it cannot currently run to completion in CI either, even though the new E2E test passes locally against `next dev`.
+- `npm run build` still fails for the repo as a whole — re-checked after merging `upstream/master` in, still fails at the same pre-existing, unrelated error (`components/HighlightedTransactionRow.tsx:78`, a type comparison with no overlap), part of a larger chain of ~75 pre-existing TypeScript errors (also `components/RecurringPayments.tsx`'s missing `listStreamsByPayer`, etc). None of these files are touched by this PR. Because the E2E CI job serves a production build, it cannot currently run to completion in CI either, even though the new E2E test passes locally against `next dev`.
 - `npm run i18n:check` can't run in this environment — `i18next-scanner` was never added as a dependency despite the script referencing it. Locale JSON was instead validated with `JSON.parse` on all 5 files.
 - A pre-existing, app-wide Next.js dev-mode hydration warning (reproducible on `master` via the existing `wallet-connect.spec.ts`) renders a click-intercepting error overlay in `next dev` only; it doesn't affect production builds. The new E2E test works around it defensively rather than fixing the root cause.
 
@@ -70,4 +71,4 @@ Not captured — this PR was built and verified without browser-automation tooli
 - [x] My code follows the project style
 - [x] I've updated docs if needed (i18n strings, this PR description)
 - [ ] No console errors or warnings — see "Known limitations": a pre-existing, unrelated hydration warning appears in `next dev` on every page, including this one
-- [ ] I've rebased on latest `main` — please confirm before merge
+- [x] I've rebased on latest `main` — merged `upstream/master` (23 commits) in, resolved a real content conflict in `ar`/`he` locale files, and fixed a Jest config regression that merge introduced
