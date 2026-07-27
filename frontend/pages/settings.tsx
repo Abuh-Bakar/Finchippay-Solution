@@ -18,6 +18,7 @@ import {
   TurretsDeployment,
 } from "@/lib/turrets";
 import { shortenAddress } from "@/lib/stellar";
+import { resetTour } from '@/lib/onboardingState';
 import { SUPPORTED_LANGUAGES, getCurrentLanguage, setLanguage, type SupportedLanguage } from "@/lib/i18n";
 
 interface SettingsPageProps {
