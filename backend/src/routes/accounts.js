@@ -57,13 +57,7 @@ router.get(
   "/resolve/:username",
   sensitiveLimiter,
   sanitizeUsername,
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
   validate(usernameParamSchema, "params"),
-
- #136-Issue-#14-Database-Backed-Turrets-with-Price-Feed-Fallbacks-FIX
-
- master
- master
   accountController.resolveUsername,
 );
 
@@ -76,9 +70,7 @@ router.get(
   sensitiveLimiter,
   verifyJWT,
   sanitizePublicKey,
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
   validate(publicKeyParamSchema, "params"),
- master
   requireOwnAccount,
   accountController.getAccount,
 );
@@ -92,33 +84,10 @@ router.get(
   sensitiveLimiter,
   verifyJWT,
   sanitizePublicKey,
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
   validate(publicKeyParamSchema, "params"),
   requireOwnAccount,
   accountController.getBalance,
 );
-
-  requireOwnAccount,
-  accountController.getBalance,
-);
-
-/**
- * GET /api/accounts/:publicKey/stream
- * Server-Sent Events stream of XLM balance updates for an account.
- *
- * Long-lived by design, so the sensitive limiter is deliberately omitted — one
- * connection is one request, and it would otherwise be counted against a user
- * who simply left the dashboard open.
- */
-router.get(
-  "/:publicKey/stream",
-  acceptTokenFromQuery,
-  verifyJWT,
-  sanitizePublicKey,
-  requireOwnAccount,
-  accountController.streamBalance,
-);
- master
 
 /**
  * GET /api/accounts/:publicKey/stream
@@ -146,6 +115,34 @@ router.post(
   strictLimiter,
   validate(registerUsernameSchema),
   accountController.registerUsername,
+);
+
+/**
+ * POST /api/accounts/:publicKey/gdpr-delete
+ * Anonymize stored off-chain data for the account (GDPR/CCPA #76).
+ */
+router.post(
+  "/:publicKey/gdpr-delete",
+  sensitiveLimiter,
+  verifyJWT,
+  sanitizePublicKey,
+  validate(publicKeyParamSchema, "params"),
+  requireOwnAccount,
+  accountController.gdprDelete,
+);
+
+/**
+ * GET /api/accounts/:publicKey/gdpr-export
+ * Return all stored off-chain data for the account as JSON (GDPR/CCPA #76).
+ */
+router.get(
+  "/:publicKey/gdpr-export",
+  sensitiveLimiter,
+  verifyJWT,
+  sanitizePublicKey,
+  validate(publicKeyParamSchema, "params"),
+  requireOwnAccount,
+  accountController.gdprExport,
 );
 
 module.exports = router;

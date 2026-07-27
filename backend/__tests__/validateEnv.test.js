@@ -58,6 +58,42 @@ describe("validateEnv.collectErrors", () => {
     );
   });
 
+  it("requires a strong rate-limit hash salt in production", () => {
+    const missingSalt = collectErrors({
+      NODE_ENV: "production",
+      STELLAR_NETWORK: "mainnet",
+      HORIZON_URL: "https://horizon.stellar.org",
+    });
+    const shortSalt = collectErrors({
+      NODE_ENV: "production",
+      STELLAR_NETWORK: "mainnet",
+      HORIZON_URL: "https://horizon.stellar.org",
+      RATE_LIMIT_IP_HASH_SALT: "too-short",
+    });
+
+    expect(missingSalt).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("RATE_LIMIT_IP_HASH_SALT is required"),
+      ]),
+    );
+    expect(shortSalt).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("must contain at least 32 characters"),
+      ]),
+    );
+  });
+
+  it("accepts a strong rate-limit hash salt in production", () => {
+    expect(
+      collectErrors({
+        NODE_ENV: "production",
+        STELLAR_NETWORK: "mainnet",
+        HORIZON_URL: "https://horizon.stellar.org",
+        RATE_LIMIT_IP_HASH_SALT: "a".repeat(32),
+      }),
+    ).toEqual([]);
+  });
+
   it("returns no errors when ALLOWED_ORIGINS is absent (uses default)", () => {
     expect(
       collectErrors({
@@ -144,6 +180,42 @@ describe("validateEnv.collectErrors", () => {
         HORIZON_URL: "https://horizon-testnet.stellar.org",
         OTEL_EXPORTER_OTLP_ENDPOINT: "https://tempo-prod.example.com:443",
       }),
+    ).toEqual([]);
+  });
+
+  // ─── WEBHOOK_ENCRYPTION_KEY validation ─────────────────────────────────
+
+  it("does not require WEBHOOK_ENCRYPTION_KEY in non-production", () => {
+    expect(
+      collectErrors({
+        STELLAR_NETWORK: "testnet",
+        HORIZON_URL: "https://horizon-testnet.stellar.org",
+        NODE_ENV: "development",
+      })
+    ).toEqual([]);
+  });
+
+  it("requires WEBHOOK_ENCRYPTION_KEY in production", () => {
+    const errors = collectErrors({
+      STELLAR_NETWORK: "testnet",
+      HORIZON_URL: "https://horizon-testnet.stellar.org",
+      NODE_ENV: "production",
+    });
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("WEBHOOK_ENCRYPTION_KEY is required"),
+      ])
+    );
+  });
+
+  it("passes when WEBHOOK_ENCRYPTION_KEY is set in production", () => {
+    expect(
+      collectErrors({
+        STELLAR_NETWORK: "testnet",
+        HORIZON_URL: "https://horizon-testnet.stellar.org",
+        NODE_ENV: "production",
+        WEBHOOK_ENCRYPTION_KEY: "aaabbbcccdddeeefff000111222333444555666777888999000aaabbbcccdddee",
+      })
     ).toEqual([]);
   });
 });

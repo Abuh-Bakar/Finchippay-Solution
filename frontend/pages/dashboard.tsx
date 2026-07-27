@@ -46,6 +46,10 @@ const CreatorTipsDashboard = dynamic(() => import("../components/CreatorTipsDash
 const AIPaymentAssistant = dynamic(() => import("../components/AIPaymentAssistant"), { ssr: false });
 const RecurringPayments = dynamic(() => import("../components/RecurringPayments"), { ssr: false });
 const StreamingPayments = dynamic(() => import("../components/StreamingPayments"), { ssr: false });
+const PriceAlertsPanel = dynamic(() => import("../components/PriceAlertsPanel"), {
+  ssr: false,
+  loading: () => <Skeleton height="h-48" />,
+});
 
 import {
   ResponsiveContainer,
@@ -1305,6 +1309,17 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
       <FeatureGate flag="streaming_payments">
         <StreamingPayments publicKey={publicKey} />
       </FeatureGate>
+
+      {/* Price Alerts — Issue #80 */}
+      <PriceAlertsPanel
+        onTriggered={(alert, priceUsd) => {
+          setBubbleMessage(
+            `${alert.asset} hit $${priceUsd.toFixed(alert.threshold < 1 ? 6 : 4)} — your price alert triggered!`
+          );
+          setShowBubble(true);
+          setTimeout(() => setShowBubble(false), 5000);
+        }}
+      />
 
       {/* Creator Tips Dashboard */}
       <CreatorTipsDashboard

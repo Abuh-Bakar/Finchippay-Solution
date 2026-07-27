@@ -109,6 +109,20 @@ function collectErrors(env) {
     }
   }
 
+  if (String(env.NODE_ENV || "").toLowerCase() === "production") {
+    const rateLimitHashSalt = String(env.RATE_LIMIT_IP_HASH_SALT || "").trim();
+
+    if (!rateLimitHashSalt) {
+      errors.push(
+        "RATE_LIMIT_IP_HASH_SALT is required in production for stable, privacy-preserving rate-limit analytics",
+      );
+    } else if (rateLimitHashSalt.length < 32) {
+      errors.push(
+        "RATE_LIMIT_IP_HASH_SALT must contain at least 32 characters in production",
+      );
+    }
+  }
+
   // ALLOWED_ORIGINS is optional (defaults to localhost:3000) but every entry
   // that is present must be a well-formed origin.
   const { warnings } = parseAllowedOrigins(env.ALLOWED_ORIGINS);
@@ -147,7 +161,11 @@ function collectErrors(env) {
   // REDIS_URL is optional but if set must be a valid redis:// URL.
   if (env.REDIS_URL) {
     const redisUrl = String(env.REDIS_URL).trim();
-    if (redisUrl.length > 0 && !redisUrl.startsWith("redis://") && !redisUrl.startsWith("rediss://")) {
+    if (
+      redisUrl.length > 0 &&
+      !redisUrl.startsWith("redis://") &&
+      !redisUrl.startsWith("rediss://")
+    ) {
       errors.push(
         `REDIS_URL must start with redis:// or rediss://, got "${redisUrl}"`,
       );
@@ -163,13 +181,29 @@ function collectErrors(env) {
       );
     }
   }
-  // ANCHORS_CONFIG is optional but if set must be valid JSON.
+  // DATA_RETENTION_DAYS is optional; default is 365.
+  if (env.DATA_RETENTION_DAYS) {
+    const days = parseInt(env.DATA_RETENTION_DAYS, 10);
+    if (isNaN(days) || days < 1) {
+      errors.push(
+        `DATA_RETENTION_DAYS must be a positive integer, got "${env.DATA_RETENTION_DAYS}"`,
+      );
+    }
+  }
+    // ANCHORS_CONFIG is optional but if set must be valid JSON.
   if (env.ANCHORS_CONFIG) {
     try {
       JSON.parse(env.ANCHORS_CONFIG);
     } catch (err) {
       errors.push(`ANCHORS_CONFIG must be valid JSON: ${err.message}`);
     }
+  }
+
+  // WEBHOOK_ENCRYPTION_KEY is required in production for encrypting webhook secrets at rest.
+  if (env.NODE_ENV === "production" && !env.WEBHOOK_ENCRYPTION_KEY?.trim()) {
+    errors.push(
+      'WEBHOOK_ENCRYPTION_KEY is required in production — generate one with: openssl rand -hex 32',
+    );
   }
   return errors;
 }
@@ -187,13 +221,8 @@ function validateEnv(env = process.env) {
     return;
   }
 
-  console.error("\nEnvironment validation failed:\n");
-  for (const message of errors) {
-    console.error(`  - ${message}`);
-  }
-  console.error(
-    "\nCopy backend/.env.example to backend/.env and set the required values.\n",
-  );
+  const logger = require("../utils/logger");
+  logger.fatal({ errors }, "Environment validation failed. Copy backend/.env.example to backend/.env and set the required values.");
   process.exit(1);
 }
 

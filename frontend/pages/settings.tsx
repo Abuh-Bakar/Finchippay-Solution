@@ -8,7 +8,6 @@ import Head from "next/head";
 import Link from "next/link";
 import { useTranslation } from "react-i18next";
 import { getNetworkConfig, setNetworkConfig, NetworkConfig } from "@/lib/stellar";
-import { signTransactionWithWallet } from "@/lib/wallet";
 import { disconnectWallet, signTransactionWithWallet } from "@/lib/wallet";
 import { clearAddressBook, loadAddressBookContacts } from "@/lib/addressBook";
 import {
@@ -20,6 +19,7 @@ import {
   TurretsDeployment,
 } from "@/lib/turrets";
 import { shortenAddress } from "@/lib/stellar";
+import { resetTour } from '@/lib/onboardingState';
 import { SUPPORTED_LANGUAGES, getCurrentLanguage, setLanguage, type SupportedLanguage } from "@/lib/i18n";
 import KyCForm from "@/components/KyCForm";
 import AccountSettings from "@/components/AccountSettings";
@@ -731,7 +731,7 @@ export default function SettingsPage({
                 Address Book
               </h2>
               <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
-                Manage your locally stored contacts. Contacts are stored in your browser's local storage and will be cleared when you disconnect your wallet.
+                Manage your locally stored contacts. Contacts are stored in your browser&apos;s local storage and will be cleared when you disconnect your wallet.
               </p>
               <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-cosmos-900 rounded-lg border border-slate-200 dark:border-slate-700">
                 <div>
@@ -826,7 +826,13 @@ export default function SettingsPage({
             </div>
           </div>
         
-          {/* ── Stellar Name Service ── */}
+          {/* ──             <div className="bg-white dark:bg-cosmos-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">Onboarding Tour</h2>
+              <p className="text-sm text-slate-400 dark:text-slate-400 mb-4">Replay the onboarding tour to refamiliarize yourself with the app.</p>
+              <button onClick={() => { resetTour(); window.location.href = '/dashboard'; }} className="px-4 py-2 bg-stellar-500 hover:bg-stellar-600 text-white font-medium rounded-lg transition-colors text-sm">Replay Onboarding Tour</button>
+            </div>
+
+            {/*  ── */}
           <div className="card">
             <h2 className="text-lg font-semibold mb-2">Your Stellar Name</h2>
             <p className="text-sm text-gray-500 mb-4">

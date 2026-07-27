@@ -55,7 +55,7 @@ async function adminGetFlags(req, res, next) {
  * POST /api/admin/feature-flags/:key/toggle
  * Admin endpoint — toggle a flag on, off, or reset to config default.
  *
- * Request body:
+ * Request body (validated by adminToggleFlagSchema):
  *   { "enabled": true | false | null }
  *   - true  → force flag on  (runtime override)
  *   - false → force flag off (runtime override)
@@ -68,6 +68,7 @@ async function adminGetFlags(req, res, next) {
 async function adminToggleFlag(req, res, next) {
   try {
     const { key } = req.params;
+    const { enabled } = req.validated;
 
     if (!key || typeof key !== "string") {
       return res.status(400).json({
@@ -76,24 +77,15 @@ async function adminToggleFlag(req, res, next) {
       });
     }
 
-    const { enabled } = req.body;
-
-    if (enabled !== true && enabled !== false && enabled !== null) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: "VAL_INVALID_INPUT",
-          message: "Body must include \"enabled\" as true, false, or null.",
-        },
-      });
-    }
-
     const updated = featureFlagsService.toggleFlag(key, enabled);
 
     if (!updated) {
       return res.status(404).json({
         success: false,
-        error: { code: "NOT_FOUND", message: `Feature flag "${key}" not found.` },
+        error: {
+          code: "NOT_FOUND",
+          message: `Feature flag "${key}" not found.`,
+        },
       });
     }
 

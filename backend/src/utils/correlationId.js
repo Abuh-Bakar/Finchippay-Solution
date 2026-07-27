@@ -14,6 +14,7 @@
 
 const crypto = require("crypto");
 const { AsyncLocalStorage } = require("async_hooks");
+const logger = require("./logger");
 
 const als = new AsyncLocalStorage();
 
@@ -28,10 +29,11 @@ const als = new AsyncLocalStorage();
 function correlationMiddleware(req, res, next) {
   const requestId = req.headers["x-request-id"] || crypto.randomUUID();
   req.id = requestId;
+  req.correlationId = requestId;
+  req.log = logger.child({ correlationId: requestId });
   res.setHeader("X-Request-ID", requestId);
   als.run({ requestId }, next);
 }
-
 /**
  * Retrieve the current request's correlation ID from AsyncLocalStorage.
  * Returns `undefined` when called outside of an active request context

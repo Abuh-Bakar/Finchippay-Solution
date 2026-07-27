@@ -259,6 +259,17 @@ containers:
 Tune `HEALTH_TIMEOUT_MS` to be slightly lower than `timeoutSeconds` so the
 probe response always arrives before Kubernetes declares a timeout.
 
+## Blue-green deployment workflow
+
+The GitHub Actions deployment workflow now follows a blue-green release pattern for Vercel.
+
+1. A new build is deployed to a temporary staging alias.
+2. The workflow calls `GET /api/health` and waits for an HTTP 200 response.
+3. If the health check passes, the staging deployment is promoted to production.
+4. If the health check fails, the workflow immediately rolls back to the previous working deployment and notifies the team.
+
+This keeps production traffic from being cut over to a broken release and gives the team a fast rollback path.
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |

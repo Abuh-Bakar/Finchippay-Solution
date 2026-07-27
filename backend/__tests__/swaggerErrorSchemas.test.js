@@ -100,7 +100,10 @@ describe("documented error statuses", () => {
   it("every one returns the canonical error body", () => {
     const missing = found
       .filter((entry) => !entry.response.content)
-      .map((entry) => `${entry.method.toUpperCase()} ${entry.route} → ${entry.status}`);
+      .map(
+        (entry) =>
+          `${entry.method.toUpperCase()} ${entry.route} → ${entry.status}`,
+      );
 
     expect(missing).toEqual([]);
   });

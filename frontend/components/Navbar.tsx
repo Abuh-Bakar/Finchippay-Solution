@@ -5,7 +5,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
 import {
@@ -21,13 +21,56 @@ import { useWallet } from "@/lib/useWallet";
 import ThemeToggle from "@/components/ThemeToggle";
 import AccountSwitcher from "@/components/AccountSwitcher";
 import { NavStarIcon } from "@/components/icons";
+import { loadAlerts, PRICE_ALERTS_STORAGE_KEY } from "@/lib/priceAlerts";
 
-export default function Navbar() {
+/** Prop interface allowing _app.tsx to wire the tour launcher. */
+export interface NavbarProps {
+  onTakeTour?: () => void;
+}
+
+export default function Navbar({ onTakeTour }: NavbarProps) {
   const router = useRouter();
   const { publicKey, connectWallet } = useWallet();
   const { t } = useTranslation("common");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isHelpMenuOpen, setIsHelpMenuOpen] = useState(false);
   const [feeLevel, setFeeLevel] = useState<FeeLevel | null>(null);
+  const helpMenuRef = useRef<HTMLDivElement>(null);
+
+  // ── Price alert badge ────────────────────────────────────────────────────
+  /** Number of recently triggered (≤ 24 h) price alerts shown as a badge. */
+  const [alertBadgeCount, setAlertBadgeCount] = useState(0);
+
+  useEffect(() => {
+    const updateBadge = () => {
+      const alerts = loadAlerts();
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000; // last 24 hours
+      const recentlyTriggered = alerts.filter(
+        (a) =>
+          !a.active &&
+          a.triggeredAt !== null &&
+          new Date(a.triggeredAt).getTime() > cutoff
+      ).length;
+      setAlertBadgeCount(recentlyTriggered);
+    };
+
+    updateBadge();
+
+    // Re-evaluate whenever localStorage is written from another component.
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === PRICE_ALERTS_STORAGE_KEY) updateBadge();
+    };
+    window.addEventListener("storage", handleStorage);
+
+    // Also poll every 30 s in case the event doesn't fire in the same tab.
+    const intervalId = window.setInterval(updateBadge, 30_000);
+
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
   const config = getNetworkConfig();
   const isMainnet = config.network === "mainnet";
   const networkLabel =
@@ -36,6 +79,7 @@ export default function Navbar() {
   const navLinks = [
     { href: "/", label: t("nav.home") },
     { href: "/dashboard", label: t("nav.dashboard") },
+    { href: "/portfolio", label: t("nav.portfolio") },
     { href: "/trade", label: t("nav.trade") },
     { href: "/transactions", label: t("nav.transactions") },
     { href: "/network", label: t("nav.network") },
@@ -71,6 +115,26 @@ export default function Navbar() {
     };
   }, []);
 
+  // Close help menu when clicking outside.
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        helpMenuRef.current &&
+        !helpMenuRef.current.contains(event.target as Node)
+      ) {
+        setIsHelpMenuOpen(false);
+      }
+    };
+
+    if (isHelpMenuOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isHelpMenuOpen]);
+
   const handleConnectClick = async () => {
     const { publicKey: nextPublicKey, error: walletError } =
       await requestWalletConnection();
@@ -91,10 +155,16 @@ export default function Navbar() {
     connectWallet(nextPublicKey);
   };
 
+  const handleTakeTour = () => {
+    setIsHelpMenuOpen(false);
+    setIsMobileMenuOpen(false);
+    onTakeTour?.();
+  };
+
   return (
     <nav className="sticky top-0 z-50 border-b border-[rgba(14,165,233,0.12)] bg-white/80 backdrop-blur-xl transition-colors duration-300 dark:bg-cosmos-900/80">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6 rtl:flex-row-reverse">
-        <div className="flex items-center gap-4 rtl:flex-row-reverse">
+      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
+        <div className="flex items-center gap-4">
           <Link href="/" className="group flex items-center gap-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-stellar-500/30 bg-stellar-500/20 transition-colors group-hover:border-stellar-500/60">
               <NavStarIcon className="h-4 w-4 text-stellar-400" />
@@ -126,7 +196,7 @@ export default function Navbar() {
             />
           )}
 
-          <div className="hidden items-center gap-1 md:flex rtl:flex-row-reverse">
+          <div className="hidden items-center gap-1 md:flex">
             {navLinks.map((link) => (
               <Link
                 key={link.href}
@@ -144,12 +214,106 @@ export default function Navbar() {
           </div>
         </div>
 
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
-        <div className="flex items-center gap-3 rtl:flex-row-reverse">
-
         <div className="flex items-center gap-3">
- master
           <ThemeToggle />
+
+          {/* ── Price alert bell badge ── */}
+          <Link
+            href="/dashboard"
+            aria-label={
+              alertBadgeCount > 0
+                ? `${alertBadgeCount} price alert${alertBadgeCount > 1 ? "s" : ""} triggered`
+                : "Price alerts"
+            }
+            className="relative flex items-center justify-center rounded-lg p-2 text-slate-500 transition-all duration-150 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-slate-200"
+            data-testid="price-alerts-bell"
+          >
+            <svg
+              className="h-5 w-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+              />
+            </svg>
+            {alertBadgeCount > 0 && (
+              <span
+                className="absolute top-0.5 right-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-red-500 px-0.5 text-[10px] font-bold text-white leading-none"
+                aria-hidden="true"
+                data-testid="price-alerts-badge"
+              >
+                {alertBadgeCount > 9 ? "9+" : alertBadgeCount}
+              </span>
+            )}
+          </Link>
+
+          {/* ── Help menu (contains "Take a Tour") ── */}
+          <div className="relative hidden md:block" ref={helpMenuRef}>
+            <button
+              onClick={() => setIsHelpMenuOpen(!isHelpMenuOpen)}
+              aria-haspopup="true"
+              aria-expanded={isHelpMenuOpen}
+              aria-label="Help menu"
+              className="flex items-center gap-1 rounded-lg px-3 py-2 text-sm font-medium text-slate-500 transition-all duration-150 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-slate-200"
+              data-testid="help-menu-button"
+            >
+              {/* Question-mark circle icon */}
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+              <span>Help</span>
+            </button>
+
+            {isHelpMenuOpen && (
+              <div
+                role="menu"
+                aria-label="Help options"
+                className="absolute right-0 top-full mt-1 min-w-[160px] rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-cosmos-700 dark:bg-cosmos-800"
+                data-testid="help-menu-dropdown"
+              >
+                <button
+                  role="menuitem"
+                  onClick={handleTakeTour}
+                  className="flex w-full items-center gap-2 px-4 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-cosmos-700"
+                  data-testid="take-a-tour-btn"
+                >
+                  {/* Map-pin / compass icon */}
+                  <svg
+                    className="h-4 w-4 text-stellar-400"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    aria-hidden="true"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"
+                    />
+                  </svg>
+                  Take a Tour
+                </button>
+              </div>
+            )}
+          </div>
 
           {publicKey ? (
             <div className="flex items-center gap-2">
@@ -163,7 +327,11 @@ export default function Navbar() {
               <AccountSwitcher />
             </div>
           ) : (
-            <button onClick={handleConnectClick} className="btn-primary px-4 py-2 text-sm">
+            <button
+              onClick={handleConnectClick}
+              className="btn-primary px-4 py-2 text-sm"
+              data-tour="wallet-connect"
+            >
               {t("nav.connectWallet")}
             </button>
           )}
@@ -187,13 +355,8 @@ export default function Navbar() {
 
       {/* Mobile Menu Dropdown */}
       {isMobileMenuOpen && (
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
-        <div className="absolute left-0 right-0 top-full rtl:text-right border-b border-[rgba(14,165,233,0.12)] bg-white p-4 shadow-lg dark:bg-cosmos-900 md:hidden">
-          <div className="flex flex-col gap-2 rtl:items-stretch">
-
         <div className="absolute left-0 right-0 top-full border-b border-[rgba(14,165,233,0.12)] bg-white p-4 shadow-lg dark:bg-cosmos-900 md:hidden">
           <div className="flex flex-col gap-2">
-master
             {navLinks.map((link) => (
               <Link
                 key={link.href}
@@ -208,6 +371,28 @@ master
               <div className="mb-2 px-4 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 Network: {networkLabel}
               </div>
+              {/* Take a Tour — mobile */}
+              <button
+                onClick={handleTakeTour}
+                className="flex w-full min-h-[44px] items-center gap-2 rounded-lg px-4 py-3 text-base font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-cosmos-800"
+                data-testid="take-a-tour-mobile-btn"
+              >
+                <svg
+                  className="h-4 w-4 text-stellar-400"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"
+                  />
+                </svg>
+                Take a Tour
+              </button>
             </div>
           </div>
         </div>

@@ -32,6 +32,8 @@ import {
 } from "@/lib/stellar";
 import { MULTISIG_THRESHOLD_XLM } from "@/components/MultiSigFlow";
 import { signTransactionWithWallet } from "@/lib/wallet";
+import FeeEstimator from "@/components/FeeEstimator";
+import { Transaction } from "@stellar/stellar-sdk";
 import {
   type AddressBookContact,
   loadAddressBookContacts,
@@ -159,6 +161,9 @@ function SendPaymentForm({
   const [scannerError, setScannerError] = useState<string | null>(null);
   const [destAccountWarning, setDestAccountWarning] = useState<string | null>(null);
   const [isCheckingDest, setIsCheckingDest] = useState(false);
+  const [selectedFeeStroops, setSelectedFeeStroops] = useState<number>(100);
+  const [selectedFeeTier, setSelectedFeeTier] = useState<"economy" | "standard" | "fast">("standard");
+  const [previewTx, setPreviewTx] = useState<Transaction | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -506,6 +511,74 @@ function SendPaymentForm({
     trimmedDestination !== publicKey &&
     isMemoValid;
 
+  useEffect(() => {
+    let active = true;
+    const updatePreview = async () => {
+      const paymentDestination = isValidDest
+        ? trimmedDestination
+        : resolvedPaymentDestination;
+
+      if (!paymentDestination || paymentDestination === publicKey || !isValidAmt || !isMemoValid) {
+        setPreviewTx(null);
+        return;
+      }
+
+      try {
+        const customAssetEntry = accountBalances.find((b) => b.code === selectedAsset);
+        const assetParam: "XLM" | "USDC" | { code: string; issuer: string } =
+          selectedAsset === "XLM"
+            ? "XLM"
+            : selectedAsset === "USDC"
+            ? "USDC"
+            : customAssetEntry
+            ? { code: customAssetEntry.code, issuer: customAssetEntry.issuer }
+            : "XLM";
+
+        const tx = isTipOnChain
+          ? await buildSorobanTipTransaction({
+              fromPublicKey: publicKey,
+              toPublicKey: paymentDestination,
+              amount: amountNum.toFixed(7),
+              baseFee: String(selectedFeeStroops),
+            })
+          : await buildPaymentTransaction({
+              fromPublicKey: publicKey,
+              toPublicKey: paymentDestination,
+              amount: amountNum.toFixed(7),
+              memo: memo.trim() || undefined,
+              asset: assetParam,
+              baseFee: String(selectedFeeStroops),
+            });
+
+        if (active) {
+          setPreviewTx(tx);
+        }
+      } catch (e) {
+        if (active) {
+          setPreviewTx(null);
+        }
+      }
+    };
+
+    updatePreview();
+    return () => {
+      active = false;
+    };
+  }, [
+    trimmedDestination,
+    isValidDest,
+    resolvedPaymentDestination,
+    publicKey,
+    amountNum,
+    isValidAmt,
+    isMemoValid,
+    memo,
+    selectedAsset,
+    isTipOnChain,
+    selectedFeeStroops,
+    accountBalances,
+  ]);
+
   const resolveUsername = async (username: string): Promise<string> => {
     const cleanUsername = username.replace(/^@/, "").toLowerCase();
     if (!/^[a-zA-Z0-9]{3,20}$/.test(cleanUsername)) {
@@ -667,6 +740,7 @@ function SendPaymentForm({
           fromPublicKey: publicKey,
           toPublicKey: paymentDestination,
           amount: amountNum.toFixed(7),
+          baseFee: String(selectedFeeStroops),
         })
         : await buildPaymentTransaction({
             fromPublicKey: publicKey,
@@ -674,6 +748,7 @@ function SendPaymentForm({
             amount: amountNum.toFixed(7),
             memo: memo.trim() || undefined,
             asset: assetParam,
+            baseFee: String(selectedFeeStroops),
           });
       markStepCompleted("building");
 
@@ -962,6 +1037,10 @@ function SendPaymentForm({
               <p className="mt-2 text-xs text-red-400">{destinationResolutionError}</p>
             )}
 
+            {scannerError && !isScannerOpen && (
+              <p className="mt-2 text-xs text-red-400">{scannerError}</p>
+            )}
+
             {/* Destination account existence warning (#294) */}
             {isCheckingDest && isValidDest && (
               <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">{t("sendPayment.checkingAccount")}</p>
@@ -977,11 +1056,7 @@ function SendPaymentForm({
                     key={item.id}
                     type="button"
                     onClick={() => handleSelectContact(item.address)}
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
                     className="flex w-full flex-col items-start rounded-lg px-3 py-2 text-left rtl:items-end rtl:text-right hover:bg-slate-50 dark:hover:bg-white/5"
-
-                    className="flex w-full flex-col items-start rounded-lg px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-white/5"
- master
                   >
                     <span className="text-sm font-medium text-slate-900 dark:text-slate-200">{item.nickname}</span>
                     <span className="text-xs text-slate-600 dark:text-slate-400">{shortenAddress(item.address, 8)}</span>
@@ -995,11 +1070,7 @@ function SendPaymentForm({
         {!hideAmountField && (
           <div>
             <div className="mb-2 flex items-center justify-between">
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
               <label className="label mb-0 rtl:text-right">{t("sendPayment.amount")} ({selectedAsset})</label>
-
-              <label className="label mb-0">{t("sendPayment.amount")} ({selectedAsset})</label>
- master
               <button type="button" onClick={setMaxAmount} className="text-xs text-stellar-700 dark:text-stellar-400 hover:text-stellar-600 dark:hover:text-stellar-300" disabled={status !== "idle"}>
                 {t("sendPayment.max")}: {formatXLM(maxSend)}
               </button>
@@ -1021,11 +1092,7 @@ function SendPaymentForm({
         {!hideMemoField && (
           <div>
             <div className="mb-2 flex items-center justify-between">
- 160-issue-38-rtl-language-support-arabic-hebrew-fix
               <label className="label mb-0 rtl:text-right">{t("sendPayment.memo")}</label>
-
-              <label className="label mb-0">{t("sendPayment.memo")}</label>
- master
               <span className={clsx("text-xs transition-colors", memoBytes > 28 ? "text-red-400 font-bold" : "text-slate-600 dark:text-slate-400")}>
                 {memoBytes}/28 {t("sendPayment.bytes")}
               </span>
@@ -1063,6 +1130,16 @@ function SendPaymentForm({
           </div>
         </div>
 
+        <FeeEstimator
+          transaction={previewTx}
+          amount={amount}
+          asset={selectedAsset}
+          onFeeSelected={(fee, tier) => {
+            setSelectedFeeStroops(fee);
+            setSelectedFeeTier(tier);
+          }}
+        />
+
         <button
           onClick={openConfirmation}
           disabled={!canSubmit || status !== "idle"}
@@ -1091,7 +1168,11 @@ function SendPaymentForm({
         amount={amountNum}
         asset={selectedAsset}
         memo={memo}
-        estimatedFee={ESTIMATED_NETWORK_FEE}
+        estimatedFee={
+          previewTx
+            ? `${(parseInt(previewTx.fee, 10) / 10_000_000).toFixed(7)} XLM`
+            : `${(selectedFeeStroops / 10_000_000).toFixed(7)} XLM`
+        }
         isTipOnChain={isTipOnChain}
         t={t as any}
         onCancel={() => setIsConfirmOpen(false)}
