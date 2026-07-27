@@ -336,6 +336,13 @@ async function gracefulShutdown(signal, server, otelSdk) {
     if (err) logger.error({ err }, "Error closing HTTP server");
   });
 
+  // 1. Stop scheduled executor
+  try {
+    require("./services/scheduledExecutor").stop();
+  } catch (err) {
+    logger.error({ err }, "Error stopping scheduled executor");
+  }
+
   // 2. Close webhook Horizon SSE streams (stops retry worker, waits for deliveries)
   try {
     await closeWebhookStreams();
@@ -404,6 +411,8 @@ if (require.main === module) {
       .catch((err) => {
         logger.error({ err }, "Failed to load active scheduled transactions");
       });
+    // Start scheduled transaction executor
+    require("./services/scheduledExecutor").start();
     require("./services/dataRetentionService").startRetentionCron();
     const server = app.listen(PORT, () => {
       logger.info(`

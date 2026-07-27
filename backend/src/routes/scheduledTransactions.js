@@ -8,6 +8,7 @@
 const express = require("express");
 const router = express.Router();
 const scheduledTransactionService = require("../services/scheduledTransactionService");
+const scheduledExecutor = require("../services/scheduledExecutor");
 const { validate } = require("../validation/middleware");
 const {
   scheduleTransactionSchema,
@@ -134,6 +135,36 @@ router.delete("/:id", validate(idParamSchema, "params"), async (req, res, next) 
         }),
       );
     }
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/scheduled-transactions/:id/execute-now
+ * Manually trigger immediate execution of a scheduled transaction,
+ * regardless of its scheduled time.
+ */
+router.post("/:id/execute-now", validate(idParamSchema, "params"), async (req, res, next) => {
+  try {
+    const { id } = req.validated;
+    const result = await scheduledExecutor.executeNow(id);
+    res.status(result.success ? 200 : 202).json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/scheduled-transactions/:id/executions
+ * Get execution history for a scheduled transaction.
+ * Shows all execution attempts, retries, and failures.
+ */
+router.get("/:id/executions", validate(idParamSchema, "params"), async (req, res, next) => {
+  try {
+    const { id } = req.validated;
+    const executions = await scheduledExecutor.getExecutionHistory(id);
+    res.json({ scheduleId: id, executions });
   } catch (error) {
     next(error);
   }
