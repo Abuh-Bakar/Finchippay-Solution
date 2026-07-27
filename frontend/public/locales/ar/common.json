@@ -2,6 +2,7 @@
   "nav": {
     "home": "بيت",
     "dashboard": "لوحة القيادة",
+    "portfolio": "المحفظة",
     "trade": "تجارة",
     "transactions": "المعاملات",
     "network": "شبكة",
@@ -150,6 +151,24 @@
     "balanceLive": "يعيش",
     "balancePolling": "تحديث كل 30 ثانية"
   },
+  "portfolio": {
+    "title": "المحفظة",
+    "addToken": "إضافة رمز",
+    "addTokenPlaceholder": "معرف العقد (C...)",
+    "addTokenInvalid": "هذا لا يبدو معرف عقد Soroban صالحًا.",
+    "addTokenButton": "إضافة",
+    "currency": "العملة",
+    "totalValue": "القيمة الإجمالية",
+    "change24h": "التغير خلال 24 ساعة",
+    "allocation": "التوزيع",
+    "priceHistory": "سجل الأسعار",
+    "range7d": "٧ أيام",
+    "range30d": "٣٠ يوم",
+    "range90d": "٩٠ يوم",
+    "noHoldings": "لا توجد رموز في المحفظة بعد.",
+    "priceUnavailable": "السعر غير متوفر",
+    "priceHistoryUnavailable": "سجل الأسعار غير متوفر لهذا الرمز."
+  },
   "sendPayment": {
     "title": "إرسال الدفع",
     "destination": "وجهة",
@@ -174,6 +193,10 @@
     "confirmPayment": "تأكيد الدفع",
     "to": "ل",
     "estimatedFee": "الرسوم المقدرة",
+    "networkFee": "رسوم الشبكة",
+    "feeEconomy": "اقتصادية",
+    "feeStandard": "قياسية",
+    "feeFast": "سريعة",
     "confirmAndSign": "تأكيد وتوقيع",
     "successTitle": "تم إرسال الدفع!",
     "successMessage": "لقد تم تأكيد دفعتك على شبكة Stellar.",

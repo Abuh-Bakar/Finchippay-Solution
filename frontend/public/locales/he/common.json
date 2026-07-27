@@ -2,6 +2,7 @@
   "nav": {
     "home": "בַּיִת",
     "dashboard": "לוּחַ מַחווָנִים",
+    "portfolio": "תיק השקעות",
     "trade": "סַחַר",
     "transactions": "עסקאות",
     "network": "רֶשֶׁת",
@@ -150,6 +151,24 @@
     "balanceLive": "לִחיוֹת",
     "balancePolling": "מתעדכן כל שנות ה-30"
   },
+  "portfolio": {
+    "title": "תיק השקעות",
+    "addToken": "הוסף טוקן",
+    "addTokenPlaceholder": "מזהה חוזה (C...)",
+    "addTokenInvalid": "זה לא נראה כמו מזהה חוזה Soroban תקין.",
+    "addTokenButton": "הוסף",
+    "currency": "מטבע",
+    "totalValue": "שווי כולל",
+    "change24h": "שינוי ב-24 שעות",
+    "allocation": "הקצאה",
+    "priceHistory": "היסטוריית מחירים",
+    "range7d": "7 ימים",
+    "range30d": "30 ימים",
+    "range90d": "90 ימים",
+    "noHoldings": "אין עדיין טוקנים בתיק ההשקעות.",
+    "priceUnavailable": "המחיר אינו זמין",
+    "priceHistoryUnavailable": "היסטוריית המחירים אינה זמינה עבור טוקן זה."
+  },
   "sendPayment": {
     "title": "שלח תשלום",
     "destination": "יַעַד",
@@ -174,6 +193,10 @@
     "confirmPayment": "אשר תשלום",
     "to": "אֶל",
     "estimatedFee": "עמלה משוערת",
+    "networkFee": "עמלת רשת",
+    "feeEconomy": "חסכוני",
+    "feeStandard": "רגיל",
+    "feeFast": "מהיר",
     "confirmAndSign": "אשר וחתום",
     "successTitle": "התשלום נשלח!",
     "successMessage": "התשלום שלך אושר ברשת Stellar.",

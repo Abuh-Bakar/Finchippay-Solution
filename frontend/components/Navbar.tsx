@@ -79,6 +79,7 @@ export default function Navbar({ onTakeTour }: NavbarProps) {
   const navLinks = [
     { href: "/", label: t("nav.home") },
     { href: "/dashboard", label: t("nav.dashboard") },
+    { href: "/portfolio", label: t("nav.portfolio") },
     { href: "/trade", label: t("nav.trade") },
     { href: "/transactions", label: t("nav.transactions") },
     { href: "/network", label: t("nav.network") },
