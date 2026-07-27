@@ -238,6 +238,40 @@ function collectErrors(env) {
     }
   }
 
+  // VAPID keys are optional — without them pushService degrades to a no-op and
+  // the app never offers notifications. They are validated as a set, because a
+  // half-configured pair is a silent misconfiguration: the client would be
+  // handed a public key for pushes the server cannot actually sign.
+  const vapidPublic = String(env.VAPID_PUBLIC_KEY || "").trim();
+  const vapidPrivate = String(env.VAPID_PRIVATE_KEY || "").trim();
+
+  if (vapidPublic && !vapidPrivate) {
+    errors.push(
+      "VAPID_PRIVATE_KEY is required when VAPID_PUBLIC_KEY is set (push notifications need both)",
+    );
+  }
+
+  if (vapidPrivate && !vapidPublic) {
+    errors.push(
+      "VAPID_PUBLIC_KEY is required when VAPID_PRIVATE_KEY is set (push notifications need both)",
+    );
+  }
+
+  // VAPID_SUBJECT identifies the sender to the push service; RFC 8292 requires
+  // a mailto: or https: URI.
+  if (env.VAPID_SUBJECT) {
+    const subject = String(env.VAPID_SUBJECT).trim();
+    if (
+      subject.length > 0 &&
+      !subject.startsWith("mailto:") &&
+      !subject.startsWith("https://")
+    ) {
+      errors.push(
+        `VAPID_SUBJECT must be a mailto: or https:// URL, got "${subject}"`,
+      );
+    }
+  }
+
   return errors;
 }
 

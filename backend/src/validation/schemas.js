@@ -408,6 +408,51 @@ const tokenPriceHistoryQuerySchema = z.object({
   range: z.enum(["7d", "30d", "90d"]).default("30d"),
 });
 
+// ─── push notifications ───────────────────────────────────────────────────────
+
+/**
+ * A browser PushSubscription, as produced by `PushSubscription.toJSON()`.
+ *
+ * The endpoint must be HTTPS: every real push service (FCM, Mozilla, WNS) uses
+ * HTTPS, and accepting anything else would let a caller point deliveries at an
+ * arbitrary host.
+ */
+const pushSubscriptionObject = z.object({
+  endpoint: z
+    .string({ required_error: "subscription.endpoint is required" })
+    .url("subscription.endpoint must be a valid URL")
+    .startsWith("https://", "subscription.endpoint must be an HTTPS URL"),
+  expirationTime: z.union([z.number(), z.null()]).optional(),
+  keys: z.object({
+    p256dh: z
+      .string({ required_error: "subscription.keys.p256dh is required" })
+      .min(1, "subscription.keys.p256dh is required"),
+    auth: z
+      .string({ required_error: "subscription.keys.auth is required" })
+      .min(1, "subscription.keys.auth is required"),
+  }),
+});
+
+/**
+ * POST /api/push/subscribe
+ *
+ * `publicKey` is optional and only cross-checked against the authenticated
+ * account: the route derives the owner from the SEP-10 JWT, never from the
+ * body, so a caller cannot register a device against someone else's account.
+ */
+const pushSubscribeSchema = z.object({
+  publicKey: stellarAddress.optional(),
+  subscription: pushSubscriptionObject,
+});
+
+/** POST /api/push/unsubscribe */
+const pushUnsubscribeSchema = z.object({
+  publicKey: stellarAddress.optional(),
+  endpoint: z
+    .string({ required_error: "endpoint is required" })
+    .min(1, "endpoint is required"),
+});
+
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -463,4 +508,7 @@ module.exports = {
   // tokens
   tokenContractIdParamSchema,
   tokenPriceHistoryQuerySchema,
+  // push notifications
+  pushSubscribeSchema,
+  pushUnsubscribeSchema,
 };
