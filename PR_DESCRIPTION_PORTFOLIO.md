@@ -1,75 +1,73 @@
-## PR Title
-feat(portfolio): Add interactive token portfolio dashboard with price charts (#362)
+## Summary
 
-## PR Description
+Adds an interactive token portfolio dashboard (`/portfolio`): total value, 24h change, an allocation donut chart, and per-token price history (7d/30d/90d), backed by a new cached price-history endpoint. Also includes six small, isolated fixes for pre-existing bugs that were blocking the build and manual QA of this feature.
 
-### Summary
-Implements issue #362: a new `/portfolio` page showing total portfolio value, per-token 24h change, an allocation donut chart, per-token price history (7d/30d/90d), and the ability to add custom tokens by Soroban contract ID. Adds a new cached backend endpoint to serve that price history.
+## Type of change
 
-### Problem
-Users could only see individual token balances (`TokenCard.tsx`) with no consolidated view of total holdings, allocation, or price performance — `AnalyticsCharts.tsx` covers transaction analytics but not portfolio-level data.
+- [x] Bug fix
+- [x] New feature
+- [ ] Documentation update
+- [ ] Refactor / chore
+- [ ] Smart contract change
 
-### Solution
+## Related issue
 
-#### Backend
-- **`backend/src/services/tokenPriceService.js`** (NEW) — maps known assets (native XLM, USDC) to their Soroban contract IDs (via `Asset.contractId()`) and to CoinGecko ids; fetches price history from CoinGecko's `market_chart` endpoint; caches results for 5 minutes via the existing shared `cacheService.js`. Contract IDs with no known price source return an empty `prices` array instead of erroring.
-- **`backend/src/routes/tokens.js`** (NEW) — `GET /api/v1/tokens/:contractId/price-history?range=7d|30d|90d`, Zod-validated, registered in `server.js`.
-- **`backend/src/validation/schemas.js`** — added `tokenContractIdParamSchema`, `tokenPriceHistoryQuerySchema`.
+Closes #362
 
-> Note: every other backend route mounts at `/api/<name>` (no `v1`); this endpoint follows the issue's literal spec (`/api/v1/tokens/...`) instead, so it's the one inconsistent route in the API today.
+## Changes
 
-#### Frontend
-- **`lib/portfolio.ts`** (NEW) — `getPortfolioHoldings()` (wraps `getBalances()`, derives each holding's contract ID), custom-token and fiat-currency preferences (`localStorage`, mirrors `lib/addressBook.ts`'s pattern), `fetchTokenPrices()` (one CoinGecko call covering USD/EUR/GBP + 24h change).
-- **`components/PortfolioOverview.tsx`** (NEW) — total value, 24h change (green/red), per-token rows.
-- **`components/PortfolioAllocation.tsx`** (NEW) — donut chart (recharts), clickable legend that filters the price chart.
-- **`components/TokenPriceChart.tsx`** (NEW) — line chart with a 7d/30d/90d range selector, fetches from the new backend endpoint.
-- **`pages/portfolio.tsx`** — this page already existed as a scaffold behind the `new_portfolio` feature flag (issue #103, 0% rollout), showing a "Coming Soon" fallback. Replaced the placeholder content inside the existing `<FeatureGate>` with the real implementation; kept the fallback intact. Added a "connect your wallet" state (was missing — previously showed a misleading empty-holdings message when disconnected).
-- **`components/Navbar.tsx`** — added a "Portfolio" link.
-- i18n: new `portfolio.*` keys (and `nav.portfolio`) in all 5 locales (en/es/fr/ar/he).
-- Chart tooltips (`PortfolioAllocation`, `TokenPriceChart`) styled with the app's existing `--color-surface`/`--color-text`/`--color-border` CSS variables so they respect dark/light mode (recharts' default tooltip is a fixed white box).
+**Backend**
+- `backend/src/routes/tokens.js` (NEW) — `GET /api/v1/tokens/:contractId/price-history?range=7d|30d|90d`, Zod-validated.
+- `backend/src/services/tokenPriceService.js` (NEW) — maps known assets (native XLM, USDC) to their Soroban contract IDs and CoinGecko ids, fetches price history from CoinGecko, caches for 5 minutes via the existing `cacheService.js`. Unknown contract IDs return an empty result instead of erroring.
+- `backend/src/validation/schemas.js` — new `tokenContractIdParamSchema`, `tokenPriceHistoryQuerySchema`.
+- `backend/src/server.js` — registers the route at `/api/v1/tokens` (the one endpoint in the API that doesn't follow the existing `/api/<name>` convention, per the issue's literal spec).
 
-### Files Changed
-```
-backend/
-├── src/routes/tokens.js                      (NEW)
-├── src/services/tokenPriceService.js          (NEW)
-├── src/validation/schemas.js
-├── src/server.js
-└── __tests__/tokens.test.js                   (NEW)
+**Frontend**
+- `lib/portfolio.ts` (NEW) — derives each holding's contract ID from Horizon balances, custom-token / fiat-currency preferences (`localStorage`), and a `fetchTokenPrices()` helper (one CoinGecko call for USD/EUR/GBP + 24h change).
+- `components/PortfolioOverview.tsx` (NEW) — total value card, 24h change (green/red), per-token rows.
+- `components/PortfolioAllocation.tsx` (NEW) — donut chart with a clickable legend that drives the price chart.
+- `components/TokenPriceChart.tsx` (NEW) — line chart with a 7d/30d/90d range selector.
+- `pages/portfolio.tsx` — replaced the existing "Coming Soon" scaffold's placeholder content (behind the `new_portfolio` flag from #103) with the real implementation; added the missing "connect your wallet" state.
+- `components/Navbar.tsx` — added the "Portfolio" nav link.
+- i18n: new `portfolio.*` / `nav.portfolio` keys in all 5 locales (en/es/fr/ar/he).
+- Chart tooltips now use the app's `--color-surface` / `--color-text` / `--color-border` CSS variables instead of recharts' fixed white default, so they respect dark/light mode.
 
-frontend/
-├── pages/portfolio.tsx
-├── components/PortfolioOverview.tsx           (NEW)
-├── components/PortfolioAllocation.tsx         (NEW)
-├── components/TokenPriceChart.tsx             (NEW)
-├── components/Navbar.tsx
-├── lib/portfolio.ts                           (NEW)
-├── public/locales/{en,es,fr,ar,he}/common.json
-├── e2e/portfolio.spec.ts                      (NEW)
-└── __tests__/{portfolio,PortfolioOverview,PortfolioAllocation,TokenPriceChart}.test.{ts,tsx}  (NEW)
-```
+**Pre-existing bug fixes** (found while getting this feature to build and testing it manually — each is its own commit, none touch portfolio code):
+1. `frontend/components/FeeEstimator.tsx` — component was imported and rendered by `SendPaymentForm.tsx` but never created; broke every build.
+2. `frontend/package.json` — `recharts` requires `react-is` as a peer dependency; it was missing, breaking any page using charts.
+3. `frontend/utils/format.ts` — `formatDate` was both imported from `intlFormat.ts` and declared locally, a duplicate-identifier compile error.
+4. `frontend/lib/stellar.ts` — added the missing `getContractTipCount()` wrapper (`CreatorTipsDashboard.tsx` called it; the underlying contract-client method already existed).
+5. `frontend/pages/settings.tsx` — duplicate `signTransactionWithWallet` import broke compilation of `/settings`.
+6. `backend/src/server.js` — CORS `allowedHeaders` was missing `traceparent`/`tracestate` (headers the frontend's OpenTelemetry instrumentation attaches to every request), which was silently blocking `/api/features` and the SEP-10 login flow in the browser.
 
-### Related fixes (pre-existing bugs found while building/testing this feature)
-These were blocking either the build or manual testing of this feature and were fixed as isolated, minimal changes — none are part of issue #362's scope:
+## Testing
 
-1. **`frontend/lib/stellar.ts`** — `CreatorTipsDashboard.tsx` imported `getContractTipCount`, which didn't exist (the underlying contract client method `getTipCount()` did; only the wrapper was missing, same pattern as the existing `getContractTipTotal`). Was breaking `npm run build` for the whole app.
-2. **`frontend/pages/settings.tsx`** — duplicate import of `signTransactionWithWallet` from `@/lib/wallet`, breaking compilation of `/settings`.
-3. **`backend/src/server.js`** — CORS `allowedHeaders` didn't include `traceparent`/`tracestate` (W3C Trace Context headers the frontend's OpenTelemetry instrumentation attaches to every `fetch()`), blocking `/api/features` and very likely the original SEP-10 auth flow in the browser.
+- [x] Tested locally on Testnet
+- [x] Added/updated unit tests
+- [x] Manually tested UI flow
 
-### Known limitations / out of scope
-- **Custom tokens have no price source.** Adding a token by contract ID that isn't one of the known assets (XLM, USDC) shows "Price unavailable" — there's no way in this codebase to resolve an arbitrary Soroban contract to a price feed. Documented as a decision during planning, not a bug.
-- **Custom token metadata isn't resolved.** Added tokens display a truncated contract ID rather than a symbol/name (no SEP-41 `symbol()` RPC lookup in this pass).
-- **`npm run build` still fails** for the repo as a whole, due to a chain of ~75 pre-existing TypeScript errors unrelated to this PR (e.g. `components/HighlightedTransactionRow.tsx`). This PR's own files type-check and lint cleanly, but the full build — and therefore the E2E CI job, which serves a production build — cannot currently complete. Not addressed here; out of scope.
-- **`npm run i18n:check` cannot run locally** — `i18next-scanner` was never added as a dependency despite the script referencing it (pre-existing gap, unrelated). Locale JSON was validated manually (`JSON.parse` on all 5 files).
-- Found but **not fixed**: `components/RecurringPayments.tsx` calls a nonexistent `listStreamsByPayer` (needs a real implementation, not a one-line fix — only affects `/dashboard`, not this feature).
+**Coverage:**
+- Backend: `backend/__tests__/tokens.test.js` — 7/7 passing (range validation, unknown contract ID, caching, provider failure).
+- Frontend unit: `portfolio.test.ts`, `PortfolioOverview.test.tsx`, `PortfolioAllocation.test.tsx`, `TokenPriceChart.test.tsx` — 27/27 passing.
+- Frontend E2E: `e2e/portfolio.spec.ts` (NEW) — 4/4 passing locally, stable across 3 consecutive runs (wallet-not-connected prompt, overview/allocation/chart rendering, invalid contract ID rejected, custom token added).
+- Manual: full flow verified in-browser against a funded Stellar testnet account via Freighter — real Horizon balance, real CoinGecko price data, range selector, currency switcher, donut-to-chart selection, Add Token.
+- `type-check` and `lint`: clean on every file this PR touches.
+- Full existing Jest suite: 431/473 passing. Confirmed via `git stash` that the 42 failing tests already fail on `master`, unrelated to this branch.
 
-### Testing
-- **Backend**: `backend/__tests__/tokens.test.js` — 7/7 passing (valid/invalid range, unknown contract ID, caching, provider failure).
-- **Frontend unit**: `portfolio.test.ts`, `PortfolioOverview.test.tsx`, `PortfolioAllocation.test.tsx`, `TokenPriceChart.test.tsx` — 27/27 passing.
-- **Frontend E2E**: `e2e/portfolio.spec.ts` — 4/4 passing locally (not-connected prompt, overview/allocation/chart render, invalid contract ID rejected, custom token added). Verified stable across 3 consecutive runs.
-- **Manual**: full flow verified in-browser against a funded Stellar testnet account (Freighter) — real Horizon balance, real CoinGecko price data, working range selector and currency switcher, donut → price-chart selection.
-- `type-check` and `lint` clean on every file touched in this PR.
-- Full existing Jest suite run: 431/473 passing; the 42 pre-existing failures were confirmed (via `git stash`) to already fail on `master` before this branch, unrelated to this change.
+## Known limitations (out of scope for this PR)
 
-### Notes
-- The E2E test uncovered a pre-existing, app-wide dev-mode hydration warning (also reproducible on `master` via the existing `wallet-connect.spec.ts`) that renders a `next dev`-only error overlay capable of intercepting clicks. Not fixed here (out of scope, doesn't affect production builds); the new E2E test works around it defensively.
+- Custom tokens added by contract ID show "Price unavailable" unless they're XLM or USDC — there's no way in this codebase yet to resolve an arbitrary Soroban contract to a price feed or to its symbol/name. This was a deliberate scope decision made during planning, not an oversight.
+- `npm run build` still fails for the repo as a whole — a pre-existing chain of ~75 unrelated TypeScript errors (e.g. `components/HighlightedTransactionRow.tsx`, `components/RecurringPayments.tsx`'s missing `listStreamsByPayer`) blocks it. None of these files are touched by this PR. Because the E2E CI job serves a production build, it cannot currently run to completion in CI either, even though the new E2E test passes locally against `next dev`.
+- `npm run i18n:check` can't run in this environment — `i18next-scanner` was never added as a dependency despite the script referencing it. Locale JSON was instead validated with `JSON.parse` on all 5 files.
+- A pre-existing, app-wide Next.js dev-mode hydration warning (reproducible on `master` via the existing `wallet-connect.spec.ts`) renders a click-intercepting error overlay in `next dev` only; it doesn't affect production builds. The new E2E test works around it defensively rather than fixing the root cause.
+
+## Screenshots
+
+Not captured — this PR was built and verified without browser-automation tooling in the session; all UI verification above was done by hand against a live Freighter/testnet session. Happy to attach screenshots on request.
+
+## Checklist
+
+- [x] My code follows the project style
+- [x] I've updated docs if needed (i18n strings, this PR description)
+- [ ] No console errors or warnings — see "Known limitations": a pre-existing, unrelated hydration warning appears in `next dev` on every page, including this one
+- [ ] I've rebased on latest `main` — please confirm before merge
