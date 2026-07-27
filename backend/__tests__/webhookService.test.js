@@ -183,6 +183,10 @@ afterEach(async () => {
   await webhookService.closeAllStreams();
 });
 
+afterAll(async () => {
+  await knex.destroy();
+});
+
 describe("webhook registry", () => {
   it("registers and lists webhooks for an account", async () => {
     const webhook = await webhookService.registerWebhook(

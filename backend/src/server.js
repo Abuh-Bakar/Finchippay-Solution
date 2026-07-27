@@ -55,8 +55,11 @@ const eventIndexer = require("./services/eventIndexer");
 const {
   startRetryWorker,
   closeAllStreams: closeWebhookStreams,
-} = require("./services/webhookService");
-const { startCleanupWorker, stopCleanupWorker } = require("./services/eventCleanupService");
+} = require("./services/webhookSubscriptionService");
+const {
+  startCleanupWorker,
+  stopCleanupWorker,
+} = require("./services/eventCleanupService");
 const logger = require("./utils/logger");
 const { validateEnv, parseAllowedOrigins } = require("./config/validateEnv");
 const { requireJsonContentType } = require("./middleware/bodyParsing");
@@ -331,7 +334,7 @@ app.use((err, req, res, next) => {
   res.status(status).json(fallback);
 });
 
-// ─── Graceful shutdown ────────────────────────────────────────────────        
+// ─── Graceful shutdown ────────────────────────────────────────────────
 
 async function gracefulShutdown(signal, server, otelSdk) {
   logger.info({ signal }, "Received shutdown signal — draining…");

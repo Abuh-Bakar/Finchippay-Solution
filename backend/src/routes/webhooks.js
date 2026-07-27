@@ -7,14 +7,14 @@
 
 const express = require("express");
 const router = express.Router();
-const webhookService = require("../services/webhookService");
+const webhookService = require("../services/webhookSubscriptionService");
 const {
   formatErrorResponse,
   ERROR_CODES,
 } = require("../../../shared/errorCodes");
 const { validate } = require("../validation/middleware");
+const { registerWebhookSchema } = require("../validation/webhookSchemas");
 const {
-  registerWebhookSchema,
   publicKeyParamSchema,
   idParamSchema,
   getEventsQuerySchema,
@@ -25,15 +25,16 @@ const {
  * POST /api/webhooks
  * Register a webhook for a Stellar account.
  *
- * Body: { publicKey: "G...", url: "https://...", secret: "whsec_..." }
+ * Body: { publicKey: "G...", url: "https://...", secret: "whsec_...", topics?: string[] }
  */
 router.post("/", validate(registerWebhookSchema), async (req, res, next) => {
   try {
-    const { publicKey, url, secret } = req.validated;
+    const { publicKey, url, secret, topics } = req.validated;
     const webhook = await webhookService.registerWebhook(
       publicKey,
       url,
       secret,
+      topics,
     );
     return res.status(201).json({ success: true, webhook });
   } catch (err) {
