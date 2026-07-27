@@ -14,12 +14,14 @@ import {
 } from "@/lib/stellar";
 import {
   type AddressBookContact,
+  addressBookNeedsReEncryption,
   deleteAddressBookContact,
   loadAddressBookContacts,
   saveAddressBookContacts,
   subscribeToAddressBookContacts,
   upsertAddressBookContact,
 } from "@/lib/addressBook";
+import { reEncryptLocalData } from "@/lib/wallet";
 import {
   exportContactsCSV,
   exportContactsVCard,
@@ -57,7 +59,29 @@ export default function Contacts() {
     federationAddress: string;
   } | null>(null);
 
+  // Encryption state: whether stored contacts belong to a different wallet.
+  const [needsReEncryption, setNeedsReEncryption] = useState(false);
+  const [reEncrypting, setReEncrypting] = useState(false);
+
   useEffect(() => subscribeToAddressBookContacts(setContacts), []);
+
+  useEffect(() => {
+    setNeedsReEncryption(publicKey ? addressBookNeedsReEncryption(publicKey) : false);
+  }, [publicKey, contacts]);
+
+  // Re-encrypt the in-memory contacts under the active wallet's key.
+  const handleReEncrypt = async () => {
+    setReEncrypting(true);
+    try {
+      await reEncryptLocalData();
+      setNeedsReEncryption(publicKey ? addressBookNeedsReEncryption(publicKey) : false);
+      showToast("Contacts re-encrypted for this wallet");
+    } catch {
+      showToast("Failed to re-encrypt contacts");
+    } finally {
+      setReEncrypting(false);
+    }
+  };
 
   // Create or update a contact
   const handleSaveContact = () => {
@@ -266,17 +290,39 @@ export default function Contacts() {
         </h1>
         <p className="text-slate-600 dark:text-slate-400">{`Save and manage Stellar addresses`}</p>
         
-        {/* Warning banner */}
-        <div className="mt-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+        {/* Encryption notice */}
+        <div className="mt-4 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
           <div className="flex items-start gap-2">
-            <svg className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
-            </svg>
-            <p className="text-sm text-amber-800 dark:text-amber-200">
-              Your contacts are stored locally on this device. They will be cleared when you disconnect your wallet. Avoid using this feature on shared or public computers.
+            <LockIcon className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-emerald-800 dark:text-emerald-200">
+              Your contacts are encrypted on this device with a key derived from your connected wallet, and are cleared when you disconnect. Avoid using this feature on shared or public computers.
             </p>
           </div>
         </div>
+
+        {/* Re-encryption prompt shown after switching wallets */}
+        {needsReEncryption && (
+          <div className="mt-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+            <div className="flex items-start gap-2">
+              <svg className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              <div className="flex-1">
+                <p className="text-sm text-amber-800 dark:text-amber-200">
+                  Your stored contacts were encrypted for a different wallet. Re-encrypt them for the wallet you have connected now.
+                </p>
+                <button
+                  onClick={handleReEncrypt}
+                  disabled={reEncrypting}
+                  className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium text-amber-900 dark:text-amber-100 bg-amber-500/20 border border-amber-500/30 hover:bg-amber-500/30 transition-colors disabled:opacity-50"
+                >
+                  <LockIcon className="w-4 h-4" />
+                  {reEncrypting ? "Re-encrypting…" : "Re-encrypt for this wallet"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Import / Export toolbar */}
         <div className="flex flex-wrap gap-2 mt-4">
@@ -442,6 +488,10 @@ export default function Contacts() {
           <h2 className="font-display text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
             <ContactsIcon className="w-5 h-5 text-stellar-700 dark:text-stellar-400" />
             {`Saved Contacts`}
+            <LockIcon
+              className="w-4 h-4 text-emerald-600 dark:text-emerald-400"
+              aria-label="Contacts are encrypted at rest"
+            />
             <span className="ml-auto text-sm font-normal text-slate-600 dark:text-slate-400">
               {contacts.length} {contacts.length === 1 ? "contact" : "contacts"}
             </span>
@@ -570,6 +620,23 @@ function TrashIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+    </svg>
+  );
+}
+
+function LockIcon({ className, "aria-label": ariaLabel }: { className?: string; "aria-label"?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      role={ariaLabel ? "img" : undefined}
+      aria-label={ariaLabel}
+      aria-hidden={ariaLabel ? undefined : true}
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 0h10.5a2.25 2.25 0 012.25 2.25v6.75a2.25 2.25 0 01-2.25 2.25H6.75a2.25 2.25 0 01-2.25-2.25v-6.75a2.25 2.25 0 012.25-2.25z" />
     </svg>
   );
 }

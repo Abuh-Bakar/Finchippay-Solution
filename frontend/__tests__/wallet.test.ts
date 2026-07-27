@@ -16,11 +16,29 @@ jest.mock("@/lib/auth", () => ({
   setJwtToken: jest.fn(),
   clearJwtToken: jest.fn(),
   getJwtToken: jest.fn(() => null),
+  // sdk-instance.ts wraps fetch with withAuth at import time; return the fetch
+  // fn unchanged so importing wallet.ts doesn't throw.
+  withAuth: jest.fn((fetchFn) => fetchFn),
+}));
+
+// Mock the SDK client boundary. wallet.ts drives the SEP-0010 flow through the
+// shared `sdk` instance (getChallenge/verifyChallenge/setToken), so we stub it
+// rather than the underlying fetch.
+jest.mock("@/lib/sdk-instance", () => ({
+  sdk: {
+    getChallenge: jest.fn(),
+    verifyChallenge: jest.fn(),
+    setToken: jest.fn(),
+  },
+  initSdkAuth: jest.fn(),
 }));
 
 // Mock the addressBook module
 jest.mock("@/lib/addressBook", () => ({
   clearAddressBook: jest.fn(),
+  lockAddressBook: jest.fn(),
+  unlockAddressBook: jest.fn(),
+  reEncryptAddressBook: jest.fn(),
 }));
 
 // Mock fetch
@@ -40,7 +58,11 @@ import {
 } from "@/lib/wallet";
 
 import * as freighterApi from "@stellar/freighter-api";
-import { clearAddressBook } from "@/lib/addressBook";
+import { clearAddressBook, lockAddressBook } from "@/lib/addressBook";
+import { sdk } from "@/lib/sdk-instance";
+
+const mockGetChallenge = sdk.getChallenge as jest.Mock;
+const mockVerifyChallenge = sdk.verifyChallenge as jest.Mock;
 
 const mockIsConnected = freighterApi.isConnected as jest.Mock;
 const mockGetAddress = freighterApi.getAddress as jest.Mock;
@@ -57,7 +79,15 @@ describe("wallet.ts", () => {
     jest.clearAllMocks();
     setJwtToken(null);
     (global.fetch as jest.Mock).mockClear();
+    // disconnectWallet fires a best-effort logout fetch; give it a resolvable
+    // default so `.catch(...)` doesn't run on `undefined`. Tests that need a
+    // specific response still override with mockResolvedValueOnce.
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({}),
+    });
     (clearAddressBook as jest.Mock).mockClear();
+    (lockAddressBook as jest.Mock).mockClear();
   });
 
   describe("isFreighterInstalled", () => {
@@ -326,12 +356,15 @@ describe("wallet.ts", () => {
       expect(clearJwtToken).toHaveBeenCalled();
     });
 
-    it("disconnectWallet clears address book from localStorage", () => {
+    it("disconnectWallet locks the address book (retains ciphertext, drops key)", () => {
       setJwtToken("test-token");
 
       disconnectWallet();
 
-      expect(clearAddressBook).toHaveBeenCalled();
+      // Disconnect must lock (forget the in-memory key/cache) rather than wipe
+      // the encrypted envelope, so contacts survive a reconnect.
+      expect(lockAddressBook).toHaveBeenCalled();
+      expect(clearAddressBook).not.toHaveBeenCalled();
     });
   });
 
@@ -340,22 +373,17 @@ describe("wallet.ts", () => {
       const challengeXDR = "challenge-xdr-123";
       const jwtToken = "jwt-token-456";
 
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ transaction: challengeXDR }),
-      });
-
-      mockSignTransaction.mockResolvedValue({
-        signedTxXdr: mockSignedXDR,
-      });
-
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ token: jwtToken }),
+      mockGetChallenge.mockResolvedValue({ transaction: challengeXDR });
+      mockSignTransaction.mockResolvedValue({ signedTxXdr: mockSignedXDR });
+      mockVerifyChallenge.mockResolvedValue({
+        accessToken: jwtToken,
+        refreshToken: "refresh-789",
       });
 
       const result = await performSEP0010Auth(mockPublicKey);
 
+      expect(mockGetChallenge).toHaveBeenCalledWith(mockPublicKey);
+      expect(mockVerifyChallenge).toHaveBeenCalledWith(mockSignedXDR);
       expect(result.token).toBe(jwtToken);
       expect(result.error).toBeNull();
       expect(getJwtToken()).toBe(jwtToken);
@@ -366,18 +394,11 @@ describe("wallet.ts", () => {
       const jwtToken = "jwt-token-456";
       const { setJwtToken: authSetJwtToken } = require("@/lib/auth");
 
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ transaction: challengeXDR }),
-      });
-
-      mockSignTransaction.mockResolvedValue({
-        signedTxXdr: mockSignedXDR,
-      });
-
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ token: jwtToken }),
+      mockGetChallenge.mockResolvedValue({ transaction: challengeXDR });
+      mockSignTransaction.mockResolvedValue({ signedTxXdr: mockSignedXDR });
+      mockVerifyChallenge.mockResolvedValue({
+        accessToken: jwtToken,
+        refreshToken: "refresh-789",
       });
 
       await performSEP0010Auth(mockPublicKey);
@@ -385,11 +406,8 @@ describe("wallet.ts", () => {
       expect(authSetJwtToken).toHaveBeenCalledWith(jwtToken);
     });
 
-    it("returns error when challenge fetch fails", async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: false,
-        json: async () => ({ error: "Challenge not available" }),
-      });
+    it("returns error when the challenge request fails", async () => {
+      mockGetChallenge.mockRejectedValue(new Error("Challenge not available"));
 
       const result = await performSEP0010Auth(mockPublicKey);
 
@@ -400,11 +418,7 @@ describe("wallet.ts", () => {
     it("returns error when signing fails", async () => {
       const challengeXDR = "challenge-xdr-123";
 
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ transaction: challengeXDR }),
-      });
-
+      mockGetChallenge.mockResolvedValue({ transaction: challengeXDR });
       mockSignTransaction.mockRejectedValue(new Error("User declined signing"));
 
       const result = await performSEP0010Auth(mockPublicKey);

@@ -23,6 +23,7 @@ import {
   disconnectWallet as clearWalletConnection,
   getConnectedPublicKey,
   performSEP0010Auth,
+  initEncryptionSession,
 } from "@/lib/wallet";
 
 /** A single Stellar account the user has connected to Finchippay. */
@@ -220,6 +221,16 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const activeAccount = accounts[activeIndex] ?? accounts[0] ?? null;
+
+  // Derive the encrypted-storage session key whenever the active account
+  // changes. A different public key derives a different key (rotation); the
+  // stores keep the previous data in memory and surface a re-encryption prompt.
+  useEffect(() => {
+    const publicKey = activeAccount?.publicKey ?? null;
+    if (!publicKey) return;
+    // Optional-call: tests may mock the wallet module without this export.
+    void initEncryptionSession?.(publicKey);
+  }, [activeAccount?.publicKey]);
 
   const setActiveAccount = useCallback((index: number) => {
     setState((current) =>

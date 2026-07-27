@@ -1,4 +1,5 @@
 import { isValidStellarAddress } from "@/lib/stellar";
+import { createEncryptedStore } from "@/lib/encryptedStorage";
 
 export interface AddressBookContact {
   id: string;
@@ -26,35 +27,26 @@ function now() {
   return Date.now();
 }
 
-function makeContact(input: LegacyContact): AddressBookContact | null {
-  const address = typeof input.address === "string" ? input.address.trim() : "";
+function makeContact(input: unknown): AddressBookContact | null {
+  const contact = (input ?? {}) as LegacyContact;
+  const address = typeof contact.address === "string" ? contact.address.trim() : "";
   const nicknameSource =
-    typeof input.nickname === "string" ? input.nickname : typeof input.name === "string" ? input.name : "";
+    typeof contact.nickname === "string"
+      ? contact.nickname
+      : typeof contact.name === "string"
+      ? contact.name
+      : "";
   const nickname = nicknameSource.trim();
 
   if (!address || !nickname || !isValidStellarAddress(address)) return null;
 
   return {
-    id: input.id || `${address}:${input.createdAt || now()}`,
+    id: contact.id || `${address}:${contact.createdAt || now()}`,
     nickname,
     address,
-    createdAt: typeof input.createdAt === "number" ? input.createdAt : now(),
-    updatedAt: typeof input.updatedAt === "number" ? input.updatedAt : now(),
+    createdAt: typeof contact.createdAt === "number" ? contact.createdAt : now(),
+    updatedAt: typeof contact.updatedAt === "number" ? contact.updatedAt : now(),
   };
-}
-
-function readContactsFromKey(key: string): AddressBookContact[] {
-  if (typeof window === "undefined") return [];
-
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as LegacyContact[];
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map(makeContact).filter((contact): contact is AddressBookContact => Boolean(contact));
-  } catch {
-    return [];
-  }
 }
 
 function dedupeContacts(contacts: AddressBookContact[]) {
@@ -66,22 +58,22 @@ function dedupeContacts(contacts: AddressBookContact[]) {
   });
 }
 
+// Encrypted-at-rest store backing the address book. Contacts are only readable
+// once a wallet session key has unlocked the store (see wallet.ts).
+const store = createEncryptedStore<AddressBookContact>({
+  storageKey: ADDRESS_BOOK_STORAGE_KEY,
+  eventName: CONTACTS_UPDATED_EVENT,
+  legacyKeys: [LEGACY_CONTACTS_STORAGE_KEY, LEGACY_FAVOURITES_STORAGE_KEY],
+  revive: makeContact,
+  dedupe: dedupeContacts,
+});
+
 export function loadAddressBookContacts(): AddressBookContact[] {
-  const primaryContacts = readContactsFromKey(ADDRESS_BOOK_STORAGE_KEY);
-  const legacyContacts = readContactsFromKey(LEGACY_CONTACTS_STORAGE_KEY);
-  const legacyFavourites = readContactsFromKey(LEGACY_FAVOURITES_STORAGE_KEY);
-  return dedupeContacts([...primaryContacts, ...legacyContacts, ...legacyFavourites]);
+  return store.load();
 }
 
 export function saveAddressBookContacts(contacts: AddressBookContact[]) {
-  if (typeof window === "undefined") return;
-
-  try {
-    window.localStorage.setItem(ADDRESS_BOOK_STORAGE_KEY, JSON.stringify(contacts));
-    window.dispatchEvent(new CustomEvent(CONTACTS_UPDATED_EVENT, { detail: contacts }));
-  } catch {
-    // Ignore storage failures (private browsing, full quota, etc.).
-  }
+  store.save(contacts);
 }
 
 export function upsertAddressBookContact(input: { nickname: string; address: string }) {
@@ -122,26 +114,7 @@ export function deleteAddressBookContact(id: string) {
 }
 
 export function subscribeToAddressBookContacts(callback: (contacts: AddressBookContact[]) => void) {
-  if (typeof window === "undefined") return () => undefined;
-
-  const onContactsUpdated = () => callback(loadAddressBookContacts());
-  const onStorage = (event: StorageEvent) => {
-    if (
-      event.key === ADDRESS_BOOK_STORAGE_KEY ||
-      event.key === LEGACY_CONTACTS_STORAGE_KEY ||
-      event.key === LEGACY_FAVOURITES_STORAGE_KEY
-    ) {
-      callback(loadAddressBookContacts());
-    }
-  };
-
-  window.addEventListener(CONTACTS_UPDATED_EVENT, onContactsUpdated);
-  window.addEventListener("storage", onStorage);
-
-  return () => {
-    window.removeEventListener(CONTACTS_UPDATED_EVENT, onContactsUpdated);
-    window.removeEventListener("storage", onStorage);
-  };
+  return store.subscribe(callback);
 }
 
 export function getAddressBookStorageKey() {
@@ -149,14 +122,27 @@ export function getAddressBookStorageKey() {
 }
 
 export function clearAddressBook() {
-  if (typeof window === "undefined") return;
+  store.clear();
+}
 
-  try {
-    window.localStorage.removeItem(ADDRESS_BOOK_STORAGE_KEY);
-    window.localStorage.removeItem(LEGACY_CONTACTS_STORAGE_KEY);
-    window.localStorage.removeItem(LEGACY_FAVOURITES_STORAGE_KEY);
-    window.dispatchEvent(new CustomEvent(CONTACTS_UPDATED_EVENT, { detail: [] }));
-  } catch {
-    // Ignore storage failures (private browsing, full quota, etc.).
-  }
+// ─── Session lifecycle (called from the wallet layer) ───────────────────────
+
+/** Decrypt the address book into memory for the given wallet session. */
+export function unlockAddressBook(key: CryptoKey, owner: string) {
+  return store.unlock(key, owner);
+}
+
+/** Re-encrypt the in-memory contacts under a new wallet key (rotation). */
+export function reEncryptAddressBook(key: CryptoKey, owner: string) {
+  return store.reEncrypt(key, owner);
+}
+
+/** Drop the decrypted contacts from memory (on disconnect). */
+export function lockAddressBook() {
+  store.lock();
+}
+
+/** True when the stored contacts were encrypted for a different wallet. */
+export function addressBookNeedsReEncryption(owner: string) {
+  return store.needsReEncryption(owner);
 }
