@@ -6,7 +6,7 @@
 #   1. frontend          — lint, i18n, type-check, unit tests, build
 #   2. visual-regression — Chromatic Storybook visual regression
 #   3. backend           — format check, lint, unit tests
-#   4. contracts         — cargo check, cargo test, WASM build
+#   4. contracts         — cargo check, cargo test, integration tests, WASM build
 #   5. compose           — validate Docker Compose configurations
 #   6. e2e               — Playwright end-to-end tests
 #   7. validate          — validate environment and config files
@@ -214,6 +214,9 @@ jobs:
 
       - name: Test
         run: cargo test
+
+      - name: Integration tests
+        run: cargo test --test integration
 
       - name: Build WASM
         # Only build WASM on stable to avoid duplicate artifacts
