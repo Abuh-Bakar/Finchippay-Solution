@@ -242,6 +242,32 @@ const parsePaymentSchema = z.object({
     .min(1, "Please provide a payment description."),
 });
 
+// ─── receipts / IPFS ────────────────────────────────────────────────────────
+
+const ipfsUploadSchema = z.object({
+  metadata: z
+    .record(z.unknown(), { required_error: "metadata is required" })
+    .refine((value) => Object.keys(value).length > 0, {
+      message: "metadata must not be empty",
+    }),
+});
+
+const ipfsFetchSchema = z.object({
+  cid: z.string({ required_error: "cid is required" }).min(1, "cid is required"),
+});
+
+const mintWithIpfsSchema = z.object({
+  publicKey: z
+    .string({ required_error: "publicKey is required" })
+    .min(1, "publicKey is required"),
+  memo: z.string().optional(),
+  metadata: z
+    .record(z.unknown(), { required_error: "metadata is required" })
+    .refine((value) => Object.keys(value).length > 0, {
+      message: "metadata must not be empty",
+    }),
+});
+
 // ─── scheduled transactions ───────────────────────────────────────────────────
 
 const SCHEDULED_FIELDS_REQUIRED = "Missing signedXDR, submitAt, or publicKey";
@@ -414,6 +440,10 @@ module.exports = {
   replayEventsBodySchema,
   // parse-payment
   parsePaymentSchema,
+  // receipts / IPFS
+  ipfsUploadSchema,
+  ipfsFetchSchema,
+  mintWithIpfsSchema,
   // scheduled transactions
   scheduleTransactionSchema,
   // sep24
