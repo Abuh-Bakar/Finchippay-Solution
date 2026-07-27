@@ -7,6 +7,8 @@
 
 "use strict";
 
+const logger = require("../utils/logger");
+
 const stellarService = require("./stellarService");
 
 // Lazy-loaded cache service (avoids circular dependency at parse time)
@@ -216,7 +218,7 @@ async function getTotalReceiptCount() {
 
       return { totalReceiptCount };
     } catch (error) {
-      console.error("Failed to fetch total receipt count from contract:", error);
+      logger.error({ error }, "Failed to fetch total receipt count from contract");
       return { totalReceiptCount: 0 };
     }
   });

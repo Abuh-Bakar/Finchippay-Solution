@@ -216,6 +216,23 @@ const registerWebhookSchema = z.object({
     .min(8, "Secret must be at least 8 characters for HMAC-SHA256 security"),
 });
 
+
+const getEventsQuerySchema = z.object({
+  since: z.string().datetime().optional(),
+  until: z.string().datetime().optional(),
+  type: z.string().optional(),
+  limit: z.preprocess((val) => parseInt(val, 10), z.number().int().min(1).max(100).optional()).optional(),
+  cursor: z.string().optional(),
+});
+
+const replayEventsBodySchema = z.object({
+  eventIds: z.array(z.string()).optional(),
+  since: z.string().datetime().optional(),
+  until: z.string().datetime().optional(),
+}).refine(data => (data.eventIds && data.eventIds.length > 0) || data.since, {
+  message: "Either eventIds or since must be provided",
+});
+
 // ─── parse-payment (AI intent parser) ─────────────────────────────────────────
 
 /** POST /api/parse-payment */
@@ -223,6 +240,32 @@ const parsePaymentSchema = z.object({
   input: z
     .string({ required_error: "Please provide a payment description." })
     .min(1, "Please provide a payment description."),
+});
+
+// ─── receipts / IPFS ────────────────────────────────────────────────────────
+
+const ipfsUploadSchema = z.object({
+  metadata: z
+    .record(z.unknown(), { required_error: "metadata is required" })
+    .refine((value) => Object.keys(value).length > 0, {
+      message: "metadata must not be empty",
+    }),
+});
+
+const ipfsFetchSchema = z.object({
+  cid: z.string({ required_error: "cid is required" }).min(1, "cid is required"),
+});
+
+const mintWithIpfsSchema = z.object({
+  publicKey: z
+    .string({ required_error: "publicKey is required" })
+    .min(1, "publicKey is required"),
+  memo: z.string().optional(),
+  metadata: z
+    .record(z.unknown(), { required_error: "metadata is required" })
+    .refine((value) => Object.keys(value).length > 0, {
+      message: "metadata must not be empty",
+    }),
 });
 
 // ─── scheduled transactions ───────────────────────────────────────────────────
@@ -351,6 +394,20 @@ const sep24DepositWithdrawSchema = z.object({
   token: z.string().optional(),
 });
 
+// ─── tokens ───────────────────────────────────────────────────────────────────
+
+/** GET /api/v1/tokens/:contractId/price-history — path params */
+const tokenContractIdParamSchema = z.object({
+  contractId: z
+    .string({ required_error: "contractId is required" })
+    .regex(/^C[A-Z2-7]{55}$/, "Invalid Soroban contract ID format"),
+});
+
+/** GET /api/v1/tokens/:contractId/price-history — query params */
+const tokenPriceHistoryQuerySchema = z.object({
+  range: z.enum(["7d", "30d", "90d"]).default("30d"),
+});
+
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -379,8 +436,14 @@ module.exports = {
   turretsListQuerySchema,
   // webhooks
   registerWebhookSchema,
+  getEventsQuerySchema,
+  replayEventsBodySchema,
   // parse-payment
   parsePaymentSchema,
+  // receipts / IPFS
+  ipfsUploadSchema,
+  ipfsFetchSchema,
+  mintWithIpfsSchema,
   // scheduled transactions
   scheduleTransactionSchema,
   // sep24
@@ -397,4 +460,7 @@ module.exports = {
   adminToggleFlagSchema,
   // sep24 deposit/withdraw
   sep24DepositWithdrawSchema,
+  // tokens
+  tokenContractIdParamSchema,
+  tokenPriceHistoryQuerySchema,
 };

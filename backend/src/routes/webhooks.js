@@ -7,31 +7,34 @@
 
 const express = require("express");
 const router = express.Router();
-const webhookService = require("../services/webhookService");
+const webhookService = require("../services/webhookSubscriptionService");
 const {
   formatErrorResponse,
   ERROR_CODES,
 } = require("../../../shared/errorCodes");
 const { validate } = require("../validation/middleware");
+const { registerWebhookSchema } = require("../validation/webhookSchemas");
 const {
-  registerWebhookSchema,
   publicKeyParamSchema,
   idParamSchema,
+  getEventsQuerySchema,
+  replayEventsBodySchema,
 } = require("../validation/schemas");
 
 /**
  * POST /api/webhooks
  * Register a webhook for a Stellar account.
  *
- * Body: { publicKey: "G...", url: "https://...", secret: "whsec_..." }
+ * Body: { publicKey: "G...", url: "https://...", secret: "whsec_...", topics?: string[] }
  */
 router.post("/", validate(registerWebhookSchema), async (req, res, next) => {
   try {
-    const { publicKey, url, secret } = req.validated;
+    const { publicKey, url, secret, topics } = req.validated;
     const webhook = await webhookService.registerWebhook(
       publicKey,
       url,
       secret,
+      topics,
     );
     return res.status(201).json({ success: true, webhook });
   } catch (err) {
@@ -51,6 +54,64 @@ router.get(
       const { publicKey } = req.validated;
       const hooks = await webhookService.getWebhooksByPublicKey(publicKey);
       return res.json({ webhooks: hooks });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * GET /api/webhooks/:publicKey/events
+ * Get paginated past events for a Stellar account.
+ */
+router.get(
+  "/:publicKey/events",
+  validate(publicKeyParamSchema, "params"),
+  validate(getEventsQuerySchema, "query"),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validatedParams || req.params;
+      const options = req.validatedQuery || req.query;
+      const events = await webhookService.getEvents(publicKey, options);
+      return res.json({ events });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * POST /api/webhooks/:publicKey/replay
+ * Replay selected events.
+ */
+router.post(
+  "/:publicKey/replay",
+  validate(publicKeyParamSchema, "params"),
+  validate(replayEventsBodySchema),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validatedParams || req.params;
+      const options = req.validated;
+      const result = await webhookService.replayEvents(publicKey, options);
+      return res.json({ success: true, ...result });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * GET /api/webhooks/:publicKey/events/stats
+ * Get event stats by type.
+ */
+router.get(
+  "/:publicKey/events/stats",
+  validate(publicKeyParamSchema, "params"),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validatedParams || req.params;
+      const stats = await webhookService.getEventStats(publicKey);
+      return res.json({ stats });
     } catch (err) {
       next(err);
     }

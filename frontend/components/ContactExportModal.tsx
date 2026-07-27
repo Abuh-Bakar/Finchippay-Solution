@@ -1,0 +1,73 @@
+"use client";
+
+import { useState } from "react";
+import { useContacts } from "@/hooks/useContacts";
+import { generateCSV, generateVCard, type Contact } from "@/lib/contactsDB";
+
+interface Props {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export default function ContactExportModal({ isOpen, onClose }: Props) {
+  const { contacts } = useContacts();
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [format, setFormat] = useState<"csv" | "vcard">("csv");
+
+  if (!isOpen) return null;
+
+  const toggleSelect = (id: number) => {
+    const next = new Set(selectedIds);
+    next.has(id) ? next.delete(id) : next.add(id);
+    setSelectedIds(next);
+  };
+
+  const toggleAll = () => {
+    if (selectedIds.size === contacts.length) setSelectedIds(new Set());
+    else setSelectedIds(new Set(contacts.map(c => c.id!)));
+  };
+
+  const selectedContacts = contacts.filter(c => selectedIds.has(c.id!));
+  const exportContacts = selectedContacts.length > 0 ? selectedContacts : contacts;
+
+  const handleExport = () => {
+    const content = format === "csv" ? generateCSV(exportContacts) : generateVCard(exportContacts);
+    const blob = new Blob([content], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `contacts.${format === "csv" ? "csv" : "vcf"}`;
+    a.click();
+    URL.revokeObjectURL(url);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-md rounded-2xl bg-slate-900 p-6 border border-white/10">
+        <h3 className="text-lg font-bold text-white mb-4">Export Contacts</h3>
+        <div className="flex gap-3 mb-4">
+          <button onClick={() => setFormat("csv")} className={`px-4 py-2 rounded-lg text-sm ${format === "csv" ? "bg-stellar-500 text-white" : "bg-white/5 text-slate-300"}`}>CSV</button>
+          <button onClick={() => setFormat("vcard")} className={`px-4 py-2 rounded-lg text-sm ${format === "vcard" ? "bg-stellar-500 text-white" : "bg-white/5 text-slate-300"}`}>vCard</button>
+        </div>
+        {contacts.length > 0 && (
+          <div className="max-h-48 overflow-y-auto mb-4">
+            <label className="flex items-center gap-2 text-sm text-slate-300 mb-2">
+              <input type="checkbox" checked={selectedIds.size === contacts.length} onChange={toggleAll} /> Select All
+            </label>
+            {contacts.map(c => (
+              <label key={c.id} className="flex items-center gap-2 text-sm text-slate-400 py-1">
+                <input type="checkbox" checked={selectedIds.has(c.id!)} onChange={() => toggleSelect(c.id!)} />
+                {c.name} <span className="text-xs text-slate-500">{c.publicKey.slice(0, 8)}...</span>
+              </label>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 rounded-xl border border-white/10 py-2 text-sm text-white">Cancel</button>
+          <button onClick={handleExport} className="flex-1 btn-primary py-2 text-sm">Export {exportContacts.length} contacts</button>
+        </div>
+      </div>
+    </div>
+  );
+}

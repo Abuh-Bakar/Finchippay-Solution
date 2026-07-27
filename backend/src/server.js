@@ -19,11 +19,12 @@ const { sdk: otelSdk } = require("./config/tracing");
 // Must load before any route requiring axios so the global interceptor
 // can forward the correlation ID on every outbound HTTP call.
 require("./config/axiosInterceptors");
+require("./config/fetchInterceptor");
 
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
-const pinoHttp = require("pino-http");
+const requestLogger = require("./middleware/requestLogger");
 const rateLimit = require("express-rate-limit");
 const Sentry = require("@sentry/node");
 const { formatErrorResponse, ERROR_CODES } = require("../../shared/errorCodes");
@@ -31,6 +32,7 @@ const { formatErrorResponse, ERROR_CODES } = require("../../shared/errorCodes");
 const accountRoutes = require("./routes/accounts");
 const authRoutes = require("./routes/auth");
 const paymentRoutes = require("./routes/payments");
+const receiptsRoutes = require("./routes/receipts");
 const analyticsRoutes = require("./routes/analytics");
 const healthRoutes = require("./routes/health");
 const federationRoutes = require("./routes/federation");
@@ -45,6 +47,7 @@ const sep38Routes = require("./routes/sep38");
 const eventRoutes = require("./routes/events");
 const featuresRoutes = require("./routes/features");
 const adminFeatureFlagsRoutes = require("./routes/adminFeatureFlags");
+const tokensRoutes = require("./routes/tokens");
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./swagger");
 const { startTurretsServer } = require("./turretsServer");
@@ -52,7 +55,11 @@ const eventIndexer = require("./services/eventIndexer");
 const {
   startRetryWorker,
   closeAllStreams: closeWebhookStreams,
-} = require("./services/webhookService");
+} = require("./services/webhookSubscriptionService");
+const {
+  startCleanupWorker,
+  stopCleanupWorker,
+} = require("./services/eventCleanupService");
 const logger = require("./utils/logger");
 const { validateEnv, parseAllowedOrigins } = require("./config/validateEnv");
 const { requireJsonContentType } = require("./middleware/bodyParsing");
@@ -69,6 +76,9 @@ const {
 } = require("./services/balanceStreamService");
 const { zodErrorHandler } = require("./validation/middleware");
 const traceContextMiddleware = require("./middleware/tracing");
+const correlationIdMiddleware = require("./middleware/correlationId");
+const { setCorrelationIdProvider } = require("../../shared/errorCodes");
+setCorrelationIdProvider(correlationIdMiddleware.getCorrelationId);
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -165,17 +175,9 @@ app.use(trackHttpMetrics);
 // Correlation ID middleware — generates/adopts X-Request-ID, stores in ALS.
 app.use(correlationMiddleware);
 app.use(traceContextMiddleware);
-// Structured JSON request logging (#269) — machine-parseable JSON logs.
-app.use(
-  pinoHttp({
-    logger,
-    genReqId: (req) => req.id || crypto.randomUUID(),
-    customProps: () => {
-      const requestId = getRequestId();
-      return requestId ? { requestId } : {};
-    },
-  }),
-);
+app.use(correlationIdMiddleware);
+// Structured JSON request logging
+app.use(requestLogger);
 
 // Content-Type enforcement (#81)
 app.use(requireJsonContentType);
@@ -216,7 +218,9 @@ app.use(
       }
     },
     methods: ["GET", "POST", "DELETE"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    // traceparent/tracestate: W3C Trace Context headers the frontend's
+    // OpenTelemetry instrumentation attaches to every fetch() call.
+    allowedHeaders: ["Content-Type", "Authorization", "traceparent", "tracestate"],
     credentials: true,
   }),
 );
@@ -260,6 +264,7 @@ app.use(limiter);
 app.use("/api/auth", authRoutes);
 app.use("/api/accounts", accountRoutes);
 app.use("/api/payments", paymentRoutes);
+app.use("/api/receipts", receiptsRoutes);
 app.use("/api/webhooks", webhookRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/turrets", turretsRoutes);
@@ -272,6 +277,7 @@ app.use("/api/sep12", sep12Routes);
 app.use("/sep38", sep38Routes);
 app.use("/api/features", featuresRoutes);
 app.use("/api/admin/feature-flags", adminFeatureFlagsRoutes);
+app.use("/api/v1/tokens", tokensRoutes);
 app.use("/federation", federationRoutes);
 app.use("/metrics", metricsRoutes);
 
@@ -335,7 +341,7 @@ app.use((err, req, res, next) => {
   res.status(status).json(fallback);
 });
 
-// ─── Graceful shutdown ────────────────────────────────────────────────        
+// ─── Graceful shutdown ────────────────────────────────────────────────
 
 async function gracefulShutdown(signal, server, otelSdk) {
   logger.info({ signal }, "Received shutdown signal — draining…");
@@ -412,8 +418,9 @@ if (require.main === module) {
       .catch((err) => {
         logger.error({ err }, "Failed to load active scheduled transactions");
       });
+    require("./services/dataRetentionService").startRetentionCron();
     const server = app.listen(PORT, () => {
-      console.log(`
+      logger.info(`
  ✨ Finchippay Solution API
  🚀 Server running at http://localhost:${PORT}
  🌐 Network: ${process.env.STELLAR_NETWORK || "testnet"}

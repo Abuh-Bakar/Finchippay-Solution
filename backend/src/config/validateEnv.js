@@ -181,13 +181,29 @@ function collectErrors(env) {
       );
     }
   }
-  // ANCHORS_CONFIG is optional but if set must be valid JSON.
+  // DATA_RETENTION_DAYS is optional; default is 365.
+  if (env.DATA_RETENTION_DAYS) {
+    const days = parseInt(env.DATA_RETENTION_DAYS, 10);
+    if (isNaN(days) || days < 1) {
+      errors.push(
+        `DATA_RETENTION_DAYS must be a positive integer, got "${env.DATA_RETENTION_DAYS}"`,
+      );
+    }
+  }
+    // ANCHORS_CONFIG is optional but if set must be valid JSON.
   if (env.ANCHORS_CONFIG) {
     try {
       JSON.parse(env.ANCHORS_CONFIG);
     } catch (err) {
       errors.push(`ANCHORS_CONFIG must be valid JSON: ${err.message}`);
     }
+  }
+
+  // WEBHOOK_ENCRYPTION_KEY is required in production for encrypting webhook secrets at rest.
+  if (env.NODE_ENV === "production" && !env.WEBHOOK_ENCRYPTION_KEY?.trim()) {
+    errors.push(
+      'WEBHOOK_ENCRYPTION_KEY is required in production — generate one with: openssl rand -hex 32',
+    );
   }
 
   // BODY_LIMIT_JSON is optional (default: "1mb").
@@ -238,13 +254,8 @@ function validateEnv(env = process.env) {
     return;
   }
 
-  console.error("\nEnvironment validation failed:\n");
-  for (const message of errors) {
-    console.error(`  - ${message}`);
-  }
-  console.error(
-    "\nCopy backend/.env.example to backend/.env and set the required values.\n",
-  );
+  const logger = require("../utils/logger");
+  logger.fatal({ errors }, "Environment validation failed. Copy backend/.env.example to backend/.env and set the required values.");
   process.exit(1);
 }
 
