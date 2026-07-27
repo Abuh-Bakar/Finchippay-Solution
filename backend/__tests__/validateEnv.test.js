@@ -182,6 +182,42 @@ describe("validateEnv.collectErrors", () => {
       }),
     ).toEqual([]);
   });
+
+  // ─── WEBHOOK_ENCRYPTION_KEY validation ─────────────────────────────────
+
+  it("does not require WEBHOOK_ENCRYPTION_KEY in non-production", () => {
+    expect(
+      collectErrors({
+        STELLAR_NETWORK: "testnet",
+        HORIZON_URL: "https://horizon-testnet.stellar.org",
+        NODE_ENV: "development",
+      })
+    ).toEqual([]);
+  });
+
+  it("requires WEBHOOK_ENCRYPTION_KEY in production", () => {
+    const errors = collectErrors({
+      STELLAR_NETWORK: "testnet",
+      HORIZON_URL: "https://horizon-testnet.stellar.org",
+      NODE_ENV: "production",
+    });
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("WEBHOOK_ENCRYPTION_KEY is required"),
+      ])
+    );
+  });
+
+  it("passes when WEBHOOK_ENCRYPTION_KEY is set in production", () => {
+    expect(
+      collectErrors({
+        STELLAR_NETWORK: "testnet",
+        HORIZON_URL: "https://horizon-testnet.stellar.org",
+        NODE_ENV: "production",
+        WEBHOOK_ENCRYPTION_KEY: "aaabbbcccdddeeefff000111222333444555666777888999000aaabbbcccdddee",
+      })
+    ).toEqual([]);
+  });
 });
 
 // ─── parseAllowedOrigins ──────────────────────────────────────────────────────
