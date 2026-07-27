@@ -84,7 +84,11 @@ async function getWebhooksByPublicKey(publicKey) {
   }));
 }
 
-async function deliverWebhook(webhook, payload, eventType = "payment.received") {
+async function deliverWebhook(
+  webhook,
+  payload,
+  eventType = "payment.received",
+) {
   let resolvedWebhook = webhook;
   if (!resolvedWebhook.secret && resolvedWebhook.id) {
     resolvedWebhook = await getWebhookRecordById(resolvedWebhook.id);
@@ -137,8 +141,7 @@ function startMonitoring(publicKey) {
             from: payment.from,
             to: payment.to,
             amount: payment.amount,
-            asset:
-              payment.asset_type === "native" ? "XLM" : payment.asset_code,
+            asset: payment.asset_type === "native" ? "XLM" : payment.asset_code,
             createdAt: payment.created_at,
           },
         };

@@ -86,12 +86,14 @@ describe("POST /api/webhooks", () => {
   });
 
   it("accepts and normalizes explicit topics", async () => {
-    const res = await request(app()).post("/api/webhooks").send({
-      publicKey: ME,
-      url: "https://x.test/hook",
-      secret: "supersecret",
-      topics: ["payment.received", "payment.received", "stream.claimed"],
-    });
+    const res = await request(app())
+      .post("/api/webhooks")
+      .send({
+        publicKey: ME,
+        url: "https://x.test/hook",
+        secret: "supersecret",
+        topics: ["payment.received", "payment.received", "stream.claimed"],
+      });
 
     expect(res.status).toBe(201);
     expect(webhookService.registerWebhook).toHaveBeenCalledWith(
@@ -103,12 +105,14 @@ describe("POST /api/webhooks", () => {
   });
 
   it("collapses all with other topics to all", async () => {
-    const res = await request(app()).post("/api/webhooks").send({
-      publicKey: ME,
-      url: "https://x.test/hook",
-      secret: "supersecret",
-      topics: ["all", "payment.received"],
-    });
+    const res = await request(app())
+      .post("/api/webhooks")
+      .send({
+        publicKey: ME,
+        url: "https://x.test/hook",
+        secret: "supersecret",
+        topics: ["all", "payment.received"],
+      });
 
     expect(res.status).toBe(201);
     expect(webhookService.registerWebhook).toHaveBeenCalledWith(
@@ -120,12 +124,14 @@ describe("POST /api/webhooks", () => {
   });
 
   it("rejects unsupported topics with a descriptive 400", async () => {
-    const res = await request(app()).post("/api/webhooks").send({
-      publicKey: ME,
-      url: "https://x.test/hook",
-      secret: "supersecret",
-      topics: ["unknown.event"],
-    });
+    const res = await request(app())
+      .post("/api/webhooks")
+      .send({
+        publicKey: ME,
+        url: "https://x.test/hook",
+        secret: "supersecret",
+        topics: ["unknown.event"],
+      });
 
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/invalid webhook topic/i);

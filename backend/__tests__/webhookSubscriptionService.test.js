@@ -42,7 +42,8 @@ jest.mock("../src/db/connection", () =>
         where: jest.fn((column, value) => {
           const rows = webhookRows.filter((row) => row[column] === value);
           return {
-            then: (resolve, reject) => Promise.resolve(rows).then(resolve, reject),
+            then: (resolve, reject) =>
+              Promise.resolve(rows).then(resolve, reject),
             first: async () => rows[0],
           };
         }),
@@ -87,10 +88,7 @@ describe("webhook topic subscriptions", () => {
       ["payment.received", "payment.received", "stream.claimed"],
     );
 
-    expect(registered.topics).toEqual([
-      "payment.received",
-      "stream.claimed",
-    ]);
+    expect(registered.topics).toEqual(["payment.received", "stream.claimed"]);
     expect(JSON.parse(webhookRows[0].topics)).toEqual([
       "payment.received",
       "stream.claimed",
