@@ -19,7 +19,7 @@ import {
   type URIParseResult,
 } from "@/lib/sep0007";
 import { I18nextProvider } from "react-i18next";
-import i18n from '@/lib/i18n';
+import i18n from "@/lib/i18n";
 import "@/styles/globals.css";
 
 interface BeforeInstallPromptEvent extends Event {
@@ -126,7 +126,6 @@ function AppShell({
   setIsQuickSendOpen: (isOpen: boolean) => void;
 }) {
   const { publicKey } = useWallet();
-  useRTL();
 
   return (
     <FeatureFlagProvider publicKey={publicKey}>
@@ -139,15 +138,6 @@ function AppShell({
       />
     </FeatureFlagProvider>
   );
-}
-
-function useRTL() {
-  const lang = i18n.language?.split('-')[0];
-  useEffect(() => {
-    const dir = (lang === 'ar' || lang === 'he') ? 'rtl' : 'ltr';
-    document.documentElement.dir = dir;
-    document.documentElement.lang = lang || 'en';
-  }, [lang]);
 }
 
 function AppShellInner({
@@ -164,7 +154,6 @@ function AppShellInner({
   setIsQuickSendOpen: (isOpen: boolean) => void;
 }) {
   const { publicKey } = useWallet();
-  useRTL();
 
   return (
     <>
