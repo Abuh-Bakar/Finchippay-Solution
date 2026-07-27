@@ -80,12 +80,17 @@ pub enum ContractError {
     /// Token transfer succeeded but the actual balance did not increase by
     /// the expected amount (possible malicious/fake token contract).
     TransferFailed = 17,
+    /// The emergency withdrawal has not yet reached its activation ledger.
+    EmergencyWithdrawalNotReady = 18,
+    /// The caller is not an authorised admin signer for this withdrawal.
+    NotAdminSigner = 19,
 }
 
 // ─── Shared data types ────────────────────────────────────────────────────────
 
 #[contracttype]
-#[derive(Clone, Debug)]    pub struct TipRecord {
+#[derive(Clone, Debug)]
+pub struct TipRecord {
     pub from: Address,
     pub to: Address,
     pub amount: i128,
@@ -105,6 +110,25 @@ pub struct ReceiptMetadata {
     pub ledger: u32,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeEstimate {
+    pub cpu_instructions: u64,
+    pub ledger_read_bytes: u32,
+    pub ledger_write_bytes: u32,
+    pub estimated_stroops: i128,
+}
+
+/// Off-chain verifiable proof referencing an on-chain receipt.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ReceiptProof {
+    pub receipt_index: u32,
+    pub payer: Address,
+    pub expected_amount: i128,
+    pub expected_memo: Symbol,
+}
+
 // ─── Escrow ───────────────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -116,7 +140,8 @@ pub enum EscrowStatus {
 }
 
 #[contracttype]
-#[derive(Clone, Debug)]    pub struct Escrow {
+#[derive(Clone, Debug)]
+pub struct Escrow {
     pub id: u32,
     pub from: Address,
     pub to: Address,
@@ -222,6 +247,51 @@ pub struct MultiSigProposal {
     pub expiration_ledger: u32,
 }
 
+// ─── Emergency withdrawal ─────────────────────────────────────────────────────
+
+/// Status of an emergency withdrawal request.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum EmergencyWithdrawalStatus {
+    /// Collecting admin signer approvals — time delay also pending.
+    Pending,
+    /// Threshold reached AND activation delay elapsed; funds transferred.
+    Executed,
+    /// Cancelled by any admin before execution.
+    Cancelled,
+}
+
+/// A time-delayed, multi-sig-gated emergency token rescue.
+///
+/// Replaces the instant `rescue_tokens` with a safer flow:
+/// 1. Any admin initiates → locks parameters, records activation ledger.
+/// 2. M-of-N admin signers approve.
+/// 3. After BOTH activation ledger is reached AND threshold met → execute.
+/// 4. Any admin can cancel before execution.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct EmergencyWithdrawal {
+    pub id: u32,
+    /// Admin that initiated the withdrawal and will receive funds on cancel.
+    pub initiator: Address,
+    /// Token to withdraw.
+    pub token: Address,
+    /// Amount of unlocked tokens to withdraw.
+    pub amount: i128,
+    /// Destination address for the token transfer.
+    pub to: Address,
+    /// Ledger at which the withdrawal was initiated.
+    pub initiated_at_ledger: u32,
+    /// Earliest ledger at which execution is allowed
+    /// (= initiated_at_ledger + EMERGENCY_WITHDRAWAL_DELAY).
+    pub activation_ledger: u32,
+    /// Admin signers that have approved so far.
+    pub approvals: Vec<Address>,
+    /// How many unique admin approvals are required.
+    pub threshold: u32,
+    pub status: EmergencyWithdrawalStatus,
+}
+
 // ─── Security bounds ──────────────────────────────────────────────────────────
 
 /// Maximum ledgers into the future an escrow can be created (≈ 30 days at 5 s).
@@ -252,6 +322,16 @@ const MAX_VESTING_DURATION_LEDGERS: u32 = 31_536_000;
 const MAX_BATCH_SIZE: u32 = 50;
 /// Contract version identifier (used for off-chain discovery).
 const CONTRACT_VERSION: u32 = 3;
+/// Mandatory delay in ledgers before an emergency withdrawal can be executed
+/// (≈24 hours at 5 s/ledger).
+const EMERGENCY_WITHDRAWAL_DELAY: u32 = 17_280;
+/// Maximum number of admin signers allowed for emergency withdrawal approvals.
+const MAX_ADMIN_SIGNERS: u32 = 20;
+/// Storage layout version — must be incremented every time the `DataKey` enum
+/// or any persistent struct field layout changes. The admin must call
+/// `validate_storage_compatibility` before upgrading to ensure the new WASM
+/// declares a layout version >= this value, preventing bricked storage.
+const STORAGE_LAYOUT_VERSION: u32 = 1;
 
 // ─── Storage key enum ─────────────────────────────────────────────────────────
 
@@ -263,6 +343,8 @@ pub enum DataKey {
     Paused,
     /// Stored contract version; bumped on upgrade.
     Version,
+    /// Storage layout version for upgrade compatibility checks.
+    StorageLayoutVersion,
     // Tips
     TipTotal(Address),
     TipCount(Address),
@@ -287,6 +369,13 @@ pub enum DataKey {
     // Vesting
     VestingCount,
     Vesting(u32),
+    // Emergency withdrawal
+    EmergencyWithdrawalCount,
+    EmergencyWithdrawal(u32),
+    /// List of addresses authorised to approve emergency withdrawals.
+    AdminSigners,
+    /// Number of admin approvals required for emergency withdrawal execution.
+    AdminSignersThreshold,
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -425,6 +514,28 @@ fn require_initialized(env: &Env) {
     }
 }
 
+fn get_admin_signers(env: &Env) -> Vec<Address> {
+    let key = DataKey::AdminSigners;
+    let signers: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .expect("admin signers not configured");
+    bump(env, &key);
+    signers
+}
+
+fn get_admin_signers_threshold(env: &Env) -> u32 {
+    let key = DataKey::AdminSignersThreshold;
+    let threshold: u32 = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .expect("admin signers threshold not configured");
+    bump(env, &key);
+    threshold
+}
+
 
 #[contract]
 pub struct FinchippayContract;
@@ -447,6 +558,10 @@ impl FinchippayContract {
             .persistent()
             .set(&DataKey::Version, &CONTRACT_VERSION);
         bump(&env, &DataKey::Version);
+        env.storage()
+            .persistent()
+            .set(&DataKey::StorageLayoutVersion, &STORAGE_LAYOUT_VERSION);
+        bump(&env, &DataKey::StorageLayoutVersion);
         env.events().publish((Symbol::new(&env, "init"),), admin);
         Ok(())
     }
@@ -536,6 +651,55 @@ impl FinchippayContract {
             .publish((Symbol::new(&env, "pauser_set"),), pauser);
     }
 
+    /// Admin: configure the list of admin signers and threshold for emergency
+    /// withdrawal approvals. The admin must be part of the signers list.
+    /// `threshold` must be between 1 and `signers.len()`.
+    pub fn set_admin_signers(
+        env: Env,
+        admin: Address,
+        signers: Vec<Address>,
+        threshold: u32,
+    ) {
+        admin.require_auth();
+        let stored = get_admin(&env);
+        if admin != stored {
+            panic!("Unauthorized");
+        }
+        if signers.len() == 0 {
+            panic!("signers list must not be empty");
+        }
+        if signers.len() > MAX_ADMIN_SIGNERS {
+            panic!("too many admin signers");
+        }
+        if threshold == 0 || threshold > signers.len() {
+            panic!("threshold must be between 1 and signers.len()");
+        }
+        // Prevent duplicates.
+        for i in 0..signers.len() {
+            for j in (i + 1)..signers.len() {
+                if signers.get(i).unwrap() == signers.get(j).unwrap() {
+                    panic!("duplicate admin signer");
+                }
+            }
+        }
+        // The admin itself must be among the signers.
+        if !signers.iter().any(|s| s == admin) {
+            panic!("admin must be in signers list");
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::AdminSignersThreshold, &threshold);
+        bump(&env, &DataKey::AdminSignersThreshold);
+        env.storage()
+            .persistent()
+            .set(&DataKey::AdminSigners, &signers);
+        bump(&env, &DataKey::AdminSigners);
+
+        env.events()
+            .publish((Symbol::new(&env, "admin_signers_set"),), (threshold, signers.len()));
+    }
+
     /// Return the current pauser address, if one is set.
     pub fn get_pauser(env: Env) -> Option<Address> {
         let key = DataKey::Pauser;
@@ -560,16 +724,62 @@ impl FinchippayContract {
         ver
     }
 
+    /// Return the current storage layout version. This must be incremented
+    /// whenever the `DataKey` enum or any persistent struct field layout
+    /// changes to prevent bricked upgrades.
+    pub fn get_storage_layout_version(env: Env) -> u32 {
+        let key = DataKey::StorageLayoutVersion;
+        let ver: u32 = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(STORAGE_LAYOUT_VERSION);
+        if env.storage().persistent().has(&key) {
+            bump(&env, &key);
+        }
+        ver
+    }
+
+    /// Validate that the new layout version is compatible with the current one.
+    ///
+    /// The new layout version must be >= the current version to prevent
+    /// bricked upgrades from incompatible data layouts.
+    ///
+    /// This is called automatically by `upgrade()`.
+    pub fn validate_storage_compatibility(
+        env: Env,
+        new_layout_version: u32,
+    ) -> bool {
+        let current_version = Self::get_storage_layout_version(env);
+
+        if new_layout_version < current_version {
+            panic!("new WASM storage layout version is lower than current");
+        }
+
+        true
+    }
+
     /// Admin: upgrade the contract WASM to `new_wasm_hash`.
     ///
-    /// After a successful upgrade the stored version is incremented so off-chain
-    /// indexers can detect the change.
-    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) {
+    /// The caller must also provide `new_layout_version` — the storage layout
+    /// version declared by the new WASM. This must be >= the current layout
+    /// version to prevent bricked upgrades. After a successful upgrade the
+    /// stored version is incremented and the layout version is updated.
+    pub fn upgrade(
+        env: Env,
+        admin: Address,
+        new_wasm_hash: BytesN<32>,
+        new_layout_version: u32,
+    ) {
         admin.require_auth();
         let stored = get_admin(&env);
         if admin != stored {
             panic!("Unauthorized");
         }
+
+        // Validate storage compatibility before upgrading.
+        Self::validate_storage_compatibility(env.clone(), new_layout_version);
+
         env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
         let current_ver: u32 = env
             .storage()
@@ -580,16 +790,111 @@ impl FinchippayContract {
             .persistent()
             .set(&DataKey::Version, &(current_ver + 1));
         bump(&env, &DataKey::Version);
+        env.storage()
+            .persistent()
+            .set(&DataKey::StorageLayoutVersion, &new_layout_version);
+        bump(&env, &DataKey::StorageLayoutVersion);
         env.events().publish(
             (Symbol::new(&env, "upgraded"),),
-            (current_ver + 1, new_wasm_hash),
+            (current_ver + 1, new_wasm_hash, new_layout_version),
         );
+    }
+
+  /// Estimates resource bounds for `send_tip`
+    pub fn estimate_send_tip(
+        _env: Env,
+        _token: Address,
+        _from: Address,
+        _to: Address,
+        _amount: i128,
+    ) -> FeeEstimate {
+        FeeEstimate {
+            cpu_instructions: 500_000,
+            ledger_read_bytes: 1_500,
+            ledger_write_bytes: 500,
+            estimated_stroops: 10_000, // Conservative 0.001 XLM upper-bound
+        }
+    }
+
+    /// Estimates resource bounds for `create_escrow`
+    pub fn estimate_create_escrow(
+        _env: Env,
+        _token: Address,
+        _from: Address,
+        _to: Address,
+        _amount: i128,
+        _release_ledger: u32,
+    ) -> FeeEstimate {
+        FeeEstimate {
+            cpu_instructions: 750_000,
+            ledger_read_bytes: 2_000,
+            ledger_write_bytes: 1_000,
+            estimated_stroops: 15_000,
+        }
+    }
+
+    /// Estimates resource bounds for `open_stream`
+    pub fn estimate_open_stream(
+        _env: Env,
+        _token: Address,
+        _payer: Address,
+        _recipient: Address,
+        _rate: i128,
+        _deposit: i128,
+    ) -> FeeEstimate {
+        FeeEstimate {
+            cpu_instructions: 750_000,
+            ledger_read_bytes: 2_000,
+            ledger_write_bytes: 1_000,
+            estimated_stroops: 15_000,
+        }
+    }
+
+    /// Estimates resource bounds for `batch_send` (scales linearly with recipient count)
+    pub fn estimate_batch_send(
+        _env: Env,
+        _token: Address,
+        _from: Address,
+        recipient_count: u32,
+    ) -> FeeEstimate {
+        let count_u64 = recipient_count as u64;
+        let count_i128 = recipient_count as i128;
+
+        FeeEstimate {
+            cpu_instructions: 300_000 + (count_u64 * 250_000),
+            ledger_read_bytes: 1_000 + (recipient_count * 500),
+            ledger_write_bytes: 300 + (recipient_count * 300),
+            estimated_stroops: 5_000 + (count_i128 * 5_000),
+        }
+    }
+
+    /// Estimates resource bounds for `create_multisig`
+    pub fn estimate_create_multisig(
+        _env: Env,
+        signers_count: u32,
+        _threshold: u32,
+    ) -> FeeEstimate {
+        let count_u64 = signers_count as u64;
+        let count_i128 = signers_count as i128;
+
+        FeeEstimate {
+            cpu_instructions: 400_000 + (count_u64 * 100_000),
+            ledger_read_bytes: 1_200 + (signers_count * 200),
+            ledger_write_bytes: 600 + (signers_count * 100),
+            estimated_stroops: 8_000 + (count_i128 * 2_000),
+        }
     }
 
     /// Admin: rescue tokens accidentally sent directly to the contract address.
     /// Since all legitimate funds are tracked via escrow/stream/multisig IDs,
     /// any unbounded tokens held by the contract can be safely swept by the admin
     /// to a designated address. Only the admin may call this.
+    ///
+    /// # DEPRECATED
+    /// TODO(#emergency-withdrawal): This function performs an instant transfer
+    /// without time delay or multi-sig approval, creating a single-point-of-failure
+    /// risk. Use `initiate_emergency_withdrawal` → `approve_emergency_withdrawal` →
+    /// `execute_emergency_withdrawal` instead. Will be removed in a future version.
     pub fn rescue_tokens(
         env: Env,
         admin: Address,
@@ -618,6 +923,240 @@ impl FinchippayContract {
             (Symbol::new(&env, "rescue_tokens"),),
             (token_address, amount, to),
         );
+    }
+
+    // ─── Emergency withdrawal (time-delayed, multi-sig) ────────────────────────
+
+    /// Initiate an emergency withdrawal. Only an admin may call this.
+    ///
+    /// Records the withdrawal parameters and sets `activation_ledger` to
+    /// `current_ledger + EMERGENCY_WITHDRAWAL_DELAY`. The withdrawal cannot be
+    /// executed until both the activation ledger has been reached AND the
+    /// multi-sig threshold is satisfied.
+    ///
+    /// Returns the emergency withdrawal ID.
+    pub fn initiate_emergency_withdrawal(
+        env: Env,
+        admin: Address,
+        token_address: Address,
+        amount: i128,
+        to: Address,
+    ) -> u32 {
+        require_initialized(&env);
+        require_not_paused(&env);
+        admin.require_auth();
+        let stored = get_admin(&env);
+        if admin != stored {
+            panic!("Unauthorized");
+        }
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
+        let token = get_token_client(&env, &token_address);
+        let balance = token.balance(&env.current_contract_address());
+        let locked = locked_balance(&env, &token_address);
+        let unlocked = balance.checked_sub(locked).expect("overflow");
+        if amount > unlocked {
+            panic!("insufficient unlocked balance");
+        }
+
+        let threshold = get_admin_signers_threshold(&env);
+        let current_ledger = env.ledger().sequence();
+        let activation_ledger = current_ledger
+            .checked_add(EMERGENCY_WITHDRAWAL_DELAY)
+            .expect("overflow");
+
+        let id: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::EmergencyWithdrawalCount)
+            .unwrap_or(0);
+
+        let withdrawal = EmergencyWithdrawal {
+            id,
+            initiator: admin.clone(),
+            token: token_address.clone(),
+            amount,
+            to,
+            initiated_at_ledger: current_ledger,
+            activation_ledger,
+            approvals: Vec::new(&env),
+            threshold,
+            status: EmergencyWithdrawalStatus::Pending,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::EmergencyWithdrawal(id), &withdrawal);
+        bump(&env, &DataKey::EmergencyWithdrawal(id));
+        env.storage()
+            .persistent()
+            .set(&DataKey::EmergencyWithdrawalCount, &(id + 1));
+        bump(&env, &DataKey::EmergencyWithdrawalCount);
+
+        env.events().publish(
+            (Symbol::new(&env, "emergency_withdrawal_initiated"), id),
+            (admin, token_address, amount, activation_ledger),
+        );
+        id
+    }
+
+    /// An admin signer approves an emergency withdrawal. When the approval count
+    /// reaches the configured threshold AND the activation ledger has passed,
+    /// the withdrawal executes automatically.
+    pub fn approve_emergency_withdrawal(env: Env, id: u32, signer: Address) {
+        require_not_paused(&env);
+        signer.require_auth();
+
+        let mut withdrawal: EmergencyWithdrawal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::EmergencyWithdrawal(id))
+            .expect("emergency withdrawal not found");
+
+        if withdrawal.status != EmergencyWithdrawalStatus::Pending {
+            panic!("emergency withdrawal is not pending");
+        }
+
+        // Verify signer is in the admin signers list.
+        let admin_signers = get_admin_signers(&env);
+        if !admin_signers.iter().any(|s| s == signer) {
+            panic!("not an admin signer");
+        }
+
+        // Prevent duplicate approvals.
+        if withdrawal.approvals.iter().any(|a| a == signer) {
+            panic!("already approved");
+        }
+
+        withdrawal.approvals.push_back(signer.clone());
+
+        env.events().publish(
+            (Symbol::new(&env, "emergency_withdrawal_approve"), id),
+            (
+                signer,
+                withdrawal.approvals.len(),
+                withdrawal.threshold,
+            ),
+        );
+
+        // Auto-execute if threshold reached AND activation ledger passed.
+        let mut executed = false;
+        if withdrawal.approvals.len() >= withdrawal.threshold {
+            if env.ledger().sequence() >= withdrawal.activation_ledger {
+                let token = get_token_client(&env, &withdrawal.token);
+                let to = withdrawal.to.clone();
+                let amount = withdrawal.amount;
+                contract_transfer_out(&env, &token, &to, &amount);
+                withdrawal.status = EmergencyWithdrawalStatus::Executed;
+                executed = true;
+                env.events().publish(
+                    (Symbol::new(&env, "emergency_withdrawal_executed"), id),
+                    (to, amount),
+                );
+            }
+            // If threshold met but delay not elapsed, we just record the approval;
+            // execution will happen on a subsequent call after the activation ledger.
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::EmergencyWithdrawal(id), &withdrawal);
+        bump(&env, &DataKey::EmergencyWithdrawal(id));
+
+        if executed {
+            // Extend TTL after successful execution.
+            bump(&env, &DataKey::EmergencyWithdrawal(id));
+        }
+    }
+
+    /// Execute a pending emergency withdrawal. Can only be called after both the
+    /// activation ledger has been reached AND the approval threshold is met.
+    /// Anyone may call this — the actual authorization was done via approvals.
+    pub fn execute_emergency_withdrawal(env: Env, id: u32) {
+        require_not_paused(&env);
+
+        let mut withdrawal: EmergencyWithdrawal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::EmergencyWithdrawal(id))
+            .expect("emergency withdrawal not found");
+
+        if withdrawal.status != EmergencyWithdrawalStatus::Pending {
+            panic!("emergency withdrawal is not pending");
+        }
+        if env.ledger().sequence() < withdrawal.activation_ledger {
+            panic!("emergency withdrawal not ready");
+        }
+        if withdrawal.approvals.len() < withdrawal.threshold {
+            panic!("insufficient admin approvals");
+        }
+
+        let token = get_token_client(&env, &withdrawal.token);
+        contract_transfer_out(&env, &token, &withdrawal.to, &withdrawal.amount);
+        withdrawal.status = EmergencyWithdrawalStatus::Executed;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::EmergencyWithdrawal(id), &withdrawal);
+        bump(&env, &DataKey::EmergencyWithdrawal(id));
+
+        env.events().publish(
+            (Symbol::new(&env, "emergency_withdrawal_executed"), id),
+            (withdrawal.to, withdrawal.amount),
+        );
+    }
+
+    /// Cancel a pending emergency withdrawal. Any admin may call this before
+    /// execution. Funds remain in the contract; the withdrawal is simply voided.
+    pub fn cancel_emergency_withdrawal(env: Env, id: u32, admin: Address) {
+        require_not_paused(&env);
+        admin.require_auth();
+        let stored = get_admin(&env);
+        if admin != stored {
+            panic!("Unauthorized");
+        }
+
+        let mut withdrawal: EmergencyWithdrawal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::EmergencyWithdrawal(id))
+            .expect("emergency withdrawal not found");
+
+        if withdrawal.status != EmergencyWithdrawalStatus::Pending {
+            panic!("emergency withdrawal is not pending");
+        }
+
+        withdrawal.status = EmergencyWithdrawalStatus::Cancelled;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::EmergencyWithdrawal(id), &withdrawal);
+        bump(&env, &DataKey::EmergencyWithdrawal(id));
+
+        env.events().publish(
+            (Symbol::new(&env, "emergency_withdrawal_cancelled"), id),
+            (admin, withdrawal.amount),
+        );
+    }
+
+    /// Return the emergency withdrawal record for `id`.
+    pub fn get_emergency_withdrawal(env: Env, id: u32) -> EmergencyWithdrawal {
+        let withdrawal: EmergencyWithdrawal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::EmergencyWithdrawal(id))
+            .expect("emergency withdrawal not found");
+        bump(&env, &DataKey::EmergencyWithdrawal(id));
+        withdrawal
+    }
+
+    /// Return the total number of emergency withdrawals ever initiated.
+    pub fn get_emergency_withdrawal_count(env: Env) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::EmergencyWithdrawalCount)
+            .unwrap_or(0)
     }
 
     // ─── Tips ─────────────────────────────────────────────────────────────────
@@ -788,8 +1327,39 @@ impl FinchippayContract {
         val
     }
 
+    /// Generate a `ReceiptProof` from the on-chain receipt at `index` for `payer`.
+    /// This is a convenience helper that reads the stored receipt and packages
+    /// the payer, amount, and memo into a proof struct for off-chain verification.
+    pub fn generate_receipt_proof(env: Env, payer: Address, index: u32) -> ReceiptProof {
+        let receipt = Self::get_receipt(env, payer.clone(), index);
+        ReceiptProof {
+            receipt_index: index,
+            payer,
+            expected_amount: receipt.amount,
+            expected_memo: receipt.memo,
+        }
+    }
 
-    // ─── Escrow ───────────────────────────────────────────────────────────────
+    /// Verify that a receipt at `payer` + `index` matches the given `expected_amount`
+    /// and `expected_memo`. Returns `true` only if all fields match exactly, proving
+    /// the receipt was minted on-chain by this contract.
+    ///
+    /// Returns `false` (never panics) for non-existent indices or mismatched values
+    /// so callers can use the result in conditional logic without catching traps.
+    pub fn verify_receipt(
+        env: Env,
+        payer: Address,
+        index: u32,
+        expected_amount: i128,
+        expected_memo: Symbol,
+    ) -> bool {
+        let key = DataKey::ReceiptRecord(payer, index);
+        let receipt: ReceiptMetadata = match env.storage().persistent().get(&key) {
+            Some(r) => r,
+            None => return false,
+        };
+        receipt.amount == expected_amount && receipt.memo == expected_memo
+    }
 
     /// Lock `amount` tokens from `from` until `release_ledger`. Returns the escrow ID.
     ///
@@ -1848,7 +2418,7 @@ impl FinchippayContract {
         require_not_paused(&env);
         from.require_auth();
         if recipients.len() == 0 {
-            panic!("batch must have at least one recipient");
+            return Err(ContractError::InvalidState);
         }
         if recipients.len() > MAX_BATCH_SIZE {
             return Err(ContractError::BatchTooLarge);
@@ -1859,7 +2429,7 @@ impl FinchippayContract {
         for i in 0..amounts.len() {
             let amount = amounts.get(i).unwrap();
             if amount <= 0 {
-                panic!("amount must be positive");
+                return Err(ContractError::NonPositiveAmount);
             }
         }
         let token = get_token_client(&env, &token_address);
@@ -1898,7 +2468,13 @@ impl FinchippayContract {
                 .set(&DataKey::TipRecord(to.clone(), current_count), &record);
             bump(&env, &DataKey::TipRecord(to.clone(), current_count));
 
-            recipient_updates.set(to.clone(), (current_count + 1, acc_amt + amount));
+            recipient_updates.set(
+                to.clone(),
+                (
+                    current_count.checked_add(1).expect("overflow"),
+                    acc_amt.checked_add(amount).expect("overflow"),
+                ),
+            );
 
             env.events()
                 .publish((Symbol::new(&env, "tip"), from.clone(), to.clone()), (amount, memo));
@@ -2759,7 +3335,7 @@ mod tests {
         client.set_pauser(&admin, &pauser);
         // The pauser must not be able to swap the contract WASM.
         let dummy_hash = BytesN::from_array(&env, &[0u8; 32]);
-        client.upgrade(&pauser, &dummy_hash);
+        client.upgrade(&pauser, &dummy_hash, &1);
     }
 
     // ── Batch send ─────────────────────────────────────────────────────────
@@ -3976,4 +4552,308 @@ mod tests {
         // Call revoke with non_admin - should panic with "Unauthorized"
         client.revoke_vesting(&id, &non_admin);
     }
+
+    // ── Emergency withdrawal ──────────────────────────────────────────────
+
+    /// Helper: deploy a contract, create a token, mint to contract, and
+    /// configure admin signers with the given threshold.
+    fn setup_emergency(
+        env: &Env,
+        num_signers: u32,
+        threshold: u32,
+        contract_tokens: i128,
+    ) -> (Address, FinchippayContractClient<'_>, Address, Vec<Address>) {
+        let (id, client) = deploy(env);
+        let admin = client.get_admin();
+        env.mock_all_auths();
+
+        // Mint tokens directly to the contract (simulates untracked funds).
+        let token_id = create_token(env, &admin, &id, contract_tokens);
+
+        // Build admin signers: admin + (num_signers - 1) generated addresses.
+        let mut signers: Vec<Address> = Vec::new(env);
+        signers.push_back(admin.clone());
+        for _ in 1..num_signers {
+            signers.push_back(Address::generate(env));
+        }
+        client.set_admin_signers(&admin, &signers, &threshold);
+
+        (id, client, token_id, signers)
+    }
+
+    #[test]
+    fn test_emergency_withdrawal_full_lifecycle() {
+        let env = Env::default();
+        let (_contract_id, client, token_id, signers) =
+            setup_emergency(&env, 3, 2, 10_000);
+        let admin = client.get_admin();
+        let to = Address::generate(&env);
+        let token = token::Client::new(&env, &token_id);
+
+        let current = env.ledger().sequence();
+        let id = client.initiate_emergency_withdrawal(&admin, &token_id, &5_000, &to);
+        let w = client.get_emergency_withdrawal(&id);
+        assert_eq!(w.status, EmergencyWithdrawalStatus::Pending);
+        assert_eq!(w.activation_ledger, current + EMERGENCY_WITHDRAWAL_DELAY);
+
+        // First approval — still pending.
+        client.approve_emergency_withdrawal(&id, &signers.get(1).unwrap());
+        let w = client.get_emergency_withdrawal(&id);
+        assert_eq!(w.status, EmergencyWithdrawalStatus::Pending);
+        assert_eq!(w.approvals.len(), 1);
+
+        // Advance past activation ledger, then second approval triggers execution.
+        advance(&env, w.activation_ledger);
+        client.approve_emergency_withdrawal(&id, &signers.get(2).unwrap());
+        let w = client.get_emergency_withdrawal(&id);
+        assert_eq!(w.status, EmergencyWithdrawalStatus::Executed);
+        assert_eq!(token.balance(&to), 5_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "emergency withdrawal not ready")]
+    fn test_emergency_withdrawal_execute_before_delay_panics() {
+        let env = Env::default();
+        let (_, client, token_id, signers) = setup_emergency(&env, 2, 2, 5_000);
+        let admin = client.get_admin();
+        let to = Address::generate(&env);
+
+        let id = client.initiate_emergency_withdrawal(&admin, &token_id, &3_000, &to);
+        // Both approvals before activation ledger — manual execute must fail.
+        client.approve_emergency_withdrawal(&id, &admin);
+        client.approve_emergency_withdrawal(&id, &signers.get(1).unwrap());
+        // Threshold met, but activation ledger not reached.
+        client.execute_emergency_withdrawal(&id);
+    }
+
+    #[test]
+    fn test_emergency_withdrawal_cancel_by_admin() {
+        let env = Env::default();
+        let (_, client, token_id, signers) = setup_emergency(&env, 2, 2, 5_000);
+        let admin = client.get_admin();
+        let to = Address::generate(&env);
+
+        let id = client.initiate_emergency_withdrawal(&admin, &token_id, &2_000, &to);
+        client.approve_emergency_withdrawal(&id, &signers.get(1).unwrap());
+        // Cancel before execution.
+        client.cancel_emergency_withdrawal(&id, &admin);
+        let w = client.get_emergency_withdrawal(&id);
+        assert_eq!(w.status, EmergencyWithdrawalStatus::Cancelled);
+    }
+
+    #[test]
+    #[should_panic(expected = "Unauthorized")]
+    fn test_emergency_withdrawal_non_admin_cannot_initiate() {
+        let env = Env::default();
+        let (_, client, token_id, _signers) = setup_emergency(&env, 2, 2, 5_000);
+        let stranger = Address::generate(&env);
+        let to = Address::generate(&env);
+        env.mock_all_auths();
+
+        client.initiate_emergency_withdrawal(&stranger, &token_id, &1_000, &to);
+    }
+
+    #[test]
+    #[should_panic(expected = "insufficient admin approvals")]
+    fn test_emergency_withdrawal_execute_without_enough_approvals_panics() {
+        let env = Env::default();
+        let (_, client, token_id, signers) = setup_emergency(&env, 3, 3, 5_000);
+        let admin = client.get_admin();
+        let to = Address::generate(&env);
+
+        let id = client.initiate_emergency_withdrawal(&admin, &token_id, &1_000, &to);
+        let w = client.get_emergency_withdrawal(&id);
+        advance(&env, w.activation_ledger);
+        // Only 1 of 3 approvals.
+        client.approve_emergency_withdrawal(&id, &signers.get(1).unwrap());
+        client.execute_emergency_withdrawal(&id);
+    }
+
+    #[test]
+    #[should_panic(expected = "already approved")]
+    fn test_emergency_withdrawal_duplicate_approval_panics() {
+        let env = Env::default();
+        let (_, client, token_id, signers) = setup_emergency(&env, 2, 2, 5_000);
+        let admin = client.get_admin();
+        let to = Address::generate(&env);
+
+        let id = client.initiate_emergency_withdrawal(&admin, &token_id, &1_000, &to);
+        client.approve_emergency_withdrawal(&id, &signers.get(1).unwrap());
+        client.approve_emergency_withdrawal(&id, &signers.get(1).unwrap()); // duplicate
+    }
+
+    #[test]
+    fn test_emergency_withdrawal_threshold_met_before_delay_executes_later() {
+        let env = Env::default();
+        let (_, client, token_id, signers) = setup_emergency(&env, 2, 2, 5_000);
+        let admin = client.get_admin();
+        let to = Address::generate(&env);
+        let token = token::Client::new(&env, &token_id);
+
+        let id = client.initiate_emergency_withdrawal(&admin, &token_id, &4_000, &to);
+        // Both approvals immediately — threshold met but delay not elapsed.
+        // Admin (signer[0]) approved on initiate? No — must approve separately.
+        client.approve_emergency_withdrawal(&id, &admin);
+        client.approve_emergency_withdrawal(&id, &signers.get(1).unwrap());
+        let w = client.get_emergency_withdrawal(&id);
+        assert_eq!(w.status, EmergencyWithdrawalStatus::Pending);
+
+        // Advance past activation ledger, then call execute.
+        advance(&env, w.activation_ledger);
+        client.execute_emergency_withdrawal(&id);
+        let w = client.get_emergency_withdrawal(&id);
+        assert_eq!(w.status, EmergencyWithdrawalStatus::Executed);
+        assert_eq!(token.balance(&to), 4_000);
+    }
+
+    // ── Receipt verification ─────────────────────────────────────────────
+
+    #[test]
+    fn test_verify_receipt_matches_on_chain_data() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        env.mock_all_auths();
+        let _token_id = create_token(&env, &admin, &from, 5_000);
+        let memo = Symbol::new(&env, "inv_42");
+        client.mint_receipt(&from, &to, &1_500, &memo);
+
+        assert!(client.verify_receipt(&from, &0, &1_500, &memo));
+    }
+
+    #[test]
+    fn test_verify_receipt_returns_false_for_wrong_amount() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        env.mock_all_auths();
+        let _token_id = create_token(&env, &admin, &from, 5_000);
+        let memo = Symbol::new(&env, "inv_42");
+        client.mint_receipt(&from, &to, &1_500, &memo);
+
+        assert!(!client.verify_receipt(&from, &0, &9_999, &memo));
+    }
+
+    #[test]
+    fn test_verify_receipt_returns_false_for_wrong_memo() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        env.mock_all_auths();
+        let _token_id = create_token(&env, &admin, &from, 5_000);
+        let memo = Symbol::new(&env, "inv_42");
+        client.mint_receipt(&from, &to, &1_500, &memo);
+
+        let wrong_memo = Symbol::new(&env, "WRONG");
+        assert!(!client.verify_receipt(&from, &0, &1_500, &wrong_memo));
+    }
+
+    #[test]
+    fn test_verify_receipt_returns_false_for_nonexistent_index() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        env.mock_all_auths();
+        let _token_id = create_token(&env, &admin, &from, 5_000);
+        let memo = Symbol::new(&env, "inv_42");
+        client.mint_receipt(&from, &to, &1_500, &memo);
+
+        assert!(!client.verify_receipt(&from, &99, &1_500, &memo));
+    }
+
+    #[test]
+    fn test_generate_receipt_proof_returns_stored_fields() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        env.mock_all_auths();
+        let _token_id = create_token(&env, &admin, &from, 5_000);
+        let memo = Symbol::new(&env, "rent_jan");
+        client.mint_receipt(&from, &to, &2_500, &memo);
+
+        let proof = client.generate_receipt_proof(&from, &0);
+        assert_eq!(proof.receipt_index, 0);
+        assert_eq!(proof.payer, from);
+        assert_eq!(proof.expected_amount, 2_500);
+        assert_eq!(proof.expected_memo, memo);
+    }
+
+    #[test]
+    fn test_verify_receipt_multiple_receipts_independent() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        env.mock_all_auths();
+        let _token_id = create_token(&env, &admin, &from, 10_000);
+        let memo_a = Symbol::new(&env, "receipt_a");
+        let memo_b = Symbol::new(&env, "receipt_b");
+        client.mint_receipt(&from, &to, &100, &memo_a);
+        client.mint_receipt(&from, &to, &200, &memo_b);
+
+        // Each receipt verifies independently.
+        assert!(client.verify_receipt(&from, &0, &100, &memo_a));
+        assert!(client.verify_receipt(&from, &1, &200, &memo_b));
+        // Cross-checks fail.
+        assert!(!client.verify_receipt(&from, &0, &200, &memo_b));
+        assert!(!client.verify_receipt(&from, &1, &100, &memo_a));
+    }
+
+    // ==================== Storage Compatibility Tests ====================
+
+    #[test]
+    fn test_get_storage_layout_version_returns_initial() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let version = client.get_storage_layout_version();
+        assert_eq!(version, 1);
+    }
+
+    #[test]
+    fn test_validate_compatibility_same_version_passes() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        assert!(client.validate_storage_compatibility(&1));
+    }
+
+    #[test]
+    fn test_validate_compatibility_higher_version_passes() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        assert!(client.validate_storage_compatibility(&5));
+    }
+
+    #[test]
+    #[should_panic(expected = "new WASM storage layout version is lower than current")]
+    fn test_validate_compatibility_lower_version_panics() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        client.validate_storage_compatibility(&0);
+    }
+
+    #[test]
+    #[should_panic(expected = "new WASM storage layout version is lower than current")]
+    fn test_upgrade_rejects_lower_layout_version() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        env.mock_all_auths();
+
+        let dummy_hash = BytesN::from_array(&env, &[1u8; 32]);
+        client.upgrade(&admin, &dummy_hash, &0);
+    }
 }
+
+// Mock contracts for storage compatibility tests — no longer needed.
+// Kept as empty module placeholder to avoid disrupting surrounding code.

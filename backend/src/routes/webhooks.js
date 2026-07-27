@@ -1,3 +1,8 @@
+/**
+ * src/routes/webhooks.js
+ * Webhook management API endpoints.
+ */
+
 "use strict";
 
 const express = require("express");
@@ -12,6 +17,8 @@ const {
   registerWebhookSchema,
   publicKeyParamSchema,
   idParamSchema,
+  getEventsQuerySchema,
+  replayEventsBodySchema,
 } = require("../validation/schemas");
 
 /**
@@ -19,11 +26,6 @@ const {
  * Register a webhook for a Stellar account.
  *
  * Body: { publicKey: "G...", url: "https://...", secret: "whsec_..." }
- *
- * Validation (registerWebhookSchema):
- *   - publicKey must be a valid 56-char Stellar address.
- *   - url must be an HTTPS endpoint (reject http:// in production).
- *   - secret must be at least 8 characters (HMAC-SHA256 signing secret).
  */
 router.post("/", validate(registerWebhookSchema), async (req, res, next) => {
   try {
@@ -35,7 +37,7 @@ router.post("/", validate(registerWebhookSchema), async (req, res, next) => {
     );
     return res.status(201).json({ success: true, webhook });
   } catch (err) {
-    return next(err);
+    next(err);
   }
 });
 
@@ -52,7 +54,65 @@ router.get(
       const hooks = await webhookService.getWebhooksByPublicKey(publicKey);
       return res.json({ webhooks: hooks });
     } catch (err) {
-      return next(err);
+      next(err);
+    }
+  },
+);
+
+/**
+ * GET /api/webhooks/:publicKey/events
+ * Get paginated past events for a Stellar account.
+ */
+router.get(
+  "/:publicKey/events",
+  validate(publicKeyParamSchema, "params"),
+  validate(getEventsQuerySchema, "query"),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validatedParams || req.params;
+      const options = req.validatedQuery || req.query;
+      const events = await webhookService.getEvents(publicKey, options);
+      return res.json({ events });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * POST /api/webhooks/:publicKey/replay
+ * Replay selected events.
+ */
+router.post(
+  "/:publicKey/replay",
+  validate(publicKeyParamSchema, "params"),
+  validate(replayEventsBodySchema),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validatedParams || req.params;
+      const options = req.validated;
+      const result = await webhookService.replayEvents(publicKey, options);
+      return res.json({ success: true, ...result });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * GET /api/webhooks/:publicKey/events/stats
+ * Get event stats by type.
+ */
+router.get(
+  "/:publicKey/events/stats",
+  validate(publicKeyParamSchema, "params"),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validatedParams || req.params;
+      const stats = await webhookService.getEventStats(publicKey);
+      return res.json({ stats });
+    } catch (err) {
+      next(err);
     }
   },
 );
@@ -70,7 +130,7 @@ router.get(
       const failures = await webhookService.getDeadDeliveries(publicKey);
       return res.json({ failures });
     } catch (err) {
-      return next(err);
+      next(err);
     }
   },
 );
@@ -88,7 +148,7 @@ router.post(
       const result = await webhookService.retryDeadDeliveries(publicKey);
       return res.json({ success: true, ...result });
     } catch (err) {
-      return next(err);
+      next(err);
     }
   },
 );
@@ -105,13 +165,16 @@ router.delete(
       const { id } = req.validated;
       const deleted = await webhookService.deleteWebhook(id);
       if (!deleted) {
-        return res
-          .status(404)
-          .json(formatErrorResponse("RES_NOT_FOUND", { resourceType: "webhook", id }));
+        return res.status(ERROR_CODES.RES_NOT_FOUND.httpStatus).json(
+          formatErrorResponse("RES_NOT_FOUND", {
+            resourceType: "webhook",
+            id,
+          }),
+        );
       }
-      return res.json({ success: true, message: `Webhook ${id} deleted` });
+      return res.json({ success: true, message: "Webhook " + id + " deleted" });
     } catch (err) {
-      return next(err);
+      next(err);
     }
   },
 );

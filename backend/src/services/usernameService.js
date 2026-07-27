@@ -14,7 +14,7 @@
 
 const knex = require("../db/connection");
 
-// ─── Validation helpers ───────────────────────────────────────────────────────
+// ─── Validation helpers ──────────────────────────────────────────────────────
 
 /**
  * Throw a 400 error if `username` is not a valid Finchippay username.
@@ -42,7 +42,7 @@ function validateUsername(username) {
 /**
  * Throw a 400 error if `publicKey` is not a valid Stellar public key.
  *
- * Valid format: 'G' followed by 55 uppercase alphanumeric characters.
+ * Valid format: 'G' followed by 55 base-32 (A-Z, 2-7) characters.
  *
  * @param {string} publicKey
  * @throws {{ message: string, status: 400 }}
@@ -53,14 +53,14 @@ function validatePublicKey(publicKey) {
     err.status = 400;
     throw err;
   }
-  if (!/^G[A-Z0-9]{55}$/.test(publicKey)) {
+  if (!/^G[A-Z2-7]{55}$/.test(publicKey)) {
     const err = new Error("Invalid Stellar public key format");
     err.status = 400;
     throw err;
   }
 }
 
-// ─── Core operations ──────────────────────────────────────────────────────────
+// ─── Core operations ───────────────────────────────────────────────────────
 
 /**
  * Register a new username for a Stellar public key.

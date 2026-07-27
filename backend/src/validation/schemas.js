@@ -216,6 +216,23 @@ const registerWebhookSchema = z.object({
     .min(8, "Secret must be at least 8 characters for HMAC-SHA256 security"),
 });
 
+
+const getEventsQuerySchema = z.object({
+  since: z.string().datetime().optional(),
+  until: z.string().datetime().optional(),
+  type: z.string().optional(),
+  limit: z.preprocess((val) => parseInt(val, 10), z.number().int().min(1).max(100).optional()).optional(),
+  cursor: z.string().optional(),
+});
+
+const replayEventsBodySchema = z.object({
+  eventIds: z.array(z.string()).optional(),
+  since: z.string().datetime().optional(),
+  until: z.string().datetime().optional(),
+}).refine(data => (data.eventIds && data.eventIds.length > 0) || data.since, {
+  message: "Either eventIds or since must be provided",
+});
+
 // ─── parse-payment (AI intent parser) ─────────────────────────────────────────
 
 /** POST /api/parse-payment */
@@ -223,6 +240,32 @@ const parsePaymentSchema = z.object({
   input: z
     .string({ required_error: "Please provide a payment description." })
     .min(1, "Please provide a payment description."),
+});
+
+// ─── receipts / IPFS ────────────────────────────────────────────────────────
+
+const ipfsUploadSchema = z.object({
+  metadata: z
+    .record(z.unknown(), { required_error: "metadata is required" })
+    .refine((value) => Object.keys(value).length > 0, {
+      message: "metadata must not be empty",
+    }),
+});
+
+const ipfsFetchSchema = z.object({
+  cid: z.string({ required_error: "cid is required" }).min(1, "cid is required"),
+});
+
+const mintWithIpfsSchema = z.object({
+  publicKey: z
+    .string({ required_error: "publicKey is required" })
+    .min(1, "publicKey is required"),
+  memo: z.string().optional(),
+  metadata: z
+    .record(z.unknown(), { required_error: "metadata is required" })
+    .refine((value) => Object.keys(value).length > 0, {
+      message: "metadata must not be empty",
+    }),
 });
 
 // ─── scheduled transactions ───────────────────────────────────────────────────
@@ -288,6 +331,69 @@ const federationQuerySchema = z.object({
   }),
 });
 
+// ─── events ───────────────────────────────────────────────────────────────────
+
+/** Query params for GET /api/events/:publicKey */
+const eventsQuerySchema = z.object({
+  limit: z.coerce
+    .number({ invalid_type_error: "limit must be a positive integer" })
+    .int("limit must be a positive integer")
+    .min(1, "limit must be a positive integer")
+    .transform((n) => Math.min(n, 100))
+    .default(20),
+  offset: z.coerce
+    .number({ invalid_type_error: "offset must be a non-negative integer" })
+    .int("offset must be a non-negative integer")
+    .min(0, "offset must be a non-negative integer")
+    .default(0),
+});
+
+// ─── SEP-0012 (KYC) ───────────────────────────────────────────────────────────
+
+/** POST /api/sep12/customer — submit KYC fields */
+const sep12CustomerBodySchema = z.object({
+  anchorName: z
+    .string({ required_error: "anchorName is required" })
+    .min(1, "anchorName is required"),
+  fields: z.record(z.unknown(), {
+    required_error: "fields object is required",
+  }),
+});
+
+/** GET /api/sep12/customer — fetch KYC data */
+const sep12CustomerQuerySchema = z.object({
+  anchorName: z
+    .string({ required_error: "The anchorName query parameter is required." })
+    .min(1, "The anchorName query parameter is required."),
+});
+
+// ─── admin feature flags ──────────────────────────────────────────────────────
+
+/** POST /api/admin/feature-flags/:key/toggle */
+const adminToggleFlagSchema = z.object({
+  enabled: z.union([z.boolean(), z.null()], {
+    required_error: 'Body must include "enabled" as true, false, or null.',
+    message: 'Body must include "enabled" as true, false, or null.',
+  }),
+});
+
+// ─── SEP-0024 deposit / withdraw ──────────────────────────────────────────────
+
+/** POST /api/sep24/deposit and POST /api/sep24/withdraw */
+const sep24DepositWithdrawSchema = z.object({
+  assetCode: z
+    .string({ required_error: "assetCode is required" })
+    .min(1, "assetCode is required"),
+  account: z
+    .string({ required_error: "account is required" })
+    .regex(/^G[A-Z2-7]{55}$/, "Invalid Stellar public key format"),
+  assetIssuer: z.string().optional(),
+  amount: z.string().optional(),
+  destAccount: z.string().optional(),
+  anchorName: z.string().optional(),
+  token: z.string().optional(),
+});
+
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -316,8 +422,14 @@ module.exports = {
   turretsListQuerySchema,
   // webhooks
   registerWebhookSchema,
+  getEventsQuerySchema,
+  replayEventsBodySchema,
   // parse-payment
   parsePaymentSchema,
+  // receipts / IPFS
+  ipfsUploadSchema,
+  ipfsFetchSchema,
+  mintWithIpfsSchema,
   // scheduled transactions
   scheduleTransactionSchema,
   // sep24
@@ -325,4 +437,13 @@ module.exports = {
   sep24TransactionQuerySchema,
   // federation
   federationQuerySchema,
+  // events
+  eventsQuerySchema,
+  // sep12
+  sep12CustomerBodySchema,
+  sep12CustomerQuerySchema,
+  // admin feature flags
+  adminToggleFlagSchema,
+  // sep24 deposit/withdraw
+  sep24DepositWithdrawSchema,
 };

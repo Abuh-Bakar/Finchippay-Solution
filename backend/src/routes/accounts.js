@@ -58,7 +58,6 @@ router.get(
   sensitiveLimiter,
   sanitizeUsername,
   validate(usernameParamSchema, "params"),
-
   accountController.resolveUsername,
 );
 
@@ -116,6 +115,34 @@ router.post(
   strictLimiter,
   validate(registerUsernameSchema),
   accountController.registerUsername,
+);
+
+/**
+ * POST /api/accounts/:publicKey/gdpr-delete
+ * Anonymize stored off-chain data for the account (GDPR/CCPA #76).
+ */
+router.post(
+  "/:publicKey/gdpr-delete",
+  sensitiveLimiter,
+  verifyJWT,
+  sanitizePublicKey,
+  validate(publicKeyParamSchema, "params"),
+  requireOwnAccount,
+  accountController.gdprDelete,
+);
+
+/**
+ * GET /api/accounts/:publicKey/gdpr-export
+ * Return all stored off-chain data for the account as JSON (GDPR/CCPA #76).
+ */
+router.get(
+  "/:publicKey/gdpr-export",
+  sensitiveLimiter,
+  verifyJWT,
+  sanitizePublicKey,
+  validate(publicKeyParamSchema, "params"),
+  requireOwnAccount,
+  accountController.gdprExport,
 );
 
 module.exports = router;

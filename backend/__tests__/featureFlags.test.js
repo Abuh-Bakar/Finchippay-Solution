@@ -12,7 +12,7 @@
 "use strict";
 
 const request = require("supertest");
-const jwt     = require("jsonwebtoken");
+const jwt = require("jsonwebtoken");
 
 // ─── Service unit tests ───────────────────────────────────────────────────────
 
@@ -65,11 +65,15 @@ describe("featureFlagsService", () => {
     });
 
     it("returns true for streaming_payments in production (100% rollout)", () => {
-      expect(service.evaluateFlag("streaming_payments", "production")).toBe(true);
+      expect(service.evaluateFlag("streaming_payments", "production")).toBe(
+        true,
+      );
     });
 
     it("returns true for streaming_payments in development (100% rollout)", () => {
-      expect(service.evaluateFlag("streaming_payments", "development")).toBe(true);
+      expect(service.evaluateFlag("streaming_payments", "development")).toBe(
+        true,
+      );
     });
 
     it("returns false for ledger_wallet in production (env disabled)", () => {
@@ -103,7 +107,9 @@ describe("featureFlagsService", () => {
 
       service.toggleFlag("streaming_payments", null);
       // After removing the override, production/100% flag should be true again.
-      expect(service.evaluateFlag("streaming_payments", "production")).toBe(true);
+      expect(service.evaluateFlag("streaming_payments", "production")).toBe(
+        true,
+      );
     });
   });
 
@@ -178,7 +184,8 @@ describe("Feature flags HTTP endpoints", () => {
   let app;
   let featureFlagsService;
   const JWT_SECRET = process.env.JWT_SECRET || "finchippay_secret_key";
-  const TEST_PUBLIC_KEY = "GBRPYHIL2CI3WHZDTOOQFC6EB4KJJGUJLVXKJ46ZGFWTTNQNXNHTJXW";
+  const TEST_PUBLIC_KEY =
+    "GBRPYHIL2CI3WHZDTOOQFC6EB4KJJGUJLVXKJ46ZGFWTTNQNXNHTJXW";
 
   function makeToken(publicKey = TEST_PUBLIC_KEY) {
     return jwt.sign({ publicKey }, JWT_SECRET, { expiresIn: "1h" });

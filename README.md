@@ -138,6 +138,25 @@ cargo test
 cargo build --release --target wasm32v1-none
 ```
 
+### Generate TypeScript contract bindings
+
+The frontend uses auto-generated TypeScript bindings from the deployed Soroban contract ABI for type-safe contract interaction. This eliminates manual `nativeToScVal`/`scValToNative` conversions.
+
+```bash
+# Generate bindings for testnet (default)
+bash scripts/gen-contract-bindings.sh
+
+# Generate bindings for mainnet
+NETWORK=mainnet bash scripts/gen-contract-bindings.sh
+
+# Generate bindings with explicit contract ID
+CONTRACT_ID=C… bash scripts/gen-contract-bindings.sh
+```
+
+The generated files live in `frontend/lib/contract-bindings/` and are checked into version control. CI ensures the checked-in bindings stay in sync with the deployed contract — if the contract ABI changes, CI will fail until bindings are regenerated.
+
+**Prerequisites:** Stellar CLI (`cargo install --locked stellar-cli`).
+
 ### Deploy the contract to Stellar testnet
 
 ```bash
@@ -195,6 +214,7 @@ Key backend variables:
 | [docs/api.md](docs/api.md) | Full REST API reference |
 | [docs/architecture.md](docs/architecture.md) | System design and data flows |
 | [docs/deployment.md](docs/deployment.md) | Production deployment guide |
+| [docs/onboarding.md](docs/onboarding.md) | Interactive onboarding tour (Issue #254) |
 | [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) | Docker / cloud deployment |
 | [ENV.md](ENV.md) | Environment variable reference |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |

@@ -148,7 +148,10 @@ async function getAccount(publicKey) {
     const cacheKey = `account:${publicKey}`;
     const cached = await cache.get(cacheKey);
     if (cached) {
-      metrics.horizonRequestsTotal.inc({ operation: "loadAccount", status: "cache_hit" });
+      metrics.horizonRequestsTotal.inc({
+        operation: "loadAccount",
+        status: "cache_hit",
+      });
       return cached;
     }
 
@@ -181,7 +184,10 @@ async function getAccount(publicKey) {
       await cache.set(cacheKey, result, ACCOUNT_CACHE_TTL_SEC);
       return result;
     } catch (err) {
-      metrics.horizonRequestsTotal.inc({ operation: "loadAccount", status: "error" });
+      metrics.horizonRequestsTotal.inc({
+        operation: "loadAccount",
+        status: "error",
+      });
       if (err?.response?.status === 404) {
         const error = new Error(
           "Account not found. It may not be funded yet. Use Friendbot on testnet.",
@@ -237,7 +243,10 @@ async function getPayments(publicKey, { limit = 20, cursor } = {}) {
   if (shouldCache) {
     const cached = await cache.get(paymentsCacheKey);
     if (cached) {
-      metrics.horizonRequestsTotal.inc({ operation: "getPayments", status: "cache_hit" });
+      metrics.horizonRequestsTotal.inc({
+        operation: "getPayments",
+        status: "cache_hit",
+      });
       return cached;
     }
   }
@@ -330,6 +339,63 @@ async function getPayments(publicKey, { limit = 20, cursor } = {}) {
   return payments;
 }
 
+// Payment-type operations counted for pagination totals (mirrors getPayments).
+const COUNTED_PAYMENT_TYPES = new Set([
+  "payment",
+  "path_payment_strict_send",
+  "path_payment_strict_receive",
+]);
+
+/**
+ * Approximate, bounded count of an account's payment operations for the
+ * `X-Total-Count` header. Horizon exposes no total, and paging through the
+ * whole history would reintroduce the memory/latency problem cursor pagination
+ * is meant to avoid — so this makes a single lean Horizon call (no per-op memo
+ * fetch, unlike getPayments) capped at `cap` (Horizon's max page size, 200).
+ *
+ * The result is a floor: if it equals `cap` the true total may be higher. Cached
+ * with the same short TTL as the payments list.
+ *
+ * @param {string} publicKey
+ * @param {{ cap?: number }} [options]
+ * @returns {Promise<number>} count of payment-type ops, at most `cap`.
+ */
+async function countPaymentsApprox(publicKey, { cap = 200 } = {}) {
+  validatePublicKey(publicKey);
+
+  const cache = getCache();
+  const cacheKey = `payments:count:${publicKey}:${cap}`;
+  const cached = await cache.get(cacheKey);
+  if (cached !== undefined && cached !== null) {
+    metrics.horizonRequestsTotal.inc({
+      operation: "countPayments",
+      status: "cache_hit",
+    });
+    return cached;
+  }
+
+  const result = await withTracedSpan(
+    "countPayments",
+    "Horizon.countPayments",
+    () =>
+      withTimeoutAndRetry(() =>
+        server.payments().forAccount(publicKey).limit(cap).order("desc").call(),
+      ),
+  );
+
+  const total = result.records.filter((op) =>
+    COUNTED_PAYMENT_TYPES.has(op.type),
+  ).length;
+
+  try {
+    await cache.set(cacheKey, total, PAYMENTS_CACHE_TTL_SEC);
+  } catch (err) {
+    logger.warn({ err }, "Failed to cache payment count");
+  }
+
+  return total;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function validatePublicKey(publicKey) {
@@ -344,5 +410,6 @@ module.exports = {
   getAccount,
   getXLMBalance,
   getPayments,
+  countPaymentsApprox,
   validatePublicKey,
 };

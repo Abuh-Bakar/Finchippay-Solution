@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { AssetInfo } from "@/lib/assetDiscovery";
 
 interface TokenCardProps {
@@ -8,11 +9,23 @@ interface TokenCardProps {
 export default function TokenCard({ asset, onAddTrustline }: TokenCardProps) {
   const truncatedIssuer = `${asset.issuer.slice(0, 8)}...${asset.issuer.slice(-4)}`;
 
+  const imageElement = asset.image ? (
+    <Image
+      src={asset.image}
+      alt={asset.code}
+      width={40}
+      height={40}
+      className="h-10 w-10 rounded-full object-cover"
+      loading="lazy"
+      unoptimized
+    />
+  ) : null;
+
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
       <div className="flex items-center gap-3">
         {asset.image ? (
-          <img src={asset.image} alt={asset.code} className="h-10 w-10 rounded-full" />
+          imageElement
         ) : (
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-700">
             {asset.code.slice(0, 2)}

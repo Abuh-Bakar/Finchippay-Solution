@@ -25,10 +25,12 @@ jest.mock("../src/services/webhookService", () => {
     ),
     deleteWebhook: jest.fn((id) => store.delete(id)),
     getDeadDeliveries: jest.fn((publicKey) =>
-      deadDeliveries.filter((d) => d.publicKey === publicKey)
+      deadDeliveries.filter((d) => d.publicKey === publicKey),
     ),
     retryDeadDeliveries: jest.fn((publicKey) => {
-      const count = deadDeliveries.filter((d) => d.publicKey === publicKey).length;
+      const count = deadDeliveries.filter(
+        (d) => d.publicKey === publicKey,
+      ).length;
       return { reset: count };
     }),
   };
@@ -58,7 +60,7 @@ describe("POST /api/webhooks", () => {
       .post("/api/webhooks")
       .send({ url: "https://x.test/h" });
     expect(res.status).toBe(400);
-    expect(res.body.error.message).toMatch(/required/i);
+    expect(res.body.error).toMatch(/required/i);
   });
 
   it("registers a webhook", async () => {
@@ -99,7 +101,13 @@ describe("GET /api/webhooks/:publicKey", () => {
 describe("GET /api/webhooks/:publicKey/failures", () => {
   it("returns dead deliveries for the account", async () => {
     webhookService.getDeadDeliveries.mockReturnValue([
-      { id: "del-1", webhook_id: "1", event_type: "payment.received", status: "dead", attempts: 5 },
+      {
+        id: "del-1",
+        webhook_id: "1",
+        event_type: "payment.received",
+        status: "dead",
+        attempts: 5,
+      },
     ]);
 
     const res = await request(app()).get(`/api/webhooks/${ME}/failures`);

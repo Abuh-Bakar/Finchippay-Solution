@@ -9,6 +9,11 @@ const express = require("express");
 const router = express.Router();
 const { strictLimiter } = require("../middleware/rateLimit");
 const { sanitizePublicKey } = require("../middleware/sanitization");
+const { validate } = require("../validation/middleware");
+const {
+  publicKeyParamSchema,
+  eventsQuerySchema,
+} = require("../validation/schemas");
 const eventController = require("../controllers/eventController");
 
 /**
@@ -23,6 +28,8 @@ router.get(
   "/:publicKey",
   strictLimiter,
   sanitizePublicKey,
+  validate(publicKeyParamSchema, "params"),
+  validate(eventsQuerySchema, "query"),
   eventController.getEvents,
 );
 
@@ -34,6 +41,7 @@ router.get(
   "/:publicKey/stats",
   strictLimiter,
   sanitizePublicKey,
+  validate(publicKeyParamSchema, "params"),
   eventController.getStats,
 );
 

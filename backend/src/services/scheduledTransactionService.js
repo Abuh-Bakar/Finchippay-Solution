@@ -5,17 +5,12 @@
  * unsigned XDR and waits for the owner to sign via Freighter. The signed
  * transaction is then submitted to Horizon.
  *
- * Storage: Knex (SQLite in development, PostgreSQL in production). The
- * earlier version of this file used better-sqlite3 prepared statements
- * directly; the migration to Knex was incomplete, so this rewrite unifies
- * every read/write through the shared `knex` query builder.
+ * Storage: Knex (SQLite in development, PostgreSQL in production).
  */
 
 "use strict";
-
 const crypto = require("crypto");
 const cron = require("node-cron");
-
 const {
   Asset,
   Memo,
@@ -31,7 +26,9 @@ const webhookService = require("./webhookService");
 const logger = require("../utils/logger");
 
 const NETWORK_PASSPHRASE =
-  process.env.STELLAR_NETWORK === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
+  process.env.STELLAR_NETWORK === "mainnet"
+    ? Networks.PUBLIC
+    : Networks.TESTNET;
 
 // scheduleId -> node-cron task handle
 const activeCronJobs = new Map();
@@ -85,8 +82,7 @@ function estimateNextRun(frequency, fromDate) {
   const next = new Date(fromDate);
   if (frequency === "daily") next.setUTCDate(next.getUTCDate() + 1);
   else if (frequency === "weekly") next.setUTCDate(next.getUTCDate() + 7);
-  else if (frequency === "monthly")
-    next.setUTCMonth(next.getUTCMonth() + 1);
+  else if (frequency === "monthly") next.setUTCMonth(next.getUTCMonth() + 1);
   else return null; // raw cron: fired by node-cron directly, not tracked here
   return next.toISOString();
 }
@@ -149,9 +145,8 @@ async function loadActiveSchedules() {
 // ─── Execution ────────────────────────────────────────────────────────────
 
 async function notifyOwner(schedule, pendingId) {
-  const hooks = await webhookService.getWebhooksByPublicKey(
-    schedule.owner_pk,
-  );
+  const hooks = await webhookService.getWebhooksByPublicKey(schedule.owner_pk);
+
   const payload = {
     event: "scheduled_transaction.pending_signature",
     scheduleId: schedule.id,
@@ -170,6 +165,7 @@ async function executeSchedule(scheduleId) {
     .where("id", scheduleId)
     .andWhere("status", "active")
     .first();
+
   if (!schedule) return;
 
   try {
@@ -230,7 +226,8 @@ async function createSchedule(body) {
 
   const resolvedCron = frequencyToCron(frequency, startDate, cronExpression);
   const id = crypto.randomUUID();
-  const nextRunAt = estimateNextRun(frequency, new Date(startDate)) || startDate;
+  const nextRunAt =
+    estimateNextRun(frequency, new Date(startDate)) || startDate;
 
   await knex("scheduled_transactions").insert({
     id,
@@ -246,9 +243,7 @@ async function createSchedule(body) {
     status: "active",
   });
 
-  const schedule = await knex("scheduled_transactions")
-    .where("id", id)
-    .first();
+  const schedule = await knex("scheduled_transactions").where("id", id).first();
   registerCronJob(schedule);
   return schedule;
 }
@@ -261,9 +256,8 @@ async function listSchedules(ownerPk) {
 }
 
 async function updateSchedule(id, updates) {
-  const existing = await knex("scheduled_transactions")
-    .where("id", id)
-    .first();
+  const existing = await knex("scheduled_transactions").where("id", id).first();
+
   if (!existing) {
     const err = new Error("Scheduled transaction not found");
     err.status = 404;
@@ -280,19 +274,19 @@ async function updateSchedule(id, updates) {
         )
       : existing.cron_expression;
 
-  await knex("scheduled_transactions").where("id", id).update({
-    recipient: merged.recipient,
-    amount: String(merged.amount),
-    asset: merged.asset,
-    memo: merged.memo || null,
-    frequency: merged.frequency,
-    cron_expression: resolvedCron,
-    status: merged.status,
-  });
-
-  const updated = await knex("scheduled_transactions")
+  await knex("scheduled_transactions")
     .where("id", id)
-    .first();
+    .update({
+      recipient: merged.recipient,
+      amount: String(merged.amount),
+      asset: merged.asset,
+      memo: merged.memo || null,
+      frequency: merged.frequency,
+      cron_expression: resolvedCron,
+      status: merged.status,
+    });
+
+  const updated = await knex("scheduled_transactions").where("id", id).first();
 
   if (updated.status === "active") {
     registerCronJob(updated);
@@ -304,9 +298,7 @@ async function updateSchedule(id, updates) {
 }
 
 async function deleteSchedule(id) {
-  const existing = await knex("scheduled_transactions")
-    .where("id", id)
-    .first();
+  const existing = await knex("scheduled_transactions").where("id", id).first();
   if (!existing) return false;
   unregisterCronJob(id);
   await knex("scheduled_transactions").where("id", id).del();
@@ -316,11 +308,7 @@ async function deleteSchedule(id) {
 async function listPendingExecutions(ownerPk) {
   validatePublicKey(ownerPk);
   return knex("pending_executions as pe")
-    .join(
-      "scheduled_transactions as st",
-      "st.id",
-      "pe.schedule_id",
-    )
+    .join("scheduled_transactions as st", "st.id", "pe.schedule_id")
     .where("pe.owner_pk", ownerPk)
     .andWhere("pe.status", "awaiting_signature")
     .orderBy("pe.created_at", "desc")
@@ -328,9 +316,8 @@ async function listPendingExecutions(ownerPk) {
 }
 
 async function submitPendingExecution(id, signedXDR) {
-  const pending = await knex("pending_executions")
-    .where("id", id)
-    .first();
+  const pending = await knex("pending_executions").where("id", id).first();
+
   if (!pending) {
     const err = new Error("Pending execution not found");
     err.status = 404;

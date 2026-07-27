@@ -22,7 +22,6 @@ const {
 const knex = require("../db/connection");
 const priceFeedService = require("./priceFeedService");
 
-
 const HORIZON_URL =
   process.env.HORIZON_URL || "https://horizon-testnet.stellar.org";
 const NETWORK_PASSPHRASE =
@@ -353,29 +352,6 @@ async function addExecutionLog(deploymentId, status, message, result = null) {
 async function getXlmUsdPrice() {
   const priceQuote = await priceFeedService.getXLMPrice();
   return priceQuote.price;
-
-  const now = Date.now();
-  if (priceCache.value !== null && now - priceCache.fetchedAt < 30_000) {
-    return priceCache.value;
-  }
-
-  const res = await fetch(
-    "https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=usd",
-  );
-
-  if (!res.ok) {
-    throw new Error(`Price lookup failed (${res.status})`);
-  }
-
-  const data = await res.json();
-  const value = Number(data?.stellar?.usd);
-
-  if (!Number.isFinite(value) || value <= 0) {
-    throw new Error("Invalid price response from upstream provider");
-  }
-
-  priceCache = { value, fetchedAt: now };
-  return value;
 }
 
 function nextRunIso(intervalMinutes) {
