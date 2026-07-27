@@ -45,7 +45,7 @@ describe("Global 100kb JSON body limit (#81)", () => {
       });
 
     expect(res.status).toBe(413);
-    expect(res.body.error).toMatch(/too large/i);
+    expect(res.body.error).toMatch(/exceeds|too large/i);
   });
 });
 
@@ -68,6 +68,6 @@ describe("/api/turrets 512kb body limit override (#81)", () => {
       .send({ ownerPublicKey: "invalid-key", type: "dca", padding: oversized });
 
     expect(res.status).toBe(413);
-    expect(res.body.error).toMatch(/too large/i);
+    expect(res.body.error).toMatch(/exceeds|too large/i);
   });
 });

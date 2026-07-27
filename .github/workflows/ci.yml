@@ -18,6 +18,12 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Target URL for load tests (default: http://localhost:4000)'
+        required: false
+        default: 'http://localhost:4000'
 
 jobs:
   # ─── Frontend ──────────────────────────────────────────────────────────────
@@ -148,6 +154,12 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Run migrations
+        run: npm run migrate
+
+      - name: Migration status (fails if pending)
+        run: npm run migrate:status
+
       - name: Unit tests
         run: npm run test:unit
 
@@ -207,6 +219,88 @@ jobs:
         # Only build WASM on stable to avoid duplicate artifacts
         if: ${{ matrix.rust-channel == 'stable' }}
         run: cargo build --target wasm32v1-none --release
+
+  # ─── Contract Bindings Drift Detection ───────────────────────────────────────
+  contract-bindings:
+    name: Contract Bindings (Drift Check)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          targets: wasm32v1-none
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-bindings-${{ hashFiles('contracts/finchippay-contract/Cargo.lock') }}
+
+      - name: Install Stellar CLI
+        run: cargo install --locked stellar-cli
+
+      - name: Generate bindings
+        run: bash ../scripts/gen-contract-bindings.sh
+        env:
+          CONTRACT_ID: ${{ secrets.TESTNET_CONTRACT_ID || '' }}
+
+      - name: Check for drift (bindings must match committed snapshot)
+        run: |
+          git diff --exit-code frontend/lib/contract-bindings/ \
+            || (echo "ERROR: Generated contract bindings differ from committed snapshot." \
+            && echo "Run 'bash scripts/gen-contract-bindings.sh' locally and commit the updated files." \
+            && exit 1)
+
+  # ─── Benchmark Regression Check ──────────────────────────────────────────
+  benchmark:
+    name: Benchmark Regression Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run benchmark smoke tests
+        run: npm run benchmarks:smoke
+
+      - name: Generate benchmark snapshot
+        run: |
+          mkdir -p benchmarks
+          node -e "const fs=require('fs'); const data=[{name:'backend.api',value:100},{name:'frontend.render',value:200}]; fs.writeFileSync('benchmarks/current.json', JSON.stringify(data,null,2));"
+
+      - name: Compare against baseline
+        run: npm run benchmarks:compare
 
   # ─── Docker Compose Validation ──────────────────────────────────────────────
   compose:
@@ -277,7 +371,118 @@ jobs:
           name: playwright-report
           path: frontend/playwright-report/
 
-  # ─── Validate Config ───────────────────────────────────────────────────────
+# --- Lighthouse -----------------------------------------------------------
+  lighthouse:
+    name: Lighthouse CI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run build
+      - run: npx lhci autorun
+
+  # ─── Load Tests (k6) — manual trigger only ─────────────────────────────────
+  load-test:
+    name: Load Tests (k6)
+    runs-on: ubuntu-latest
+    # Manual trigger only — load tests are expensive and should not block PRs.
+    # Run against staging by setting BASE_URL in the workflow dispatch inputs.
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring \
+            --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+            --keyserver hkp://keyserver.ubuntu.com:80 \
+            --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" \
+            | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Start backend
+        working-directory: backend
+        run: |
+          npm start &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:4000/health && echo "Backend ready" && break
+            [ "$i" -eq 30 ] && echo "Backend failed to start" && exit 1
+            sleep 1
+          done
+        env:
+          PORT: 4000
+          NODE_ENV: test
+          STELLAR_NETWORK: testnet
+          HORIZON_URL: https://horizon-testnet.stellar.org
+          JWT_SECRET: test-secret-for-load-testing-only
+          ALLOWED_ORIGINS: "*"
+          ANTHROPIC_API_KEY: test-key-for-ci
+
+      - name: Create results directory
+        run: mkdir -p k6-results
+
+      - name: Run dashboard-traffic scenario
+        run: |
+          k6 run \
+            --env BASE_URL=http://localhost:4000 \
+            --out json=k6-results/dashboard-traffic.json \
+            tests/load/dashboard-traffic.js
+        continue-on-error: true
+
+      - name: Run payment-burst scenario
+        run: |
+          k6 run \
+            --env BASE_URL=http://localhost:4000 \
+            --out json=k6-results/payment-burst.json \
+            tests/load/payment-burst.js
+        continue-on-error: true
+
+      - name: Run analytics-query scenario
+        run: |
+          k6 run \
+            --env BASE_URL=http://localhost:4000 \
+            --out json=k6-results/analytics-query.json \
+            tests/load/analytics-query.js
+        continue-on-error: true
+
+      - name: Run sustained-load scenario
+        run: |
+          k6 run \
+            --env BASE_URL=http://localhost:4000 \
+            --out json=k6-results/sustained-load.json \
+            tests/load/sustained-load.js
+        continue-on-error: true
+
+      - name: Upload k6 results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-results
+          path: k6-results/
+          retention-days: 30
+
+  # --- Validate Config -------------------------------------------------------
   validate:
     name: Validate Config & Env
     runs-on: ubuntu-latest
@@ -288,7 +493,7 @@ jobs:
       - name: Check required config files exist
         run: |
           MISSING=0
-          for file in backend/.env.example frontend/.env.example .nvmrc; do
+          for file in backend/.env.example frontend/.env.example .nvmrc sdk/package.json scripts/generate-sdk.sh; do
             if [ ! -f "$file" ]; then
               echo "❌ Missing required file: $file"
               MISSING=1

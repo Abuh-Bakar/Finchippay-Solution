@@ -1,26 +1,48 @@
-/**
- * pages/_app.tsx
- * Global app wrapper for theme, wallet, navigation, and shared overlays.
- */
-
+import "@/lib/api";
 import type { AppProps } from "next/app";
-import { useState, useEffect, createContext, useContext } from "react";
+import { useState, useEffect } from "react";
 import Head from "next/head";
+import { useRouter } from "next/router";
+import { AnimatePresence, motion, MotionConfig } from "framer-motion";
 import Navbar from "@/components/Navbar";
 import QuickSendModal from "@/components/QuickSendModal";
 import { ToastContainer } from "@/components/Toast";
 import { ToastProvider } from "@/lib/ToastContext";
 import { WalletProvider, useWallet } from "@/lib/useWallet";
 import { FeatureFlagProvider } from "@/lib/FeatureFlags";
+import { ThemeProvider } from "@/lib/ThemeContext";
 import OfflineBanner from "@/components/OfflineBanner";
+import MobileBottomNav from "@/components/MobileBottomNav";
+import OnboardingTour from "@/components/OnboardingTour";
+import { useOnboardingTour } from "@/hooks/useOnboardingTour";
 import {
   getStellarURIFromURL,
   registerProtocolHandler,
   type URIParseResult,
 } from "@/lib/sep0007";
 import { I18nextProvider } from "react-i18next";
-import i18n from '@/lib/i18n';
+import i18n from "@/lib/i18n";
+import { getDirection, syncDocumentDirection } from "@/lib/useDirection";
+import { initSdkAuth } from "@/lib/sdk-instance";
 import "@/styles/globals.css";
+import "@/styles/rtl.css";
+
+function DirectionSync() {
+  const [locale, setLocale] = useState(i18n.resolvedLanguage || i18n.language || "en");
+
+  useEffect(() => {
+    const syncDirection = (nextLocale: string) => {
+      syncDocumentDirection(nextLocale);
+      setLocale(nextLocale);
+    };
+
+    syncDirection(i18n.resolvedLanguage || i18n.language || "en");
+    i18n.on("languageChanged", syncDirection);
+    return () => i18n.off("languageChanged", syncDirection);
+  }, []);
+
+  return <span className="sr-only" data-locale={locale} data-direction={getDirection(locale)} />;
+}
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -100,18 +122,6 @@ function InstallBanner() {
   );
 }
 
-interface ThemeContextType {
-  theme: "dark" | "light";
-  toggleTheme: () => void;
-}
-
-export const ThemeContext = createContext<ThemeContextType>({
-  theme: "dark",
-  toggleTheme: () => {},
-});
-
-export const useTheme = () => useContext(ThemeContext);
-
 function AppShell({
   Component,
   pageProps,
@@ -126,7 +136,6 @@ function AppShell({
   setIsQuickSendOpen: (isOpen: boolean) => void;
 }) {
   const { publicKey } = useWallet();
-  useRTL();
 
   return (
     <FeatureFlagProvider publicKey={publicKey}>
@@ -139,15 +148,6 @@ function AppShell({
       />
     </FeatureFlagProvider>
   );
-}
-
-function useRTL() {
-  const lang = i18n.language?.split('-')[0];
-  useEffect(() => {
-    const dir = (lang === 'ar' || lang === 'he') ? 'rtl' : 'ltr';
-    document.documentElement.dir = dir;
-    document.documentElement.lang = lang || 'en';
-  }, [lang]);
 }
 
 function AppShellInner({
@@ -164,17 +164,31 @@ function AppShellInner({
   setIsQuickSendOpen: (isOpen: boolean) => void;
 }) {
   const { publicKey } = useWallet();
-  useRTL();
+  const router = useRouter();
+
+  const tour = useOnboardingTour();
 
   return (
-    <>
+    <MotionConfig reducedMotion="user">
       <div className="min-h-screen bg-white bg-grid transition-colors duration-300 dark:bg-cosmos-900">
         <OfflineBanner />
-        <Navbar />
-        <main>
-          <Component {...pageProps} stellarURI={stellarURI} />
+        <Navbar onTakeTour={tour.startTour} />
+        <OnboardingTour tour={tour} />
+        <main className="pb-20 md:pb-0">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={router.route}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
+            >
+              <Component {...pageProps} stellarURI={stellarURI} />
+            </motion.div>
+          </AnimatePresence>
         </main>
         <InstallBanner />
+        <MobileBottomNav />
       </div>
 
       {publicKey && (
@@ -186,14 +200,17 @@ function AppShellInner({
           usdcBalance={null}
         />
       )}
-    </>
+    </MotionConfig>
   );
 }
 
 export default function App({ Component, pageProps }: AppProps) {
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [stellarURI, setStellarURI] = useState<URIParseResult | null>(null);
   const [isQuickSendOpen, setIsQuickSendOpen] = useState(false);
+
+  useEffect(() => {
+    initSdkAuth();
+  }, []);
 
   useEffect(() => {
     const saved = localStorage.getItem("finchippay:theme") as
@@ -204,7 +221,6 @@ export default function App({ Component, pageProps }: AppProps) {
       saved ??
       (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
 
-    setTheme(preferred);
     document.documentElement.classList.toggle("dark", preferred === "dark");
   }, []);
 
@@ -237,21 +253,15 @@ export default function App({ Component, pageProps }: AppProps) {
     return () => window.removeEventListener("load", registerWorker);
   }, []);
 
-  const toggleTheme = () => {
-    const nextTheme = theme === "dark" ? "light" : "dark";
-    setTheme(nextTheme);
-    document.documentElement.classList.toggle("dark", nextTheme === "dark");
-    localStorage.setItem("finchippay:theme", nextTheme);
-  };
-
   return (
     <I18nextProvider i18n={i18n}>
-      <ThemeContext.Provider value={{ theme, toggleTheme }}>
+      <DirectionSync />
+      <ThemeProvider>
       <ToastProvider>
       <WalletProvider>
         <Head>
           <title>Finchippay-Solution | Instant Stellar Payments</title>
-          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
           <meta
             name="description"
             content="Send instant, low-fee payments globally using the Stellar network — streaming, escrow, multi-sig, and tips. Non-custodial, secure, and transparent."
@@ -297,7 +307,7 @@ export default function App({ Component, pageProps }: AppProps) {
         <ToastContainer />
       </WalletProvider>
       </ToastProvider>
-    </ThemeContext.Provider>
+    </ThemeProvider>
     </I18nextProvider>
   );
 }

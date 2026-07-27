@@ -5,7 +5,7 @@
  * Language preference is persisted in localStorage under "finchippay:lang"
  * and falls back to browser preference, then English.
  *
- * Supported locales: English (en), Spanish (es), French (fr)
+ * Supported locales: English (en), Spanish (es), French (fr), Arabic (ar), Hebrew (he)
  */
 
 import i18n from "i18next";
@@ -14,16 +14,16 @@ import LanguageDetector from "i18next-browser-languagedetector";
 
 import enCommon from "@/public/locales/en/common.json";
 import esCommon from "@/public/locales/es/common.json";
-import frCommon from '@/public/locales/fr/common.json';
-import arCommon from '@/public/locales/ar/common.json';
-import heCommon from '@/public/locales/he/common.json';
+import frCommon from "@/public/locales/fr/common.json";
+import arCommon from "@/public/locales/ar/common.json";
+import heCommon from "@/public/locales/he/common.json";
 
 export const SUPPORTED_LANGUAGES = [
   { code: "en", name: "English", nativeName: "English" },
   { code: "es", name: "Spanish", nativeName: "Español" },
-  { code: 'fr', name: 'French', nativeName: 'Fran\u00E7ais' },
-  { code: 'ar', name: 'Arabic', nativeName: '\u0627\u0644\u0639\u0631\u0628\u064A\u0629' },
-  { code: 'he', name: 'Hebrew', nativeName: '\u05E2\u05D1\u05E8\u05D9\u05EA' },
+  { code: "fr", name: "French", nativeName: "Français" },
+  { code: "ar", name: "Arabic", nativeName: "العربية", direction: "rtl" },
+  { code: "he", name: "Hebrew", nativeName: "עברית", direction: "rtl" },
 ] as const;
 
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number]["code"];
@@ -61,7 +61,7 @@ i18n
  */
 export function getCurrentLanguage(): SupportedLanguage {
   const lang = i18n.language?.split("-")[0];
-  if (lang === 'es' || lang === 'fr' || lang === 'ar' || lang === 'he') return lang;
+  if (lang === "es" || lang === "fr" || lang === "ar" || lang === "he") return lang;
   return "en";
 }
 

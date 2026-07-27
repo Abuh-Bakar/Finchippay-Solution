@@ -1,52 +1,43 @@
+/**
+ * src/routes/webhooks.js
+ * Webhook management API endpoints.
+ */
+
 "use strict";
 
 const express = require("express");
 const router = express.Router();
-const { registerWebhook, getWebhooksByPublicKey, deleteWebhook } = require("../services/webhookService");
+const webhookService = require("../services/webhookService");
+const {
+  formatErrorResponse,
+  ERROR_CODES,
+} = require("../../../shared/errorCodes");
+const { validate } = require("../validation/middleware");
+const {
+  registerWebhookSchema,
+  publicKeyParamSchema,
+  idParamSchema,
+  getEventsQuerySchema,
+  replayEventsBodySchema,
+} = require("../validation/schemas");
 
 /**
  * POST /api/webhooks
  * Register a webhook for a Stellar account.
  *
  * Body: { publicKey: "G...", url: "https://...", secret: "whsec_..." }
- *
- * Validation:
- *   - publicKey must be a valid 56-char Stellar address.
- *   - url must be an HTTPS endpoint (reject http:// in production).
- *   - secret must be at least 16 characters.
  */
-router.post("/", (req, res) => {
-  const { publicKey, url, secret } = req.body;
-  if (!publicKey || !url || !secret) {
-    return res.status(400).json({ error: "publicKey, url, and secret are required" });
-  }
-
-  // Validate public key format
-  if (!/^G[A-Z0-9]{55}$/.test(publicKey)) {
-    return res.status(400).json({ error: "Invalid Stellar public key format" });
-  }
-
-  // Validate URL scheme (production should only accept HTTPS)
-  let parsedUrl;
+router.post("/", validate(registerWebhookSchema), async (req, res, next) => {
   try {
-    parsedUrl = new URL(url);
-  } catch {
-    return res.status(400).json({ error: "Invalid URL format" });
-  }
-  if (process.env.NODE_ENV === "production" && parsedUrl.protocol !== "https:") {
-    return res.status(400).json({ error: "Webhook URL must use HTTPS in production" });
-  }
-
-  // Validate secret strength (min 8 chars for HMAC-SHA256)
-  if (typeof secret !== "string" || secret.length < 8) {
-    return res.status(400).json({ error: "Secret must be at least 8 characters for HMAC-SHA256 security" });
-  }
-
-  try {
-    const webhook = registerWebhook(publicKey, url, secret);
+    const { publicKey, url, secret } = req.validated;
+    const webhook = await webhookService.registerWebhook(
+      publicKey,
+      url,
+      secret,
+    );
     return res.status(201).json({ success: true, webhook });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    next(err);
   }
 });
 
@@ -54,29 +45,138 @@ router.post("/", (req, res) => {
  * GET /api/webhooks/:publicKey
  * Get all webhooks for a Stellar account.
  */
-router.get("/:publicKey", (req, res) => {
-  const { publicKey } = req.params;
-  if (!/^G[A-Z0-9]{55}$/.test(publicKey)) {
-    return res.status(400).json({ error: "Invalid Stellar public key format" });
-  }
-  const hooks = getWebhooksByPublicKey(publicKey);
-  return res.json({ webhooks: hooks });
-});
+router.get(
+  "/:publicKey",
+  validate(publicKeyParamSchema, "params"),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validated;
+      const hooks = await webhookService.getWebhooksByPublicKey(publicKey);
+      return res.json({ webhooks: hooks });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * GET /api/webhooks/:publicKey/events
+ * Get paginated past events for a Stellar account.
+ */
+router.get(
+  "/:publicKey/events",
+  validate(publicKeyParamSchema, "params"),
+  validate(getEventsQuerySchema, "query"),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validatedParams || req.params;
+      const options = req.validatedQuery || req.query;
+      const events = await webhookService.getEvents(publicKey, options);
+      return res.json({ events });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * POST /api/webhooks/:publicKey/replay
+ * Replay selected events.
+ */
+router.post(
+  "/:publicKey/replay",
+  validate(publicKeyParamSchema, "params"),
+  validate(replayEventsBodySchema),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validatedParams || req.params;
+      const options = req.validated;
+      const result = await webhookService.replayEvents(publicKey, options);
+      return res.json({ success: true, ...result });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * GET /api/webhooks/:publicKey/events/stats
+ * Get event stats by type.
+ */
+router.get(
+  "/:publicKey/events/stats",
+  validate(publicKeyParamSchema, "params"),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validatedParams || req.params;
+      const stats = await webhookService.getEventStats(publicKey);
+      return res.json({ stats });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * GET /api/webhooks/:publicKey/failures
+ * Get dead letter queue (failed webhook deliveries) for a Stellar account.
+ */
+router.get(
+  "/:publicKey/failures",
+  validate(publicKeyParamSchema, "params"),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validated;
+      const failures = await webhookService.getDeadDeliveries(publicKey);
+      return res.json({ failures });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * POST /api/webhooks/:publicKey/retry
+ * Reset dead deliveries to pending and trigger retry for a Stellar account.
+ */
+router.post(
+  "/:publicKey/retry",
+  validate(publicKeyParamSchema, "params"),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validated;
+      const result = await webhookService.retryDeadDeliveries(publicKey);
+      return res.json({ success: true, ...result });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 /**
  * DELETE /api/webhooks/:id
- * Delete a webhook by numeric ID.
+ * Delete a webhook by ID.
  */
-router.delete("/:id", (req, res) => {
-  const { id } = req.params;
-  if (!id || typeof id !== "string" || id.length === 0) {
-    return res.status(400).json({ error: "Webhook ID is required" });
-  }
-  const deleted = deleteWebhook(id);
-  if (!deleted) {
-    return res.status(404).json({ error: "Webhook not found" });
-  }
-  return res.json({ success: true, message: `Webhook ${id} deleted` });
-});
+router.delete(
+  "/:id",
+  validate(idParamSchema, "params"),
+  async (req, res, next) => {
+    try {
+      const { id } = req.validated;
+      const deleted = await webhookService.deleteWebhook(id);
+      if (!deleted) {
+        return res.status(ERROR_CODES.RES_NOT_FOUND.httpStatus).json(
+          formatErrorResponse("RES_NOT_FOUND", {
+            resourceType: "webhook",
+            id,
+          }),
+        );
+      }
+      return res.json({ success: true, message: "Webhook " + id + " deleted" });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 module.exports = router;
