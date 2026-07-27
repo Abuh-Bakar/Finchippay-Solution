@@ -29,8 +29,7 @@
 //!   multi-sig amounts are capped to prevent griefing and permanent lock-up.
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Symbol,
-    Vec,
+    contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Symbol, Vec,
 };
 
 // ─── Storage lifetime constants ───────────────────────────────────────────────
@@ -381,9 +380,11 @@ pub enum DataKey {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 fn bump<K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(env: &Env, key: &K) {
-    env.storage()
-        .persistent()
-        .extend_ttl(key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+    env.storage().persistent().extend_ttl(
+        key,
+        PERSISTENT_LIFETIME_THRESHOLD,
+        PERSISTENT_BUMP_AMOUNT,
+    );
 }
 
 fn get_admin(env: &Env) -> Address {
@@ -421,8 +422,6 @@ fn decrease_locked_balance(env: &Env, token_address: &Address, amount: i128) {
         .set(&key, &(current.checked_sub(amount).expect("underflow")));
     bump(env, &key);
 }
-
-
 
 /// Get a token client for a given token address, avoiding repeated
 /// boilerplate across all token-interacting functions.
@@ -492,11 +491,7 @@ fn contract_transfer_out(env: &Env, token: &token::Client, to: &Address, amount:
 /// Check that the contract is not paused. Panics with `ContractPaused` if it is.
 fn require_not_paused(env: &Env) {
     let key = DataKey::Paused;
-    let paused: bool = env
-        .storage()
-        .persistent()
-        .get(&key)
-        .unwrap_or(false);
+    let paused: bool = env.storage().persistent().get(&key).unwrap_or(false);
     if paused {
         panic!("Contract is paused");
     }
@@ -535,7 +530,6 @@ fn get_admin_signers_threshold(env: &Env) -> u32 {
     bump(env, &key);
     threshold
 }
-
 
 #[contract]
 pub struct FinchippayContract;
@@ -598,10 +592,7 @@ impl FinchippayContract {
     pub fn pause(env: Env, caller: Address) {
         caller.require_auth();
         let stored_admin = get_admin(&env);
-        let stored_pauser: Option<Address> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Pauser);
+        let stored_pauser: Option<Address> = env.storage().persistent().get(&DataKey::Pauser);
         let is_pauser = stored_pauser
             .as_ref()
             .map(|p| p == &caller)
@@ -611,8 +602,7 @@ impl FinchippayContract {
         }
         env.storage().persistent().set(&DataKey::Paused, &true);
         bump(&env, &DataKey::Paused);
-        env.events()
-            .publish((Symbol::new(&env, "paused"),), ());
+        env.events().publish((Symbol::new(&env, "paused"),), ());
     }
 
     /// Admin: resume all value-transferring operations.
@@ -620,10 +610,7 @@ impl FinchippayContract {
     pub fn unpause(env: Env, caller: Address) {
         caller.require_auth();
         let stored_admin = get_admin(&env);
-        let stored_pauser: Option<Address> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Pauser);
+        let stored_pauser: Option<Address> = env.storage().persistent().get(&DataKey::Pauser);
         let is_pauser = stored_pauser
             .as_ref()
             .map(|p| p == &caller)
@@ -633,8 +620,7 @@ impl FinchippayContract {
         }
         env.storage().persistent().set(&DataKey::Paused, &false);
         bump(&env, &DataKey::Paused);
-        env.events()
-            .publish((Symbol::new(&env, "unpaused"),), ());
+        env.events().publish((Symbol::new(&env, "unpaused"),), ());
     }
 
     /// Admin: set or clear the pauser address. Only the admin may call this.
@@ -654,12 +640,7 @@ impl FinchippayContract {
     /// Admin: configure the list of admin signers and threshold for emergency
     /// withdrawal approvals. The admin must be part of the signers list.
     /// `threshold` must be between 1 and `signers.len()`.
-    pub fn set_admin_signers(
-        env: Env,
-        admin: Address,
-        signers: Vec<Address>,
-        threshold: u32,
-    ) {
+    pub fn set_admin_signers(env: Env, admin: Address, signers: Vec<Address>, threshold: u32) {
         admin.require_auth();
         let stored = get_admin(&env);
         if admin != stored {
@@ -696,8 +677,10 @@ impl FinchippayContract {
             .set(&DataKey::AdminSigners, &signers);
         bump(&env, &DataKey::AdminSigners);
 
-        env.events()
-            .publish((Symbol::new(&env, "admin_signers_set"),), (threshold, signers.len()));
+        env.events().publish(
+            (Symbol::new(&env, "admin_signers_set"),),
+            (threshold, signers.len()),
+        );
     }
 
     /// Return the current pauser address, if one is set.
@@ -746,10 +729,7 @@ impl FinchippayContract {
     /// bricked upgrades from incompatible data layouts.
     ///
     /// This is called automatically by `upgrade()`.
-    pub fn validate_storage_compatibility(
-        env: Env,
-        new_layout_version: u32,
-    ) -> bool {
+    pub fn validate_storage_compatibility(env: Env, new_layout_version: u32) -> bool {
         let current_version = Self::get_storage_layout_version(env);
 
         if new_layout_version < current_version {
@@ -765,12 +745,7 @@ impl FinchippayContract {
     /// version declared by the new WASM. This must be >= the current layout
     /// version to prevent bricked upgrades. After a successful upgrade the
     /// stored version is incremented and the layout version is updated.
-    pub fn upgrade(
-        env: Env,
-        admin: Address,
-        new_wasm_hash: BytesN<32>,
-        new_layout_version: u32,
-    ) {
+    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>, new_layout_version: u32) {
         admin.require_auth();
         let stored = get_admin(&env);
         if admin != stored {
@@ -780,7 +755,8 @@ impl FinchippayContract {
         // Validate storage compatibility before upgrading.
         Self::validate_storage_compatibility(env.clone(), new_layout_version);
 
-        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
         let current_ver: u32 = env
             .storage()
             .persistent()
@@ -800,7 +776,7 @@ impl FinchippayContract {
         );
     }
 
-  /// Estimates resource bounds for `send_tip`
+    /// Estimates resource bounds for `send_tip`
     pub fn estimate_send_tip(
         _env: Env,
         _token: Address,
@@ -869,11 +845,7 @@ impl FinchippayContract {
     }
 
     /// Estimates resource bounds for `create_multisig`
-    pub fn estimate_create_multisig(
-        _env: Env,
-        signers_count: u32,
-        _threshold: u32,
-    ) -> FeeEstimate {
+    pub fn estimate_create_multisig(_env: Env, signers_count: u32, _threshold: u32) -> FeeEstimate {
         let count_u64 = signers_count as u64;
         let count_i128 = signers_count as i128;
 
@@ -1033,11 +1005,7 @@ impl FinchippayContract {
 
         env.events().publish(
             (Symbol::new(&env, "emergency_withdrawal_approve"), id),
-            (
-                signer,
-                withdrawal.approvals.len(),
-                withdrawal.threshold,
-            ),
+            (signer, withdrawal.approvals.len(), withdrawal.threshold),
         );
 
         // Auto-execute if threshold reached AND activation ledger passed.
@@ -1166,7 +1134,14 @@ impl FinchippayContract {
     /// # Errors
     /// Panics if `amount <= 0`, the contract is paused, or `from` has not
     /// authorised the call.
-    pub fn send_tip(env: Env, token_address: Address, from: Address, to: Address, amount: i128, memo: Symbol) {
+    pub fn send_tip(
+        env: Env,
+        token_address: Address,
+        from: Address,
+        to: Address,
+        amount: i128,
+        memo: Symbol,
+    ) {
         require_initialized(&env);
         require_not_paused(&env);
         from.require_auth();
@@ -1316,22 +1291,27 @@ impl FinchippayContract {
     }
 
     /// Return the receipt at `index` for `payer`.
-    pub fn get_receipt(env: Env, payer: Address, index: u32) -> ReceiptMetadata {
+    pub fn get_receipt(
+        env: Env,
+        payer: Address,
+        index: u32,
+    ) -> Result<ReceiptMetadata, ContractError> {
         let key = DataKey::ReceiptRecord(payer, index);
-        let val: ReceiptMetadata = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .expect("Receipt not found");
-        bump(&env, &key);
-        val
+        match env.storage().persistent().get(&key) {
+            Some(receipt) => {
+                bump(&env, &key);
+                Ok(receipt)
+            }
+            None => Err(ContractError::NotFound),
+        }
     }
 
     /// Generate a `ReceiptProof` from the on-chain receipt at `index` for `payer`.
     /// This is a convenience helper that reads the stored receipt and packages
     /// the payer, amount, and memo into a proof struct for off-chain verification.
     pub fn generate_receipt_proof(env: Env, payer: Address, index: u32) -> ReceiptProof {
-        let receipt = Self::get_receipt(env, payer.clone(), index);
+        let receipt =
+            Self::get_receipt(env.clone(), payer.clone(), index).expect("receipt not found");
         ReceiptProof {
             receipt_index: index,
             payer,
@@ -1577,8 +1557,10 @@ impl FinchippayContract {
         env.storage().persistent().set(&rkey, &r_escrows);
         bump(&env, &rkey);
 
-        env.events()
-            .publish((Symbol::new(&env, "escrow_claim"), id), (escrow.to, escrow.amount));
+        env.events().publish(
+            (Symbol::new(&env, "escrow_claim"), id),
+            (escrow.to, escrow.amount),
+        );
     }
 
     /// Payer cancels the escrow before `release_ledger`; funds are returned.
@@ -1634,26 +1616,30 @@ impl FinchippayContract {
         );
     }
 
-    pub fn get_escrow(env: Env, id: u32) -> Escrow {
-        let recipient: Address = env
+    pub fn get_escrow(env: Env, id: u32) -> Result<Escrow, ContractError> {
+        let recipient: Address = match env
             .storage()
             .persistent()
             .get(&DataKey::EscrowRecipient(id))
-            .expect("escrow recipient not found");
+        {
+            Some(r) => r,
+            None => return Err(ContractError::NotFound),
+        };
 
         let rkey = DataKey::EscrowByRecipient(recipient);
-        let r_escrows: Vec<Escrow> = env
-            .storage()
-            .persistent()
-            .get(&rkey)
-            .expect("escrow list not found");
+        let r_escrows: Vec<Escrow> = match env.storage().persistent().get(&rkey) {
+            Some(e) => e,
+            None => return Err(ContractError::NotFound),
+        };
 
         for escrow in r_escrows.iter() {
             if escrow.id == id {
-                return escrow;
+                bump(&env, &DataKey::EscrowRecipient(id));
+                bump(&env, &rkey);
+                return Ok(escrow);
             }
         }
-        panic!("escrow not found")
+        Err(ContractError::NotFound)
     }
 
     /// Return the total number of escrows ever created.
@@ -1669,7 +1655,6 @@ impl FinchippayContract {
     pub fn escrow_count(env: Env) -> u32 {
         Self::get_escrow_count(env)
     }
-
 
     // ─── Streaming payments ───────────────────────────────────────────────────
 
@@ -1727,7 +1712,9 @@ impl FinchippayContract {
             closed: false,
         };
         increase_locked_balance(&env, &stream.token, deposit);
-        env.storage().persistent().set(&DataKey::Stream(id), &stream);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Stream(id), &stream);
         bump(&env, &DataKey::Stream(id));
         env.storage()
             .persistent()
@@ -1794,12 +1781,7 @@ impl FinchippayContract {
     }
 
     /// Payer adds `amount` more tokens to an existing open stream.
-    pub fn top_up_stream(
-        env: Env,
-        stream_id: u32,
-        payer: Address,
-        amount: i128,
-    ) {
+    pub fn top_up_stream(env: Env, stream_id: u32, payer: Address, amount: i128) {
         require_not_paused(&env);
         payer.require_auth();
         if amount <= 0 {
@@ -1887,7 +1869,11 @@ impl FinchippayContract {
         bump(&env, &DataKey::Stream(stream_id));
 
         let s_key = DataKey::StreamByPayer(payer.clone());
-        let p_streams: Vec<u32> = env.storage().persistent().get(&s_key).unwrap_or(Vec::new(&env));
+        let p_streams: Vec<u32> = env
+            .storage()
+            .persistent()
+            .get(&s_key)
+            .unwrap_or(Vec::new(&env));
         let mut new_streams = Vec::new(&env);
         for s_id in p_streams.iter() {
             if s_id != stream_id {
@@ -2020,14 +2006,15 @@ impl FinchippayContract {
     }
 
     /// Return the stream record for `stream_id`.
-    pub fn get_stream(env: Env, stream_id: u32) -> Stream {
-        let stream: Stream = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Stream(stream_id))
-            .expect("stream not found");
-        bump(&env, &DataKey::Stream(stream_id));
-        stream
+    pub fn get_stream(env: Env, stream_id: u32) -> Result<Stream, ContractError> {
+        let key = DataKey::Stream(stream_id);
+        match env.storage().persistent().get(&key) {
+            Some(stream) => {
+                bump(&env, &key);
+                Ok(stream)
+            }
+            None => Err(ContractError::NotFound),
+        }
     }
 
     /// Calculate how much the recipient could claim right now without mutating state.
@@ -2058,7 +2045,11 @@ impl FinchippayContract {
 
     pub fn list_streams_by_payer(env: Env, payer: Address, offset: u32, limit: u32) -> Vec<Stream> {
         let s_key = DataKey::StreamByPayer(payer);
-        let p_streams: Vec<u32> = env.storage().persistent().get(&s_key).unwrap_or(Vec::new(&env));
+        let p_streams: Vec<u32> = env
+            .storage()
+            .persistent()
+            .get(&s_key)
+            .unwrap_or(Vec::new(&env));
         if env.storage().persistent().has(&s_key) {
             bump(&env, &s_key);
         }
@@ -2074,15 +2065,28 @@ impl FinchippayContract {
         let mut result = Vec::new(&env);
         for i in offset..end {
             let id = p_streams.get(i).unwrap();
-            let stream: Stream = env.storage().persistent().get(&DataKey::Stream(id)).unwrap();
+            let stream: Stream = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Stream(id))
+                .unwrap();
             result.push_back(stream);
         }
         result
     }
 
-    pub fn list_escrows_by_recipient(env: Env, recipient: Address, offset: u32, limit: u32) -> Vec<Escrow> {
+    pub fn list_escrows_by_recipient(
+        env: Env,
+        recipient: Address,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<Escrow> {
         let e_key = DataKey::EscrowByRecipient(recipient);
-        let r_escrows: Vec<Escrow> = env.storage().persistent().get(&e_key).unwrap_or(Vec::new(&env));
+        let r_escrows: Vec<Escrow> = env
+            .storage()
+            .persistent()
+            .get(&e_key)
+            .unwrap_or(Vec::new(&env));
         if env.storage().persistent().has(&e_key) {
             bump(&env, &e_key);
         }
@@ -2116,7 +2120,6 @@ impl FinchippayContract {
         let capped = total_streamed.min(stream.deposited);
         (capped - stream.claimed).max(0)
     }
-
 
     // ─── Multi-sig payments ───────────────────────────────────────────────────
 
@@ -2253,7 +2256,11 @@ impl FinchippayContract {
 
         env.events().publish(
             (Symbol::new(&env, "multisig_approve"), proposal_id),
-            (signer.clone(), proposal.approvals.len() + 1, proposal.threshold),
+            (
+                signer.clone(),
+                proposal.approvals.len() + 1,
+                proposal.threshold,
+            ),
         );
 
         // Auto-execute if threshold is reached.
@@ -2346,14 +2353,15 @@ impl FinchippayContract {
     }
 
     /// Return the multi-sig proposal for `proposal_id`.
-    pub fn get_multisig(env: Env, proposal_id: u32) -> MultiSigProposal {
-        let proposal: MultiSigProposal = env
-            .storage()
-            .persistent()
-            .get(&DataKey::MultiSig(proposal_id))
-            .expect("proposal not found");
-        bump(&env, &DataKey::MultiSig(proposal_id));
-        proposal
+    pub fn get_multisig(env: Env, proposal_id: u32) -> Result<MultiSigProposal, ContractError> {
+        let key = DataKey::MultiSig(proposal_id);
+        match env.storage().persistent().get(&key) {
+            Some(proposal) => {
+                bump(&env, &key);
+                Ok(proposal)
+            }
+            None => Err(ContractError::NotFound),
+        }
     }
 
     /// Return total number of multi-sig proposals ever created.
@@ -2434,7 +2442,8 @@ impl FinchippayContract {
         }
         let token = get_token_client(&env, &token_address);
         let mut total_amount: i128 = 0;
-        let mut recipient_updates: soroban_sdk::Map<Address, (u32, i128)> = soroban_sdk::Map::new(&env);
+        let mut recipient_updates: soroban_sdk::Map<Address, (u32, i128)> =
+            soroban_sdk::Map::new(&env);
 
         for i in 0..recipients.len() {
             let to = recipients.get(i).unwrap();
@@ -2476,8 +2485,10 @@ impl FinchippayContract {
                 ),
             );
 
-            env.events()
-                .publish((Symbol::new(&env, "tip"), from.clone(), to.clone()), (amount, memo));
+            env.events().publish(
+                (Symbol::new(&env, "tip"), from.clone(), to.clone()),
+                (amount, memo),
+            );
         }
 
         for (to, (final_count, batch_accumulated_amount)) in recipient_updates.iter() {
@@ -2486,8 +2497,10 @@ impl FinchippayContract {
                 .persistent()
                 .get(&DataKey::TipTotal(to.clone()))
                 .unwrap_or(0);
-            
-            let final_total = initial_total.checked_add(batch_accumulated_amount).expect("overflow");
+
+            let final_total = initial_total
+                .checked_add(batch_accumulated_amount)
+                .expect("overflow");
 
             env.storage()
                 .persistent()
@@ -2529,17 +2542,20 @@ impl FinchippayContract {
         require_initialized(&env);
         require_not_paused(&env);
         from.require_auth();
-        
+
         if recipients.len() == 0 {
             return Err(ContractError::InvalidState);
         }
         if recipients.len() > MAX_BATCH_SIZE {
             return Err(ContractError::BatchTooLarge);
         }
-        if tokens.len() != recipients.len() || amounts.len() != recipients.len() || memos.len() != recipients.len() {
+        if tokens.len() != recipients.len()
+            || amounts.len() != recipients.len()
+            || memos.len() != recipients.len()
+        {
             return Err(ContractError::LengthMismatch);
         }
-        
+
         // Pre-validate: verify all amounts are positive before initiating any transfers
         for i in 0..amounts.len() {
             let amount = amounts.get(i).unwrap();
@@ -2547,7 +2563,7 @@ impl FinchippayContract {
                 return Err(ContractError::NonPositiveAmount);
             }
         }
-        
+
         // Pre-validate: check for self-transfers
         for i in 0..recipients.len() {
             let to = recipients.get(i).unwrap();
@@ -2555,15 +2571,15 @@ impl FinchippayContract {
                 return Err(ContractError::SelfTransfer);
             }
         }
-        
+
         let mut total_amount: i128 = 0;
-        
+
         for i in 0..recipients.len() {
             let token_address = tokens.get(i).unwrap();
             let to = recipients.get(i).unwrap();
             let amount = amounts.get(i).unwrap();
             let memo = memos.get(i).unwrap();
-            
+
             let token = get_token_client(&env, &token_address);
             require_transfer_succeeded(&env, &token, &from, &to, &amount);
             total_amount = total_amount.checked_add(amount).expect("overflow");
@@ -2579,9 +2595,10 @@ impl FinchippayContract {
                 .get(&DataKey::TipCount(to.clone()))
                 .unwrap_or(0);
 
-            env.storage()
-                .persistent()
-                .set(&DataKey::TipTotal(to.clone()), &(total.checked_add(amount).expect("overflow")));
+            env.storage().persistent().set(
+                &DataKey::TipTotal(to.clone()),
+                &(total.checked_add(amount).expect("overflow")),
+            );
             bump(&env, &DataKey::TipTotal(to.clone()));
 
             env.storage()
@@ -2708,7 +2725,8 @@ impl FinchippayContract {
         let elapsed = (effective_ledger - vesting.cliff_ledger) as i128;
         let duration = (vesting.end_ledger - vesting.cliff_ledger) as i128;
 
-        let vested = vesting.total_amount
+        let vested = vesting
+            .total_amount
             .checked_mul(elapsed)
             .expect("overflow")
             .checked_div(duration)
@@ -2756,7 +2774,8 @@ impl FinchippayContract {
             panic!("vesting schedule is already revoked");
         }
 
-        let unclaimed = vesting.total_amount
+        let unclaimed = vesting
+            .total_amount
             .checked_sub(vesting.claimed)
             .expect("underflow");
 
@@ -2813,7 +2832,8 @@ impl FinchippayContract {
         let elapsed = (effective_ledger - vesting.cliff_ledger) as i128;
         let duration = (vesting.end_ledger - vesting.cliff_ledger) as i128;
 
-        let vested = vesting.total_amount
+        let vested = vesting
+            .total_amount
             .checked_mul(elapsed)
             .expect("overflow")
             .checked_div(duration)
@@ -2827,7 +2847,6 @@ impl FinchippayContract {
         }
     }
 }
-
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
@@ -2929,7 +2948,10 @@ mod tests {
         client.initialize(&admin);
         let result = client.try_initialize(&admin);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().unwrap(), ContractError::AlreadyInitialized);
+        assert_eq!(
+            result.unwrap_err().unwrap(),
+            ContractError::AlreadyInitialized
+        );
     }
 
     // ── Tips ───────────────────────────────────────────────────────────────────
@@ -2991,7 +3013,14 @@ mod tests {
         let token_id = create_token(&env, &admin, &from, 2000);
         let token = token::Client::new(&env, &token_id);
         let release = env.ledger().sequence() + 10;
-        let id = client.create_escrow(&token_id, &from, &to, &2000, &release, &Symbol::new(&env, "e1"));
+        let id = client.create_escrow(
+            &token_id,
+            &from,
+            &to,
+            &2000,
+            &release,
+            &Symbol::new(&env, "e1"),
+        );
         assert_eq!(token.balance(&from), 0);
         assert_eq!(token.balance(&contract_id), 2000);
         advance(&env, release + 1);
@@ -3011,7 +3040,14 @@ mod tests {
         let token_id = create_token(&env, &admin, &from, 2000);
         let token = token::Client::new(&env, &token_id);
         let release = env.ledger().sequence() + 50;
-        let id = client.create_escrow(&token_id, &from, &to, &2000, &release, &Symbol::new(&env, "e2"));
+        let id = client.create_escrow(
+            &token_id,
+            &from,
+            &to,
+            &2000,
+            &release,
+            &Symbol::new(&env, "e2"),
+        );
         client.cancel_escrow(&id);
         assert_eq!(token.balance(&from), 2000);
         assert_eq!(client.get_escrow(&id).status, EscrowStatus::Cancelled);
@@ -3028,10 +3064,16 @@ mod tests {
         env.mock_all_auths();
         let token_id = create_token(&env, &admin, &from, 2000);
         let release = env.ledger().sequence() + 20;
-        let id = client.create_escrow(&token_id, &from, &to, &2000, &release, &Symbol::new(&env, "e3"));
+        let id = client.create_escrow(
+            &token_id,
+            &from,
+            &to,
+            &2000,
+            &release,
+            &Symbol::new(&env, "e3"),
+        );
         client.claim_escrow(&id);
     }
-
 
     // ── Streaming payments ─────────────────────────────────────────────────────
 
@@ -3177,7 +3219,9 @@ mod tests {
 
         // 2-of-3 threshold.
         let expiry = env.ledger().sequence() + 1000;
-        let pid = client.create_multisig(&token_id, &proposer, &recipient, &1_000, &2, &signers, &expiry);
+        let pid = client.create_multisig(
+            &token_id, &proposer, &recipient, &1_000, &2, &signers, &expiry,
+        );
         assert_eq!(client.get_multisig(&pid).status, MultiSigStatus::Pending);
 
         client.approve_multisig(&pid, &s1);
@@ -3204,7 +3248,9 @@ mod tests {
         let mut signers = soroban_sdk::Vec::new(&env);
         signers.push_back(s1.clone());
         let expiry = env.ledger().sequence() + 1000;
-        let pid = client.create_multisig(&token_id, &proposer, &recipient, &2000, &1, &signers, &expiry);
+        let pid = client.create_multisig(
+            &token_id, &proposer, &recipient, &2000, &1, &signers, &expiry,
+        );
         client.cancel_multisig(&pid, &proposer);
         assert_eq!(client.get_multisig(&pid).status, MultiSigStatus::Cancelled);
         assert_eq!(token.balance(&proposer), 2000);
@@ -3434,37 +3480,37 @@ mod tests {
         let r2 = Address::generate(&env);
         let r3 = Address::generate(&env);
         env.mock_all_auths();
-        
+
         // Create two different tokens
         let token1_id = create_token(&env, &admin, &from, 1000);
         let token2_id = create_token(&env, &admin, &from, 1000);
-        
+
         let token1 = token::Client::new(&env, &token1_id);
         let token2 = token::Client::new(&env, &token2_id);
-        
+
         // Prepare batch: 3 recipients, 2 different tokens
         let mut tokens = soroban_sdk::Vec::new(&env);
         tokens.push_back(token1_id.clone());
         tokens.push_back(token1_id.clone());
         tokens.push_back(token2_id.clone());
-        
+
         let mut recipients = soroban_sdk::Vec::new(&env);
         recipients.push_back(r1.clone());
         recipients.push_back(r2.clone());
         recipients.push_back(r3.clone());
-        
+
         let mut amounts = soroban_sdk::Vec::new(&env);
         amounts.push_back(300i128);
         amounts.push_back(400i128);
         amounts.push_back(500i128);
-        
+
         let mut memos = soroban_sdk::Vec::new(&env);
         memos.push_back(Symbol::new(&env, "payment1"));
         memos.push_back(Symbol::new(&env, "payment2"));
         memos.push_back(Symbol::new(&env, "payment3"));
-        
+
         client.batch_send_multi(&from, &tokens, &recipients, &amounts, &memos);
-        
+
         // Verify balances: r1 and r2 received token1, r3 received token2
         assert_eq!(token1.balance(&r1), 300);
         assert_eq!(token1.balance(&r2), 400);
@@ -3472,7 +3518,7 @@ mod tests {
         assert_eq!(token2.balance(&r1), 0);
         assert_eq!(token2.balance(&r2), 0);
         assert_eq!(token2.balance(&r3), 500);
-        
+
         // Verify tip totals
         assert_eq!(client.get_tip_total(&r1), 300);
         assert_eq!(client.get_tip_total(&r2), 400);
@@ -3522,8 +3568,11 @@ mod tests {
         let token_id = create_token(&env, &admin, &payer, MAX_STREAM_DEPOSIT);
         let start = env.ledger().sequence();
         let sid = client.open_stream(
-            &token_id, &payer, &recipient,
-            &MAX_STREAM_RATE, &MAX_STREAM_DEPOSIT,
+            &token_id,
+            &payer,
+            &recipient,
+            &MAX_STREAM_RATE,
+            &MAX_STREAM_DEPOSIT,
         );
         // Advance to a very large ledger — claimable should be capped by
         // total_streamed = rate * elapsed, not by MAX_STREAM_DEPOSIT.
@@ -3688,8 +3737,12 @@ mod tests {
         env.mock_all_auths();
         let memo = Symbol::new(&env, "test");
         client.create_escrow(
-            &Address::generate(&env), &from, &to, &2000,
-            &(env.ledger().sequence() + 10), &memo,
+            &Address::generate(&env),
+            &from,
+            &to,
+            &2000,
+            &(env.ledger().sequence() + 10),
+            &memo,
         );
     }
 
@@ -3771,7 +3824,9 @@ mod tests {
         let mut signers = soroban_sdk::Vec::new(&env);
         signers.push_back(s1);
         let too_far = env.ledger().sequence() + MAX_MULTISIG_TTL + 1;
-        client.create_multisig(&token_id, &proposer, &recipient, &2000, &1, &signers, &too_far);
+        client.create_multisig(
+            &token_id, &proposer, &recipient, &2000, &1, &signers, &too_far,
+        );
     }
 
     #[test]
@@ -3931,9 +3986,13 @@ mod tests {
         assert_eq!(client.multisig_count(), 0);
         let expiry = env.ledger().sequence() + 1_000;
         let signers = soroban_sdk::Vec::from_array(&env, [s1.clone()]);
-        client.create_multisig(&token_id, &proposer, &recipient, &1_000, &1, &signers, &expiry);
+        client.create_multisig(
+            &token_id, &proposer, &recipient, &1_000, &1, &signers, &expiry,
+        );
         assert_eq!(client.multisig_count(), 1);
-        client.create_multisig(&token_id, &proposer, &recipient, &1_000, &1, &signers, &expiry);
+        client.create_multisig(
+            &token_id, &proposer, &recipient, &1_000, &1, &signers, &expiry,
+        );
         assert_eq!(client.multisig_count(), 2);
         // Alias agrees with the canonical getter.
         assert_eq!(client.multisig_count(), client.get_multisig_count());
@@ -3996,7 +4055,9 @@ mod tests {
         signers.push_back(s1.clone());
         // MIN_MULTISIG_AMOUNT is 1000, so 500 should panic.
         let expiry = env.ledger().sequence() + 1000;
-        client.create_multisig(&token_id, &proposer, &recipient, &500, &1, &signers, &expiry);
+        client.create_multisig(
+            &token_id, &proposer, &recipient, &500, &1, &signers, &expiry,
+        );
     }
 
     #[test]
@@ -4016,7 +4077,9 @@ mod tests {
         signers.push_back(s1.clone());
         signers.push_back(s2.clone());
         let expiry = env.ledger().sequence() + 1000;
-        let pid = client.create_multisig(&token_id, &proposer, &recipient, &1_000, &2, &signers, &expiry);
+        let pid = client.create_multisig(
+            &token_id, &proposer, &recipient, &1_000, &2, &signers, &expiry,
+        );
         client.approve_multisig(&pid, &s1);
         client.approve_multisig(&pid, &s1); // duplicate — should panic
     }
@@ -4053,7 +4116,14 @@ mod tests {
         env.mock_all_auths();
         let fake_token_id = env.register_contract(None, MaliciousToken);
         let release = env.ledger().sequence() + 10;
-        client.create_escrow(&fake_token_id, &from, &to, &2000, &release, &Symbol::new(&env, "mal"));
+        client.create_escrow(
+            &fake_token_id,
+            &from,
+            &to,
+            &2000,
+            &release,
+            &Symbol::new(&env, "mal"),
+        );
     }
 
     #[test]
@@ -4092,7 +4162,15 @@ mod tests {
         env.mock_all_auths();
         let fake_token_id = env.register_contract(None, MaliciousToken);
         let expiry = env.ledger().sequence() + 1000;
-        client.create_multisig(&fake_token_id, &proposer, &recipient, &1_000, &1, &signers, &expiry);
+        client.create_multisig(
+            &fake_token_id,
+            &proposer,
+            &recipient,
+            &1_000,
+            &1,
+            &signers,
+            &expiry,
+        );
     }
 
     #[test]
@@ -4170,7 +4248,14 @@ mod tests {
         env.mock_all_auths();
         let token_id = create_token(&env, &admin, &from, 2_000);
         let release = env.ledger().sequence() + 50;
-        let id = client.create_escrow(&token_id, &from, &to, &2_000, &release, &Symbol::new(&env, "e2"));
+        let id = client.create_escrow(
+            &token_id,
+            &from,
+            &to,
+            &2_000,
+            &release,
+            &Symbol::new(&env, "e2"),
+        );
         client.cancel_escrow(&id);
 
         let events = env.events().all().filter_by_contract(&contract_id);
@@ -4226,7 +4311,9 @@ mod tests {
         let mut signers = soroban_sdk::Vec::new(&env);
         signers.push_back(signer);
         let expiry = env.ledger().sequence() + 1000;
-        let id = client.create_multisig(&token_id, &proposer, &recipient, &2_000, &1, &signers, &expiry);
+        let id = client.create_multisig(
+            &token_id, &proposer, &recipient, &2_000, &1, &signers, &expiry,
+        );
         client.cancel_multisig(&id, &proposer);
 
         let events = env.events().all().filter_by_contract(&contract_id);
@@ -4584,8 +4671,7 @@ mod tests {
     #[test]
     fn test_emergency_withdrawal_full_lifecycle() {
         let env = Env::default();
-        let (_contract_id, client, token_id, signers) =
-            setup_emergency(&env, 3, 2, 10_000);
+        let (_contract_id, client, token_id, signers) = setup_emergency(&env, 3, 2, 10_000);
         let admin = client.get_admin();
         let to = Address::generate(&env);
         let token = token::Client::new(&env, &token_id);
@@ -4808,6 +4894,116 @@ mod tests {
         // Cross-checks fail.
         assert!(!client.verify_receipt(&from, &0, &200, &memo_b));
         assert!(!client.verify_receipt(&from, &1, &100, &memo_a));
+    }
+
+    // ── View function tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_get_stream_success() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let payer = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        env.mock_all_auths();
+        let token_id = create_token(&env, &admin, &payer, 1_000);
+        let sid = client.open_stream(&token_id, &payer, &recipient, &10, &500);
+        let stream = client.get_stream(&sid);
+        assert_eq!(stream.id, sid);
+        assert_eq!(stream.payer, payer);
+        assert_eq!(stream.recipient, recipient);
+        assert_eq!(stream.rate_per_ledger, 10);
+        assert_eq!(stream.deposited, 500);
+    }
+
+    #[test]
+    fn test_get_stream_not_found() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let result = client.try_get_stream(&999);
+        assert_eq!(result.unwrap_err().unwrap(), ContractError::NotFound);
+    }
+
+    #[test]
+    fn test_get_escrow_success() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        env.mock_all_auths();
+        let token_id = create_token(&env, &admin, &from, 2_000);
+        let release = env.ledger().sequence() + 10;
+        let memo = Symbol::new(&env, "escrow_test");
+        let id = client.create_escrow(&token_id, &from, &to, &2_000, &release, &memo);
+        let escrow = client.get_escrow(&id);
+        assert_eq!(escrow.id, id);
+        assert_eq!(escrow.from, from);
+        assert_eq!(escrow.to, to);
+        assert_eq!(escrow.amount, 2_000);
+    }
+
+    #[test]
+    fn test_get_escrow_not_found() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let result = client.try_get_escrow(&999);
+        assert_eq!(result.unwrap_err().unwrap(), ContractError::NotFound);
+    }
+
+    #[test]
+    fn test_get_multisig_success() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let proposer = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let s1 = Address::generate(&env);
+        env.mock_all_auths();
+        let token_id = create_token(&env, &admin, &proposer, 1_000);
+        let mut signers = soroban_sdk::Vec::new(&env);
+        signers.push_back(s1.clone());
+        let expiry = env.ledger().sequence() + 1000;
+        let pid = client.create_multisig(
+            &token_id, &proposer, &recipient, &1_000, &1, &signers, &expiry,
+        );
+        let proposal = client.get_multisig(&pid);
+        assert_eq!(proposal.id, pid);
+        assert_eq!(proposal.proposer, proposer);
+        assert_eq!(proposal.recipient, recipient);
+        assert_eq!(proposal.amount, 1_000);
+    }
+
+    #[test]
+    fn test_get_multisig_not_found() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let result = client.try_get_multisig(&999);
+        assert_eq!(result.unwrap_err().unwrap(), ContractError::NotFound);
+    }
+
+    #[test]
+    fn test_get_receipt_success() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let payer = Address::generate(&env);
+        let payee = Address::generate(&env);
+        env.mock_all_auths();
+        let memo = Symbol::new(&env, "Rent");
+        let idx = client.mint_receipt(&payer, &payee, &1_500, &memo);
+        assert_eq!(idx, 0);
+        let receipt = client.get_receipt(&payer, &0);
+        assert_eq!(receipt.amount, 1_500);
+        assert_eq!(receipt.memo, memo);
+    }
+
+    #[test]
+    fn test_get_receipt_not_found() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let payer = Address::generate(&env);
+        let result = client.try_get_receipt(&payer, &999);
+        assert_eq!(result.unwrap_err().unwrap(), ContractError::NotFound);
     }
 
     // ==================== Storage Compatibility Tests ====================
