@@ -1,0 +1,222 @@
+# .github/workflows/canary-deploy.yml
+# Canary Deployment Workflow for Finchippay-Solution.
+#
+# Triggered on release publish or manual workflow_dispatch.
+# Deploys to a staging/canary slot, monitors health metrics,
+# and either promotes (gradually) or rolls back.
+#
+# Two deployment paths:
+#   Backend  (ECS)    — Weighted ALB routing: 10% → 50% → 100%
+#   Frontend (Vercel) — Blue-Green: staging alias → health check → promote
+#
+# Required GitHub Secrets:
+#   Backend:
+#     AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
+#     ECS_CLUSTER, ECS_SERVICE, ALB_LISTENER_ARN
+#   Frontend:
+#     VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID
+#   Monitoring:
+#     SENTRY_AUTH_TOKEN, SENTRY_ORG, SENTRY_PROJECT (optional but recommended)
+
+name: Canary Deploy
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Deployment target"
+        required: true
+        type: choice
+        options:
+          - backend
+          - frontend
+          - both
+        default: "backend"
+      canary_duration:
+        description: "Monitoring duration per stage (minutes)"
+        required: false
+        type: number
+        default: 5
+      canary_weight_start:
+        description: "Initial canary traffic % (backend only)"
+        required: false
+        type: number
+        default: 10
+
+permissions:
+  contents: read
+  issues: write
+  deployments: write
+
+env:
+  NODE_VERSION: "20.19.5"
+  CANARY_DURATION_MINUTES: ${{ github.event.inputs.canary_duration || 5 }}
+  CANARY_WEIGHT_START: ${{ github.event.inputs.canary_weight_start || 10 }}
+
+jobs:
+  # ─── Backend Canary (ECS ALB weighted routing) ───────────────────────────
+  canary-backend:
+    name: Canary Deploy — Backend (ECS)
+    if: |
+      github.event_name == 'release' ||
+      github.event.inputs.target == 'backend' ||
+      github.event.inputs.target == 'both'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.finchippay.com
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Make scripts executable
+        run: chmod +x scripts/canary-deploy.sh scripts/canary-monitor.js scripts/rollback.sh
+
+      - name: Run backend canary deployment
+        id: canary-backend
+        run: |
+          bash scripts/canary-deploy.sh backend "${{ github.sha }}"
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
+          ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
+          ALB_LISTENER_ARN: ${{ secrets.ALB_LISTENER_ARN }}
+          HEALTH_CHECK_URL: ${{ secrets.BACKEND_HEALTH_URL || 'https://api.finchippay.com/health' }}
+          CANARY_WEIGHT_START: ${{ env.CANARY_WEIGHT_START }}
+          MONITOR_DURATION_MINUTES: ${{ env.CANARY_DURATION_MINUTES }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+
+      - name: Post canary result as comment
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = '${{ job.status }}';
+            const target = 'backend (ECS)';
+            const sha = '${{ github.sha }}'.slice(0, 7);
+            const emoji = status === 'success' ? '✅' : '❌';
+
+            let body = `## ${emoji} Canary Deployment — ${target}\n\n`;
+            body += `**Commit:** \`${sha}\`\n`;
+            body += `**Result:** ${status === 'success' ? 'Promoted to 100%' : 'Rolled back'}\n`;
+            body += `**Strategy:** Weighted ALB routing (10% → 50% → 100%)\n`;
+            body += `**Duration:** ${'${{ env.CANARY_DURATION_MINUTES }}'} min per stage\n`;
+            body += `**Workflow:** [View run](${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID})\n`;
+
+            // Find associated issue/PR if triggered by release
+            const { owner, repo } = context.repo;
+            if (context.eventName === 'release') {
+              const tag = context.payload.release.tag_name;
+              body += `\n**Release:** \`${tag}\`\n`;
+            }
+
+            // Post as issue comment (for release) or workflow summary
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: context.issue.number || 1,
+              body,
+            }).catch(() => {});
+
+            // Also write to workflow summary
+            const fs = require('fs');
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, body);
+
+  # ─── Frontend Canary (Vercel Blue-Green) ────────────────────────────────
+  canary-frontend:
+    name: Canary Deploy — Frontend (Vercel)
+    # Run after backend when deploying both (but don't fail if backend was skipped)
+    if: |
+      github.event_name == 'release' ||
+      github.event.inputs.target == 'frontend' ||
+      github.event.inputs.target == 'both'
+    runs-on: ubuntu-latest
+    needs: [canary-backend]
+    environment:
+      name: production
+      url: https://finchippay.vercel.app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: Make scripts executable
+        run: chmod +x scripts/canary-deploy.sh scripts/canary-monitor.js scripts/rollback.sh
+
+      - name: Run frontend canary deployment
+        id: canary-frontend
+        run: |
+          bash scripts/canary-deploy.sh frontend "${{ github.sha }}"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          HEALTH_CHECK_URL: ${{ secrets.FRONTEND_HEALTH_URL || 'https://finchippay.vercel.app/api/health' }}
+          MONITOR_DURATION_MINUTES: ${{ env.CANARY_DURATION_MINUTES }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+
+      - name: Post canary result as comment
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = '${{ job.status }}';
+            const target = 'frontend (Vercel)';
+            const sha = '${{ github.sha }}'.slice(0, 7);
+            const emoji = status === 'success' ? '✅' : '❌';
+
+            let body = `## ${emoji} Canary Deployment — ${target}\n\n`;
+            body += `**Commit:** \`${sha}\`\n`;
+            body += `**Result:** ${status === 'success' ? 'Promoted to production' : 'Rolled back'}\n`;
+            body += `**Strategy:** Blue-Green (staging alias → health check → promote)\n`;
+            body += `**Duration:** ${'${{ env.CANARY_DURATION_MINUTES }}'} min monitoring\n`;
+            body += `**Workflow:** [View run](${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID})\n`;
+
+            const { owner, repo } = context.repo;
+
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: context.issue.number || 1,
+              body,
+            }).catch(() => {});
+
+            const fs = require('fs');
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, body);
