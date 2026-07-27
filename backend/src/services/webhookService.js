@@ -95,10 +95,10 @@ function getWebhooksByPublicKey(publicKey) {
  * @param {string} id - Webhook ID returned by `registerWebhook`
  * @returns {boolean} `true` if the webhook existed and was deleted
  */
-function deleteWebhook(id) {
+function deleteWebhook(id) {`n  const webhook = webhooks.get(id);`n  const publicKey = webhook ? webhook.publicKey : null;
   const exists = webhooks.has(id);
   if (exists) {
-    webhooks.delete(id);
+    webhooks.delete(id);`n    const remaining = Array.from(webhooks.values()).filter(w => w.publicKey === publicKey);`n    if (remaining.length === 0 && activeStreams.has(publicKey)) {`n      activeStreams.get(publicKey)();`n      activeStreams.delete(publicKey);`n      metrics.activeWebhookStreams.set(activeStreams.size);`n      logger.info({ type: "horizon_monitoring_stopped", publicKey });`n    }
     logger.info({ type: "webhook_deleted", id });
   }
   return exists;
