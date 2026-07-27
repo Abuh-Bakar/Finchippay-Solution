@@ -198,6 +198,13 @@ function collectErrors(env) {
       errors.push(`ANCHORS_CONFIG must be valid JSON: ${err.message}`);
     }
   }
+
+  // WEBHOOK_ENCRYPTION_KEY is required in production for encrypting webhook secrets at rest.
+  if (env.NODE_ENV === "production" && !env.WEBHOOK_ENCRYPTION_KEY?.trim()) {
+    errors.push(
+      'WEBHOOK_ENCRYPTION_KEY is required in production — generate one with: openssl rand -hex 32',
+    );
+  }
   return errors;
 }
 

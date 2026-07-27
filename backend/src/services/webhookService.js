@@ -37,6 +37,7 @@ const tracer = require("../config/tracing").getTracer("webhook-service");
 const { propagation, context } = require("@opentelemetry/api");
 const { getRequestIdHeader } = require("../utils/correlationId");
 const { generateWebhookSignature } = require("../utils/webhookSignature");
+const { encryptSecret, decryptSecret } = require("../utils/encryption");
 const knex = require("../db/connection");
 require("dotenv").config();
 
@@ -85,15 +86,17 @@ async function registerWebhook(publicKey, url, secret) {
   const id = crypto.randomUUID();
   const createdAt = new Date().toISOString();
 
+  const encryptedSecret = encryptSecret(secret);
+
   await knex("webhooks").insert({
     id,
     public_key: publicKey,
     url,
-    secret,
+    secret: encryptedSecret,
     created_at: createdAt,
   });
 
-  const webhook = { id, publicKey, url, secret, createdAt };
+  const webhook = { id, publicKey, url, secret: encryptedSecret, createdAt };
   webhooks.set(id, webhook);
 
   startMonitoring(webhook);
@@ -113,6 +116,7 @@ async function getWebhooksByPublicKey(publicKey) {
     id: row.id,
     publicKey: row.public_key,
     url: row.url,
+    secret: "[protected]",
     createdAt: row.created_at,
   }));
 }
@@ -172,7 +176,7 @@ function generateIdempotencyKey(webhookId, eventType, payloadStr, timestamp) {
  * Attempt to deliver a signed webhook payload to a single endpoint.
  */
 async function attemptDelivery(webhook, payload, idempotencyKey) {
-  const signature = signPayload(webhook.secret, payload);
+  const signature = signPayload(decryptSecret(webhook.secret), payload);
   const headers = {
     "Content-Type": "application/json",
     "X-Webhook-Signature": signature,
@@ -217,6 +221,7 @@ async function deliverWebhook(
   const timestamp = new Date().toISOString();
   
   const idempotencyKey = generateIdempotencyKey(webhook.id, eventType, payloadStr, timestamp);
+
 
   try {
     await knex("webhook_events").insert({
