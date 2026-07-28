@@ -1,23 +1,27 @@
+/* frontend/styles/high-contrast.css */
+@media (prefers-contrast: more) {
+  :root {
+    --text-primary: #000000;
+    --text-secondary: #1a1a1a;
+    --bg-primary: #ffffff;
+    --bg-secondary: #f0f0f0;
+    --border-color: #000000;
+    --link-color: #0000ee;
+  }
+  .dark {
+    --text-primary: #ffffff;
+    --text-secondary: #e0e0e0;
+    --bg-primary: #000000;
+    --bg-secondary: #1a1a1a;
+    --border-color: #ffffff;
+    --link-color: #66aaff;
+  }
+}
+
 /**
  * styles/high-contrast.css
  * High-contrast theme overrides (#356).
- *
- * Loaded via globals.css under `:root[data-theme="high-contrast"]`. The
- * selector is chosen over a `.high-contrast` class because it pairs cleanly
- * with prefers-contrast detection and persists across page reloads without
- * ad-hoc toggling on each rendered element.
- *
- * Tokens target WCAG AAA contrast (≥7:1) for body text against its
- * background, which gives all the WCAG AA ratios a wide margin. The
- * intent is that users with low vision or working in bright sunlight get
- * a guaranteed-readable surface; the cost is that the design abandons
- * some of the project's brand-coloured gradients for maximum readability.
- *
- * Note: focus outlines are deliberately thick and yellow — the eye-loupe
- * guidelines recommend a non-grey focus indicator because grey-on-grey is
- * hard to spot and undermines the entire purpose of focused-state styling.
  */
-
 :root[data-theme="high-contrast"] {
   /* Backgrounds */
   --hc-bg: #000000;

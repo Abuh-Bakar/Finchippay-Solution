@@ -51,14 +51,9 @@ const themeOptions: Array<{
     description: "Always use the dark theme",
   },
   {
-    value: "system",
-    label: "System",
-    description: "Follow your device preference",
-  },
-  {
-    value: "high-contrast",
+    value: "highContrast",
     label: "High Contrast",
-    description: "Maximum readability (WCAG AAA)",
+    description: "Force high‑contrast mode (WCAG AAA)",
   },
 ];
 
@@ -98,7 +93,7 @@ function ThemeOptionIcon({
     return <MoonIcon className={className} />;
   }
 
-  if (theme === "high-contrast") {
+  if (theme === "highContrast" || theme === "high-contrast") {
     return <ContrastIcon className={className} />;
   }
 
