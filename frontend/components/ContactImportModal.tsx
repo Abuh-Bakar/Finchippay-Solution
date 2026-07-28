@@ -15,6 +15,7 @@ import {
   readFileAsText,
   type AnnotatedRow,
 } from "@/lib/contactImportExport";
+import { isValidStellarAddress } from "@/lib/stellar";
 import type { AddressBookContact } from "@/lib/addressBook";
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -51,27 +52,52 @@ export default function ContactImportModal({
   // ── File parsing ──────────────────────────────────────────────────────────
 
   const processFile = useCallback(async (file: File) => {
-    if (!file.name.toLowerCase().endsWith(".csv")) {
-      setParseError("Only .csv files are supported. Please select a CSV file.");
-      setRows([]);
-      setFileName(null);
-      return;
-    }
+    const name = file.name.toLowerCase();
 
     try {
       const text = await readFileAsText(file);
-      const annotated = parseContactsCSVAnnotated(text);
-      if (annotated.length === 0) {
-        setParseError(
-          'The file has no data rows or is missing the required "Name" and "Stellar Address" columns.'
-        );
-        setRows([]);
-      } else {
-        setParseError(null);
-        setRows(annotated);
+
+      if (name.endsWith(".csv") || name.endsWith(".txt")) {
+        const annotated = parseContactsCSVAnnotated(text);
+        if (annotated.length === 0) {
+          setParseError(
+            'The file has no data rows or is missing the required "Name" and "Stellar Address" columns.'
+          );
+          setRows([]);
+        } else {
+          setParseError(null);
+          setRows(annotated);
+        }
+        setFileName(file.name);
+        return;
       }
-      setFileName(file.name);
-    } catch {
+
+      if (name.endsWith(".vcf") || name.endsWith(".vcard")) {
+        // Parse vCard blocks and convert into the AnnotatedRow shape used by the UI
+        const parsed = await import("@/lib/contactsDB").then((m) => m.parseVCard(text));
+        const annotated = parsed.map((c: any, i: number) => {
+          const rowNumber = i + 1;
+          const contact = c.publicKey ? { name: c.name || "Imported Contact", address: c.publicKey, federation: c.federation } : null;
+          const error = contact && !isValidStellarAddress(contact.address) ? `"${contact?.address}" is not a valid Stellar public key.` : "";
+          return { rowNumber, contact, error } as AnnotatedRow;
+        });
+
+        if (annotated.length === 0) {
+          setParseError("No valid vCard contacts found in the file.");
+          setRows([]);
+        } else {
+          setParseError(null);
+          setRows(annotated);
+        }
+        setFileName(file.name);
+        return;
+      }
+
+      setParseError("Unsupported file type. Please select a CSV or vCard (.vcf) file.");
+      setRows([]);
+      setFileName(null);
+    } catch (err) {
+      console.error(err);
       setParseError("Could not read the file. Please try again.");
       setRows([]);
       setFileName(null);
