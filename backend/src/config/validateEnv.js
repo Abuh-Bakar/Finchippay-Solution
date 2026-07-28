@@ -64,6 +64,13 @@ function parseAllowedOrigins(raw) {
 }
 
 function collectErrors(env) {
+  if (!env.JWT_SECRET && env.NODE_ENV === 'production') {
+    throw new Error('FATAL: JWT_SECRET must be set in production.');
+  }
+  if (env.JWT_SECRET === 'finchippay_secret_key') {
+    throw new Error('FATAL: JWT_SECRET is set to the insecure default value.');
+  }
+
   const errors = [];
 
   // Database provider validation
