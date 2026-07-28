@@ -2,7 +2,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use soroban_sdk::{Address, Env, Symbol, Vec};
-use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
+use soroban_sdk::token::StellarAssetClient;
 use soroban_sdk::testutils::Address as _;
 use finchippay_contract::FinchippayContractClient;
 
