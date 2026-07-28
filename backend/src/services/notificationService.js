@@ -27,8 +27,8 @@ var smtpConfig = {
   secure: process.env.SMTP_SECURE === "true",
   auth: {
     user: process.env.SMTP_USER || "",
-    pass: process.env.SMTP_PASS || ""
-  }
+    pass: process.env.SMTP_PASS || "",
+  },
 };
 
 var fromAddress = process.env.SMTP_FROM || "noreply@finchippay.io";
@@ -37,11 +37,17 @@ var transport = null;
 
 function initTransport() {
   if (!isEnabled) {
-    logger.info({ type: "notification_disabled" }, "Email notifications are disabled");
+    logger.info(
+      { type: "notification_disabled" },
+      "Email notifications are disabled",
+    );
     return false;
   }
   if (!smtpConfig.host || !smtpConfig.auth.user || !smtpConfig.auth.pass) {
-    logger.warn({ type: "notification_misconfigured" }, "SMTP not fully configured");
+    logger.warn(
+      { type: "notification_misconfigured" },
+      "SMTP not fully configured",
+    );
     return false;
   }
   try {
@@ -51,13 +57,19 @@ function initTransport() {
       secure: smtpConfig.secure,
       auth: {
         user: smtpConfig.auth.user,
-        pass: smtpConfig.auth.pass
-      }
+        pass: smtpConfig.auth.pass,
+      },
     });
-    logger.info({ type: "notification_transport_ready" }, "SMTP transport initialized");
+    logger.info(
+      { type: "notification_transport_ready" },
+      "SMTP transport initialized",
+    );
     return true;
   } catch (err) {
-    logger.error({ type: "notification_transport_error", error: err.message }, "Failed");
+    logger.error(
+      { type: "notification_transport_error", error: err.message },
+      "Failed",
+    );
     return false;
   }
 }
@@ -75,7 +87,10 @@ async function sendEmail(to, subject, html, options) {
   if (!options) options = {};
   var t = getTransport();
   if (!t) {
-    return { sent: false, error: "Email notifications are not enabled or misconfigured" };
+    return {
+      sent: false,
+      error: "Email notifications are not enabled or misconfigured",
+    };
   }
   try {
     var info = await t.sendMail({
@@ -83,12 +98,28 @@ async function sendEmail(to, subject, html, options) {
       to: to,
       subject: subject,
       html: html,
-      text: options.text || undefined
+      text: options.text || undefined,
     });
-    logger.info({ type: "email_sent", to: to, subject: subject, messageId: info.messageId }, "Sent");
+    logger.info(
+      {
+        type: "email_sent",
+        to: to,
+        subject: subject,
+        messageId: info.messageId,
+      },
+      "Sent",
+    );
     return { sent: true, messageId: info.messageId };
   } catch (err) {
-    logger.error({ type: "email_send_failed", to: to, subject: subject, error: err.message }, "Failed");
+    logger.error(
+      {
+        type: "email_send_failed",
+        to: to,
+        subject: subject,
+        error: err.message,
+      },
+      "Failed",
+    );
     return { sent: false, error: err.message };
   }
 }
@@ -99,7 +130,14 @@ async function sendEventNotification(to, eventType, data) {
   try {
     html = emailTemplates.renderTemplate(eventType, data);
   } catch (err) {
-    logger.error({ type: "template_render_error", eventType: eventType, error: err.message }, "Failed");
+    logger.error(
+      {
+        type: "template_render_error",
+        eventType: eventType,
+        error: err.message,
+      },
+      "Failed",
+    );
     return { sent: false, error: err.message };
   }
   var labels = {
@@ -107,9 +145,9 @@ async function sendEventNotification(to, eventType, data) {
     escrow_released: "Escrow Released - Finchippay",
     stream_depleted: "Stream Depleted - Finchippay",
     multisig_executed: "Multi-Sig Executed - Finchippay",
-    tip_received: "Tip Received - Finchippay"
+    tip_received: "Tip Received - Finchippay",
   };
-  var subject = labels[eventType] || ("Finchippay Notification: " + eventType);
+  var subject = labels[eventType] || "Finchippay Notification: " + eventType;
   var text = emailTemplates.renderPlainText(eventType, data);
   return sendEmail(to, subject, html, { text: text });
 }
@@ -123,51 +161,71 @@ async function registerEmail(publicKey, email, options) {
     "escrow_released",
     "stream_depleted",
     "multisig_executed",
-    "tip_received"
+    "tip_received",
   ];
-  var existing = await knex("notification_email_preferences").where("public_key", publicKey).first();
+  var existing = await knex("notification_email_preferences")
+    .where("public_key", publicKey)
+    .first();
   if (existing) {
-    await knex("notification_email_preferences").where("public_key", publicKey).update({
-      email: email,
-      events: JSON.stringify(events),
-      updated_at: new Date().toISOString()
-    });
+    await knex("notification_email_preferences")
+      .where("public_key", publicKey)
+      .update({
+        email: email,
+        events: JSON.stringify(events),
+        updated_at: new Date().toISOString(),
+      });
   } else {
     await knex("notification_email_preferences").insert({
       public_key: publicKey,
       email: email,
       events: JSON.stringify(events),
       created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
     });
   }
-  var saved = await knex("notification_email_preferences").where("public_key", publicKey).first();
-  logger.info({ type: "notification_email_registered", publicKey: publicKey, email: email }, "Saved");
+  var saved = await knex("notification_email_preferences")
+    .where("public_key", publicKey)
+    .first();
+  logger.info(
+    {
+      type: "notification_email_registered",
+      publicKey: publicKey,
+      email: email,
+    },
+    "Saved",
+  );
   return {
     publicKey: saved.public_key,
     email: saved.email,
     events: JSON.parse(saved.events || "[]"),
     createdAt: saved.created_at,
-    updatedAt: saved.updated_at
+    updatedAt: saved.updated_at,
   };
 }
 
 async function getEmailPreference(publicKey) {
-  var row = await knex("notification_email_preferences").where("public_key", publicKey).first();
+  var row = await knex("notification_email_preferences")
+    .where("public_key", publicKey)
+    .first();
   if (!row) return null;
   return {
     publicKey: row.public_key,
     email: row.email,
     events: JSON.parse(row.events || "[]"),
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
   };
 }
 
 async function deleteEmailPreference(publicKey) {
-  var deleted = await knex("notification_email_preferences").where("public_key", publicKey).del();
+  var deleted = await knex("notification_email_preferences")
+    .where("public_key", publicKey)
+    .del();
   if (deleted) {
-    logger.info({ type: "notification_email_deleted", publicKey: publicKey }, "Deleted");
+    logger.info(
+      { type: "notification_email_deleted", publicKey: publicKey },
+      "Deleted",
+    );
     return true;
   }
   return false;
@@ -204,7 +262,7 @@ async function notifySubscribers(eventType, data) {
         recipient: data.recipient || row.public_key,
         timestamp: data.timestamp,
         memo: data.memo,
-        txHash: data.txHash
+        txHash: data.txHash,
       });
       if (result.sent) {
         sent++;
@@ -225,5 +283,5 @@ module.exports = {
   registerEmail: registerEmail,
   getEmailPreference: getEmailPreference,
   deleteEmailPreference: deleteEmailPreference,
-  notifySubscribers: notifySubscribers
+  notifySubscribers: notifySubscribers,
 };

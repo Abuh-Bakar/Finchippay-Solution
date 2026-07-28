@@ -26,23 +26,19 @@ const {
  *
  * Body: { publicKey: "G...", email: "user@example.com", events?: string[] }
  */
-router.post(
-  "/email",
-  validate(registerEmailSchema),
-  async (req, res, next) => {
-    try {
-      const { publicKey, email, events } = req.validated;
-      const preference = await notificationService.registerEmail(
-        publicKey,
-        email,
-        { events },
-      );
-      return res.status(201).json({ success: true, preference });
-    } catch (err) {
-      next(err);
-    }
-  },
-);
+router.post("/email", validate(registerEmailSchema), async (req, res, next) => {
+  try {
+    const { publicKey, email, events } = req.validated;
+    const preference = await notificationService.registerEmail(
+      publicKey,
+      email,
+      { events },
+    );
+    return res.status(201).json({ success: true, preference });
+  } catch (err) {
+    next(err);
+  }
+});
 
 /**
  * PUT /api/notifications/email/:publicKey
@@ -92,7 +88,8 @@ router.get(
   async (req, res, next) => {
     try {
       const { publicKey } = req.validated;
-      const preference = await notificationService.getEmailPreference(publicKey);
+      const preference =
+        await notificationService.getEmailPreference(publicKey);
       if (!preference) {
         return res.status(ERROR_CODES.RES_NOT_FOUND.httpStatus).json(
           formatErrorResponse("RES_NOT_FOUND", {
@@ -118,7 +115,8 @@ router.delete(
   async (req, res, next) => {
     try {
       const { publicKey } = req.validated;
-      const deleted = await notificationService.deleteEmailPreference(publicKey);
+      const deleted =
+        await notificationService.deleteEmailPreference(publicKey);
       if (!deleted) {
         return res.status(ERROR_CODES.RES_NOT_FOUND.httpStatus).json(
           formatErrorResponse("RES_NOT_FOUND", {
