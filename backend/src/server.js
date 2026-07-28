@@ -49,6 +49,7 @@ const notificationRoutes = require("./routes/notifications");
 const featuresRoutes = require("./routes/features");
 const adminFeatureFlagsRoutes = require("./routes/adminFeatureFlags");
 const tokensRoutes = require("./routes/tokens");
+const pushRoutes = require("./routes/push");
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./swagger");
 const { startTurretsServer } = require("./turretsServer");
@@ -183,16 +184,23 @@ app.use(requestLogger);
 // Content-Type enforcement (#81)
 app.use(requireJsonContentType);
 
-// JSON body size limits (#81) — turrets gets larger limit for txFunction payloads.
+// JSON body size limits (#81, #353) — configurable via env vars.
+// Apply standard body parsing with env-configured limits.
+const { bodyParsing } = require("./middleware/bodyParsing");
+bodyParsing(app);
+// /api/turrets gets a larger limit for txFunction payloads.
 app.use("/api/turrets", express.json({ limit: "512kb" }));
-app.use(express.json({ limit: "100kb" }));
 
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
     return res.status(400).json({ error: "Invalid JSON body" });
   }
   if (err.type === "entity.too.large" || err.status === 413) {
-    return res.status(413).json({ error: "Request body too large" });
+    const limit = err.limit || "unknown";
+    return res.status(413).json({
+      error: "PAYLOAD_TOO_LARGE",
+      message: `Request body exceeds the ${limit} limit.`,
+    });
   }
   next();
 });
@@ -270,6 +278,7 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/sep24", sep24Routes);
 app.use("/api/sep12", sep12Routes);
 app.use("/sep38", sep38Routes);
+app.use("/api/push", pushRoutes);
 app.use("/api/features", featuresRoutes);
 app.use("/api/admin/feature-flags", adminFeatureFlagsRoutes);
 app.use("/api/v1/tokens", tokensRoutes);
@@ -345,6 +354,13 @@ async function gracefulShutdown(signal, server, otelSdk) {
     if (err) logger.error({ err }, "Error closing HTTP server");
   });
 
+  // 1. Stop scheduled executor
+  try {
+    require("./services/scheduledExecutor").stop();
+  } catch (err) {
+    logger.error({ err }, "Error stopping scheduled executor");
+  }
+
   // 2. Close webhook Horizon SSE streams (stops retry worker, waits for deliveries)
   try {
     await closeWebhookStreams();
@@ -413,6 +429,8 @@ if (require.main === module) {
       .catch((err) => {
         logger.error({ err }, "Failed to load active scheduled transactions");
       });
+    // Start scheduled transaction executor
+    require("./services/scheduledExecutor").start();
     require("./services/dataRetentionService").startRetentionCron();
     const server = app.listen(PORT, () => {
       logger.info(`

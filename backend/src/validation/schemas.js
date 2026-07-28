@@ -408,6 +408,51 @@ const tokenPriceHistoryQuerySchema = z.object({
   range: z.enum(["7d", "30d", "90d"]).default("30d"),
 });
 
+// ─── push notifications ───────────────────────────────────────────────────────
+
+/**
+ * A browser PushSubscription, as produced by `PushSubscription.toJSON()`.
+ *
+ * The endpoint must be HTTPS: every real push service (FCM, Mozilla, WNS) uses
+ * HTTPS, and accepting anything else would let a caller point deliveries at an
+ * arbitrary host.
+ */
+const pushSubscriptionObject = z.object({
+  endpoint: z
+    .string({ required_error: "subscription.endpoint is required" })
+    .url("subscription.endpoint must be a valid URL")
+    .startsWith("https://", "subscription.endpoint must be an HTTPS URL"),
+  expirationTime: z.union([z.number(), z.null()]).optional(),
+  keys: z.object({
+    p256dh: z
+      .string({ required_error: "subscription.keys.p256dh is required" })
+      .min(1, "subscription.keys.p256dh is required"),
+    auth: z
+      .string({ required_error: "subscription.keys.auth is required" })
+      .min(1, "subscription.keys.auth is required"),
+  }),
+});
+
+/**
+ * POST /api/push/subscribe
+ *
+ * `publicKey` is optional and only cross-checked against the authenticated
+ * account: the route derives the owner from the SEP-10 JWT, never from the
+ * body, so a caller cannot register a device against someone else's account.
+ */
+const pushSubscribeSchema = z.object({
+  publicKey: stellarAddress.optional(),
+  subscription: pushSubscriptionObject,
+});
+
+/** POST /api/push/unsubscribe */
+const pushUnsubscribeSchema = z.object({
+  publicKey: stellarAddress.optional(),
+  endpoint: z
+    .string({ required_error: "endpoint is required" })
+    .min(1, "endpoint is required"),
+});
+
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -456,58 +501,14 @@ module.exports = {
   // sep12
   sep12CustomerBodySchema,
   sep12CustomerQuerySchema,
-
-// ─── notifications ───────────────────────────────────────────────────────────
-
-const EMAIL_EVENT_TYPES = [
-  "payment_received",
-  "escrow_released",
-  "stream_depleted",
-  "multisig_executed",
-  "tip_received",
-];
-
-/** POST /api/notifications/email */
-const registerEmailSchema = z.object({
-  publicKey: z
-    .string({ required_error: "publicKey is required" })
-    .regex(/^G[A-Z2-7]{55}$/, "Invalid Stellar public key format"),
-  email: z
-    .string({ required_error: "email is required" })
-    .email("Invalid email address format"),
-  events: z
-    .array(z.enum(EMAIL_EVENT_TYPES))
-    .optional()
-    .default(EMAIL_EVENT_TYPES),
-});
-
-/** PUT /api/notifications/email/:publicKey */
-const updateEmailSchema = z.object({
-n/** Notifications events query schema */
-const emailEventsQuerySchema = z.object({
-  events: z
-    .array(z.enum([
-      "payment_received",
-      "escrow_released",
-      "stream_depleted",
-      "multisig_executed",
-      "tip_received",
-    ]))
-    .optional(),
-});
-  email: z
-    .string()
-    .email("Invalid email address format")
-    .optional(),
-  events: z
-    .array(z.enum(EMAIL_EVENT_TYPES))
-    .optional(),
-});
-
-/** GET /api/notifications/email/:publicKey */
-// Reuses publicKeyParamSchema from the shared primitives section above
-  // notifications
-  registerEmailSchema,
-  updateEmailSchema,
-  emailEventsQuerySchema,
+  // admin feature flags
+  adminToggleFlagSchema,
+  // sep24 deposit/withdraw
+  sep24DepositWithdrawSchema,
+  // tokens
+  tokenContractIdParamSchema,
+  tokenPriceHistoryQuerySchema,
+  // push notifications
+  pushSubscribeSchema,
+  pushUnsubscribeSchema,
 };
