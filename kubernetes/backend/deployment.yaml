@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: finchippay-backend
+  labels:
+    app: finchippay-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: finchippay-backend
+  template:
+    metadata:
+      labels:
+        app: finchippay-backend
+    spec:
+      containers:
+        - name: backend
+          image: finchippay/backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 4000
+          env:
+            - name: PORT
+              value: "4000"
+            - name: NODE_ENV
+              value: production
+            - name: STELLAR_NETWORK
+              value: testnet
+            - name: HORIZON_URL
+              value: https://horizon-testnet.stellar.org
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: finchippay-secrets
+                  key: JWT_SECRET
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: finchippay-secrets
+                  key: DB_URL
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 4000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 4000
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi

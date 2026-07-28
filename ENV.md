@@ -14,10 +14,11 @@ cp frontend/.env.example frontend/.env.local
 ## Backend (`backend/.env`)
 
 | Variable | Required | Default | Description |
-|---|---|---|---|
+|---|---|---|---|---|
 | `STELLAR_NETWORK` | ✅ | — | `testnet` or `mainnet` |
 | `HORIZON_URL` | ✅ | — | Stellar Horizon base URL |
-| `JWT_SECRET` | ✅ | — | Secret for SEP-0010 JWT signing (min 32 bytes) |
+| `JWT_SECRET` | ✅ | — | Secret for SEP-0010 JWT signing (min 32 chars) |
+| `WEBHOOK_ENCRYPTION_KEY` | ✅ (production) | — | AES-256 key (hex, 64 chars) for encrypting webhook secrets at rest. Generate: `openssl rand -hex 32` |
 | `ALLOWED_ORIGINS` | ✅ | — | Comma-separated list of CORS-allowed origins |
 | `PORT` | ❌ | `4000` | HTTP port to listen on |
 | `NODE_ENV` | ❌ | `development` | `development`, `test`, or `production` |

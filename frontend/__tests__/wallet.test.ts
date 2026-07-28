@@ -11,6 +11,18 @@ jest.mock("@/lib/stellar", () => ({
   getNetworkPassphrase: jest.fn(() => "Test SDF Network ; September 2015"),
 }));
 
+// Mock the auth module to prevent localStorage side effects
+jest.mock("@/lib/auth", () => ({
+  setJwtToken: jest.fn(),
+  clearJwtToken: jest.fn(),
+  getJwtToken: jest.fn(() => null),
+}));
+
+// Mock the addressBook module
+jest.mock("@/lib/addressBook", () => ({
+  clearAddressBook: jest.fn(),
+}));
+
 // Mock fetch
 global.fetch = jest.fn();
 
@@ -28,6 +40,7 @@ import {
 } from "@/lib/wallet";
 
 import * as freighterApi from "@stellar/freighter-api";
+import { clearAddressBook } from "@/lib/addressBook";
 
 const mockIsConnected = freighterApi.isConnected as jest.Mock;
 const mockGetAddress = freighterApi.getAddress as jest.Mock;
@@ -44,6 +57,7 @@ describe("wallet.ts", () => {
     jest.clearAllMocks();
     setJwtToken(null);
     (global.fetch as jest.Mock).mockClear();
+    (clearAddressBook as jest.Mock).mockClear();
   });
 
   describe("isFreighterInstalled", () => {
@@ -302,6 +316,23 @@ describe("wallet.ts", () => {
 
       expect(getJwtToken()).toBeNull();
     });
+
+    it("disconnectWallet clears localStorage auth token", () => {
+      const { clearJwtToken } = require("@/lib/auth");
+      setJwtToken("test-token");
+
+      disconnectWallet();
+
+      expect(clearJwtToken).toHaveBeenCalled();
+    });
+
+    it("disconnectWallet clears address book from localStorage", () => {
+      setJwtToken("test-token");
+
+      disconnectWallet();
+
+      expect(clearAddressBook).toHaveBeenCalled();
+    });
   });
 
   describe("performSEP0010Auth", () => {
@@ -328,6 +359,30 @@ describe("wallet.ts", () => {
       expect(result.token).toBe(jwtToken);
       expect(result.error).toBeNull();
       expect(getJwtToken()).toBe(jwtToken);
+    });
+
+    it("persists JWT token to localStorage on successful auth", async () => {
+      const challengeXDR = "challenge-xdr-123";
+      const jwtToken = "jwt-token-456";
+      const { setJwtToken: authSetJwtToken } = require("@/lib/auth");
+
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ transaction: challengeXDR }),
+      });
+
+      mockSignTransaction.mockResolvedValue({
+        signedTxXdr: mockSignedXDR,
+      });
+
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ token: jwtToken }),
+      });
+
+      await performSEP0010Auth(mockPublicKey);
+
+      expect(authSetJwtToken).toHaveBeenCalledWith(jwtToken);
     });
 
     it("returns error when challenge fetch fails", async () => {

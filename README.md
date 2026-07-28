@@ -3,6 +3,7 @@
 > Instant, low-fee, non-custodial payments on the Stellar network — powered by Soroban smart contracts.
 
 [![CI](https://github.com/FinChippay/Finchippay-Solution/actions/workflows/ci.yml/badge.svg)](https://github.com/FinChippay/Finchippay-Solution/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/FinChippay/Finchippay-Solution/actions/workflows/codeql.yml/badge.svg)](https://github.com/FinChippay/Finchippay-Solution/actions/workflows/codeql.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## Overview
@@ -133,15 +134,62 @@ Swagger docs: http://localhost:4000/api/docs
 
 ```bash
 cd contracts/finchippay-contract
-cargo test
+cargo test                    # unit tests
+cargo test --test integration # end-to-end sandbox integration tests
 cargo build --release --target wasm32v1-none
 ```
+
+The integration tests deploy the contract in a simulated Soroban sandbox and verify full workflows (Tip, Escrow, Stream, MultiSig, Receipt, Batch Send, Vesting, Emergency Withdrawal) including event emission, pagination, circuit-breaker pausing, and view function `NotFound` error handling. Each test starts with a fresh `Env` and deploys a clean contract instance.
+
+From the project root:
+```bash
+make test-integration
+```
+
+### Generate TypeScript contract bindings
+
+The frontend uses auto-generated TypeScript bindings from the deployed Soroban contract ABI for type-safe contract interaction. This eliminates manual `nativeToScVal`/`scValToNative` conversions.
+
+```bash
+# Generate bindings for testnet (default)
+bash scripts/gen-contract-bindings.sh
+
+# Generate bindings for mainnet
+NETWORK=mainnet bash scripts/gen-contract-bindings.sh
+
+# Generate bindings with explicit contract ID
+CONTRACT_ID=C… bash scripts/gen-contract-bindings.sh
+```
+
+The generated files live in `frontend/lib/contract-bindings/` and are checked into version control. CI ensures the checked-in bindings stay in sync with the deployed contract — if the contract ABI changes, CI will fail until bindings are regenerated.
+
+**Prerequisites:** Stellar CLI (`cargo install --locked stellar-cli`).
 
 ### Deploy the contract to Stellar testnet
 
 ```bash
 bash scripts/deploy-contract.sh
 ```
+
+### Export contract state
+
+The `scripts/export-contract-state.js` tool connects to Soroban RPC and dumps all persistent storage from a deployed `FinchippayContract` into structured JSON — useful for audits, migration planning, and disaster recovery.
+
+```bash
+# Full export
+node scripts/export-contract-state.js \
+  --contract-id CA3QY5Y5F5R5K5B5N5P5T5V5X5Z5B5D5F5H5J5KM5P5R5T5V5X5Z5 \
+  --rpc-url https://soroban-testnet.stellar.org \
+  --output state.json
+
+# Filter by storage type
+node scripts/export-contract-state.js \
+  --contract-id CA3Q... \
+  --filter escrows,streams \
+  --output escrows-and-streams.json
+```
+
+The export includes admin configuration, escrows, streaming payments, and multi-sig proposals with per-section counts in the summary.
 
 ## Freighter Wallet Setup
 
@@ -174,6 +222,7 @@ Key backend variables:
 | [docs/api.md](docs/api.md) | Full REST API reference |
 | [docs/architecture.md](docs/architecture.md) | System design and data flows |
 | [docs/deployment.md](docs/deployment.md) | Production deployment guide |
+| [docs/onboarding.md](docs/onboarding.md) | Interactive onboarding tour (Issue #254) |
 | [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) | Docker / cloud deployment |
 | [ENV.md](ENV.md) | Environment variable reference |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |

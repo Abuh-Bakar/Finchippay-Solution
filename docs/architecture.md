@@ -54,9 +54,61 @@ Key design decisions:
 - **Checked arithmetic**: all additions, subtractions, and multiplications use `checked_*` methods.
 - **Event emission**: every state change emits a structured Soroban event for off-chain indexers.
 - **Storage TTL**: persistent entries are bumped to 500,000 ledgers (~1 year) to prevent expiry.
-- **Emergency pause**: admin can call `pause()` to freeze all value-transferring operations (circuit breaker). Read-only queries remain accessible during pause.
+- **Emergency pause**: the admin *or* a designated pauser can call `pause()`/`unpause()` to freeze all value-transferring operations (circuit breaker). Read-only queries remain accessible during pause.
 - **Upgradability**: admin can call `upgrade(new_wasm_hash)` to deploy security patches without state migration. Version counter is incremented on each upgrade.
 - **Bounded inputs**: escrow timelocks, stream deposits/rates, and multi-sig amounts are capped to prevent griefing, overflow, and permanent fund lock-up.
+
+#### Roles
+
+The contract separates privileged authority into two roles so that emergency
+response does not require exposing the highest-privilege key.
+
+| Role | Set by | Capabilities | Cannot |
+|---|---|---|---|
+| **Admin** | `initialize` (once); rotated via `transfer_admin` | Everything: `transfer_admin`, `set_pauser`, `upgrade`, `rescue_tokens`, `pause`/`unpause` | — |
+| **Pauser** | `set_pauser` (admin only) | `pause` / `unpause` only | `transfer_admin`, `set_pauser`, `upgrade`, `rescue_tokens` |
+
+The pauser is intended to be a low-exposure "hot key" that can trigger the
+circuit breaker during an incident without the admin key ever coming online.
+`pause` and `unpause` accept either the stored admin or the stored pauser;
+every other privileged entry point checks the admin only. The pauser is
+optional — if `set_pauser` has never been called, only the admin can pause.
+
+#### Event Catalogue
+
+Every state-changing entry point emits a structured Soroban event so off-chain
+indexers can reconstruct contract history without replaying every ledger from
+genesis or reading storage directly. Topics follow the pattern
+`(Symbol::new(&env, "event_name"), ..filter_fields)`; the event's `data` tuple
+carries the remaining fields needed to reconstruct state.
+
+| Event | Topics | Data | Emitted by |
+|---|---|---|---|
+| `init` | `(init,)` | `admin` | `initialize` |
+| `admin_transfer` | `(admin_transfer,)` | `new_admin` | `transfer_admin` |
+| `paused` | `(paused,)` | `()` | `pause` |
+| `unpaused` | `(unpaused,)` | `()` | `unpause` |
+| `pauser_set` | `(pauser_set,)` | `pauser` | `set_pauser` |
+| `upgraded` | `(upgraded,)` | `(new_version, new_wasm_hash)` | `upgrade` |
+| `rescue_tokens` | `(rescue_tokens,)` | `(token_address, amount, to)` | `rescue_tokens` |
+| `tip` | `(tip, from, to)` | `amount` | `send_tip` |
+| `receipt` | `(receipt, from)` | `index` | `mint_receipt` |
+| `escrow_create` | `(escrow_create, id)` | `(from, to, amount, release_ledger)` | `create_escrow` |
+| `escrow_claim_partial` | `(escrow_claim_partial, id)` | `(to, claim_amount, remaining)` | `claim_escrow_partial` |
+| `escrow_claim` | `(escrow_claim, id)` | `(to, amount)` | `claim_escrow` |
+| `escrow_cancelled` | `(escrow_cancelled,)` | `(id, from, amount)` | `cancel_escrow` |
+| `stream_open` | `(stream_open, id)` | `(payer, recipient, rate_per_ledger, deposit)` | `open_stream` |
+| `stream_claim` | `(stream_claim, id)` | `(recipient, claimable)` | `claim_stream` |
+| `stream_topped_up` | `(stream_topped_up,)` | `(id, payer, added, new_deposit)` | `top_up_stream` |
+| `stream_close` | `(stream_close, id)` | `(payer, refund)` | `close_stream` |
+| `stream_reject` | `(stream_reject, id)` | `(recipient, refund)` | `reject_stream` |
+| `stream_transfer` | `(stream_transfer, id)` | `(current_recipient, new_recipient)` | `transfer_stream` |
+| `multisig_create` | `(multisig_create, id)` | `(proposer, recipient, amount, threshold)` | `create_multisig` |
+| `multisig_approve` | `(multisig_approve, id)` | `(signer, approvals_count, threshold)` | `approve_multisig` |
+| `multisig_executed` | `(multisig_executed, id)` | `(recipient, amount)` | `approve_multisig` (auto-execute) |
+| `multisig_timeout` | `(multisig_timeout, id)` | `(proposer, amount)` | `timeout_multisig` |
+| `multisig_cancelled` | `(multisig_cancelled,)` | `(id, proposer, amount)` | `cancel_multisig` |
+| `batch_sent` | `(batch_sent,)` | `(from, count, total_amount)` | `batch_send` |
 
 ### Backend (`backend/`)
 
@@ -123,8 +175,10 @@ Key components:
 | CSP | Helmet enforces strict Content-Security-Policy on all API responses |
 | Auth | SEP-0010 JWT — signed by Freighter, verified by backend middleware |
 | Contract auth | Every mutating entry-point calls `require_auth()` |
-| Emergency pause | Admin `pause()`/`unpause()` freezes value-transferring operations |
+| Emergency pause | Admin or designated pauser `pause()`/`unpause()` freezes value-transferring operations |
+| Least-privilege pauser | Separate pause-only role (`set_pauser`) keeps the admin key offline during incident response; pauser cannot upgrade or transfer admin |
 | Upgradability | Admin `upgrade()` replaces contract WASM; version tracked on-chain |
 | Bounded inputs | Deposit caps, rate limits, timelock maximums prevent griefing |
 | Top-up enforcement | Cumulative stream deposit checked against `MAX_STREAM_DEPOSIT` |
+| Token balance verification | `require_transfer_succeeded()` checks recipient balance before & after every token transfer; panics with `TransferFailed` (error code 17) if the balance did not increase by at least the expected amount — guards against malicious/fake token contracts (phantom deposit attack) |
 | Overflow safety | Checked arithmetic throughout the Soroban contract |

@@ -6,6 +6,10 @@
 "use strict";
 
 const swaggerJsdoc = require("swagger-jsdoc");
+const { ERROR_CODES } = require("../../shared/errorCodes");
+
+// Every code in the catalogue, so the spec can never drift from the registry.
+const ERROR_CODE_NAMES = Object.keys(ERROR_CODES).sort();
 
 const options = {
   definition: {
@@ -27,7 +31,7 @@ const options = {
         "| `RateLimit-Limit` | Maximum requests allowed in the current window |\n" +
         "| `RateLimit-Remaining` | Requests remaining before the limit is reached |\n" +
         "| `RateLimit-Reset` | Seconds until the window resets |\n\n" +
-        "When the limit is exceeded the server returns **HTTP 429** with `{ \"error\": \"Too many requests, please try again later.\" }`. " +
+        'When the limit is exceeded the server returns **HTTP 429** with `{ "error": "Too many requests, please try again later." }`. ' +
         "Clients should read `RateLimit-Remaining` on each response and add exponential back-off when the value approaches 0.",
       contact: {
         name: "Finchippay Solution",
@@ -41,12 +45,90 @@ const options = {
       },
     ],
     components: {
+      parameters: {
+        PaginationLimit: {
+          name: "limit",
+          in: "query",
+          required: false,
+          description: "Page size. Defaults to 20; capped at 100 server-side.",
+          schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+        },
+        PaginationCursor: {
+          name: "cursor",
+          in: "query",
+          required: false,
+          description:
+            "Opaque cursor from a previous page's `Link` header or " +
+            "`pagination.nextCursor`. Omit for the first page.",
+          schema: { type: "string" },
+        },
+      },
+      headers: {
+        LinkHeader: {
+          description:
+            "RFC 5988 web-linking header. Present when another page exists: " +
+            '`</api/...?cursor=abc&limit=20>; rel="next"`.',
+          schema: { type: "string" },
+        },
+        XTotalCount: {
+          description: "Total number of records matching the query.",
+          schema: { type: "integer" },
+        },
+      },
       schemas: {
-        Error: {
+        ErrorResponse: {
           type: "object",
+          required: ["error"],
+          description:
+            "Canonical error body returned by every endpoint. The `error` key " +
+            "is always at the top level, so consumers written against the " +
+            "original `{ error }` contract keep working.",
           properties: {
-            error: { type: "string", description: "Error message" },
+            error: {
+              type: "object",
+              required: ["code", "message"],
+              properties: {
+                code: {
+                  $ref: "#/components/schemas/ErrorCode",
+                },
+                message: {
+                  type: "string",
+                  description: "Human-readable description of the failure.",
+                  example: "Invalid Stellar public key format.",
+                },
+                correlationId: {
+                  type: "string",
+                  description:
+                    "Matches the `X-Request-ID` response header and the " +
+                    "`correlationId` field in the server logs. Quote this " +
+                    "value when reporting a problem.",
+                  example: "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8",
+                },
+                details: {
+                  type: "object",
+                  additionalProperties: true,
+                  description:
+                    "Optional, code-specific context — the offending field, " +
+                    "the received value, and so on.",
+                  example: { fields: ["anchorName"] },
+                },
+              },
+            },
           },
+        },
+        ErrorCode: {
+          type: "string",
+          description:
+            "Machine-readable error code from the shared catalogue. The " +
+            "category prefix identifies the owning layer: CONTRACT_* is " +
+            "on-chain, WALLET_* is the browser wallet, and the rest are the " +
+            "API. See docs/error-codes.md.",
+          enum: ERROR_CODE_NAMES,
+          example: "VAL_INVALID_PUBLIC_KEY",
+        },
+        // Retained so any existing $ref to `Error` still resolves.
+        Error: {
+          allOf: [{ $ref: "#/components/schemas/ErrorResponse" }],
         },
         SuccessResponse: {
           type: "object",
@@ -168,7 +250,8 @@ const options = {
             },
             config: {
               type: "object",
-              description: "Type-specific configuration — see DcaConfig, StopLossConfig, or EscrowReleaseConfig",
+              description:
+                "Type-specific configuration — see DcaConfig, StopLossConfig, or EscrowReleaseConfig",
             },
           },
         },
@@ -177,11 +260,13 @@ const options = {
           properties: {
             challengeXDR: {
               type: "string",
-              description: "Base64-encoded ManageData transaction XDR the owner must sign",
+              description:
+                "Base64-encoded ManageData transaction XDR the owner must sign",
             },
             deploymentHash: {
               type: "string",
-              description: "SHA-256 hash of the normalised config, included in the challenge",
+              description:
+                "SHA-256 hash of the normalised config, included in the challenge",
             },
             normalizedConfig: { type: "object" },
             networkPassphrase: { type: "string" },
@@ -189,15 +274,25 @@ const options = {
         },
         TxFunctionDeployRequest: {
           type: "object",
-          required: ["ownerPublicKey", "type", "config", "deploymentHash", "signedChallengeXDR"],
+          required: [
+            "ownerPublicKey",
+            "type",
+            "config",
+            "deploymentHash",
+            "signedChallengeXDR",
+          ],
           properties: {
             ownerPublicKey: { type: "string", pattern: "^G[A-Z0-9]{55}$" },
-            type: { type: "string", enum: ["dca", "stop_loss", "escrow_release"] },
+            type: {
+              type: "string",
+              enum: ["dca", "stop_loss", "escrow_release"],
+            },
             config: { type: "object" },
             deploymentHash: { type: "string" },
             signedChallengeXDR: {
               type: "string",
-              description: "The challenge XDR signed by the owner's Freighter (or Ledger) wallet",
+              description:
+                "The challenge XDR signed by the owner's Freighter (or Ledger) wallet",
             },
           },
         },
@@ -206,14 +301,25 @@ const options = {
           properties: {
             id: { type: "string", format: "uuid" },
             ownerPublicKey: { type: "string" },
-            type: { type: "string", enum: ["dca", "stop_loss", "escrow_release"] },
+            type: {
+              type: "string",
+              enum: ["dca", "stop_loss", "escrow_release"],
+            },
             status: { type: "string", enum: ["active", "paused", "completed"] },
             config: { type: "object" },
             deploymentHash: { type: "string" },
             createdAt: { type: "string", format: "date-time" },
             nextRunAt: { type: "string", format: "date-time", nullable: true },
-            lastExecutedAt: { type: "string", format: "date-time", nullable: true },
-            lastCheckedAt: { type: "string", format: "date-time", nullable: true },
+            lastExecutedAt: {
+              type: "string",
+              format: "date-time",
+              nullable: true,
+            },
+            lastCheckedAt: {
+              type: "string",
+              format: "date-time",
+              nullable: true,
+            },
             lastObservedPriceUsd: { type: "number", nullable: true },
             lastError: { type: "string", nullable: true },
           },
@@ -226,6 +332,87 @@ const options = {
             publicKey: { type: "string" },
             attempts: { type: "integer" },
             createdAt: { type: "string", format: "date-time" },
+          },
+        },
+        Sep24InitiateRequest: {
+          type: "object",
+          required: ["asset_code", "account"],
+          properties: {
+            asset_code: {
+              type: "string",
+              description: "Stellar asset code (e.g. USDC, XLM)",
+              example: "USDC",
+            },
+            account: {
+              type: "string",
+              pattern: "^G[A-Z0-9]{55}$",
+              description: "User's Stellar public key",
+            },
+            memo: {
+              type: "string",
+              description: "Optional memo for the deposit",
+            },
+            memo_type: {
+              type: "string",
+              enum: ["text", "id", "hash"],
+              description: "Optional memo type",
+            },
+            anchor_url: {
+              type: "string",
+              description:
+                "Optional override for the anchor interactive flow URL",
+            },
+          },
+        },
+        Sep24InteractiveResponse: {
+          type: "object",
+          properties: {
+            type: {
+              type: "string",
+              enum: ["interactive_customer_info_needed"],
+              description: "Response type indicator",
+            },
+            url: {
+              type: "string",
+              description:
+                "Interactive web URL the user must visit to complete KYC",
+            },
+            id: {
+              type: "string",
+              format: "uuid",
+              description: "Transaction ID for status polling",
+            },
+          },
+        },
+        Sep24Transaction: {
+          type: "object",
+          properties: {
+            id: { type: "string", format: "uuid" },
+            kind: { type: "string", enum: ["deposit", "withdrawal"] },
+            status: {
+              type: "string",
+              enum: ["pending_external", "completed", "error"],
+              description: "Current transaction status",
+            },
+            status_eta: { type: "integer", nullable: true },
+            more_info_url: { type: "string", nullable: true },
+            amount_in: { type: "string", nullable: true },
+            amount_out: { type: "string", nullable: true },
+            amount_fee: { type: "string", nullable: true },
+            started_at: { type: "string", format: "date-time" },
+            updated_at: { type: "string", format: "date-time" },
+            completed_at: {
+              type: "string",
+              format: "date-time",
+              nullable: true,
+            },
+            stellar_transaction_id: { type: "string", nullable: true },
+            external_transaction_id: { type: "string", nullable: true },
+            message: {
+              type: "string",
+              nullable: true,
+              description: "Error message when status is 'error'",
+            },
           },
         },
         ExecutionLogEntry: {
@@ -242,9 +429,44 @@ const options = {
             result: {
               type: "object",
               nullable: true,
-              description: "Operation intent generated by the txFunction evaluator",
+              description:
+                "Operation intent generated by the txFunction evaluator",
             },
             createdAt: { type: "string", format: "date-time" },
+          },
+        },
+        PriceFeedProviderStatus: {
+          type: "object",
+          properties: {
+            status: {
+              type: "string",
+              enum: ["ok", "error", "unknown"],
+              description: "Outcome of the most recent probe to this provider",
+            },
+            latencyMs: {
+              type: "number",
+              nullable: true,
+              description: "Most recent probe latency in milliseconds",
+            },
+            lastError: {
+              type: "string",
+              nullable: true,
+              description: "Most recent error message, if any",
+            },
+            lastSuccessAt: {
+              type: "string",
+              format: "date-time",
+              nullable: true,
+            },
+            cacheAgeMs: {
+              type: "number",
+              nullable: true,
+              description: "Age of the cached price, in milliseconds",
+            },
+            cachedPrice: {
+              type: "number",
+              nullable: true,
+            },
           },
         },
       },
@@ -356,7 +578,9 @@ const options = {
             200: {
               description: "Account info",
               headers: {
-                "RateLimit-Limit": { schema: { type: "integer", example: 100 } },
+                "RateLimit-Limit": {
+                  schema: { type: "integer", example: 100 },
+                },
                 "RateLimit-Remaining": { schema: { type: "integer" } },
                 "RateLimit-Reset": { schema: { type: "integer" } },
               },
@@ -373,7 +597,10 @@ const options = {
               },
             },
             404: { description: "Account not found" },
-            429: { description: "Rate limit exceeded — back off and retry after RateLimit-Reset seconds" },
+            429: {
+              description:
+                "Rate limit exceeded — back off and retry after RateLimit-Reset seconds",
+            },
           },
         },
       },
@@ -488,24 +715,24 @@ const options = {
               required: true,
               schema: { type: "string", pattern: "^G[A-Z0-9]{55}$" },
             },
-            {
-              name: "limit",
-              in: "query",
-              schema: { type: "integer", default: 20, maximum: 100 },
-              description: "Number of results per page",
-            },
-            {
-              name: "cursor",
-              in: "query",
-              schema: { type: "string" },
-              description: "Pagination cursor",
-            },
+            { $ref: "#/components/parameters/PaginationLimit" },
+            { $ref: "#/components/parameters/PaginationCursor" },
           ],
           responses: {
             200: {
-              description: "Payment history",
+              description: "Payment history (one page)",
               headers: {
-                "RateLimit-Limit": { schema: { type: "integer", example: 100 } },
+                Link: { $ref: "#/components/headers/LinkHeader" },
+                "X-Total-Count": {
+                  description:
+                    "Approximate, bounded total for this account's payments. " +
+                    "Horizon exposes no exact count, so this is a floor capped " +
+                    "at 200 (the value may be higher than reported).",
+                  schema: { type: "integer" },
+                },
+                "RateLimit-Limit": {
+                  schema: { type: "integer", example: 100 },
+                },
                 "RateLimit-Remaining": { schema: { type: "integer" } },
                 "RateLimit-Reset": { schema: { type: "integer" } },
               },
@@ -518,6 +745,14 @@ const options = {
                       data: {
                         type: "array",
                         items: { $ref: "#/components/schemas/PaymentRecord" },
+                      },
+                      pagination: {
+                        type: "object",
+                        properties: {
+                          nextCursor: { type: "string", nullable: true },
+                          total: { type: "integer" },
+                          limit: { type: "integer" },
+                        },
                       },
                     },
                   },
@@ -659,7 +894,7 @@ const options = {
       "/api/tips/received/{creatorPublicKey}": {
         get: {
           tags: ["Tips"],
-          summary: "Get tips received by a creator",
+          summary: "Get tips received by a creator (cursor-paginated)",
           parameters: [
             {
               name: "creatorPublicKey",
@@ -667,10 +902,16 @@ const options = {
               required: true,
               schema: { type: "string", pattern: "^G[A-Z0-9]{55}$" },
             },
+            { $ref: "#/components/parameters/PaginationLimit" },
+            { $ref: "#/components/parameters/PaginationCursor" },
           ],
           responses: {
             200: {
-              description: "Received tips",
+              description: "Received tips (one page)",
+              headers: {
+                Link: { $ref: "#/components/headers/LinkHeader" },
+                "X-Total-Count": { $ref: "#/components/headers/XTotalCount" },
+              },
               content: {
                 "application/json": {
                   schema: {
@@ -680,6 +921,14 @@ const options = {
                       data: {
                         type: "array",
                         items: { $ref: "#/components/schemas/Tip" },
+                      },
+                      pagination: {
+                        type: "object",
+                        properties: {
+                          nextCursor: { type: "string", nullable: true },
+                          total: { type: "integer" },
+                          limit: { type: "integer" },
+                        },
                       },
                     },
                   },
@@ -692,7 +941,7 @@ const options = {
       "/api/tips/sent/{senderPublicKey}": {
         get: {
           tags: ["Tips"],
-          summary: "Get tips sent by an account",
+          summary: "Get tips sent by an account (cursor-paginated)",
           parameters: [
             {
               name: "senderPublicKey",
@@ -700,10 +949,16 @@ const options = {
               required: true,
               schema: { type: "string", pattern: "^G[A-Z0-9]{55}$" },
             },
+            { $ref: "#/components/parameters/PaginationLimit" },
+            { $ref: "#/components/parameters/PaginationCursor" },
           ],
           responses: {
             200: {
-              description: "Sent tips",
+              description: "Sent tips (one page)",
+              headers: {
+                Link: { $ref: "#/components/headers/LinkHeader" },
+                "X-Total-Count": { $ref: "#/components/headers/XTotalCount" },
+              },
               content: {
                 "application/json": {
                   schema: {
@@ -713,6 +968,171 @@ const options = {
                       data: {
                         type: "array",
                         items: { $ref: "#/components/schemas/Tip" },
+                      },
+                      pagination: {
+                        type: "object",
+                        properties: {
+                          nextCursor: { type: "string", nullable: true },
+                          total: { type: "integer" },
+                          limit: { type: "integer" },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/webhooks/{publicKey}": {
+        get: {
+          tags: ["Webhooks"],
+          summary: "List webhooks for an account (cursor-paginated)",
+          parameters: [
+            {
+              name: "publicKey",
+              in: "path",
+              required: true,
+              schema: { type: "string", pattern: "^G[A-Z2-7]{55}$" },
+            },
+            { $ref: "#/components/parameters/PaginationLimit" },
+            { $ref: "#/components/parameters/PaginationCursor" },
+          ],
+          responses: {
+            200: {
+              description: "Registered webhooks (one page)",
+              headers: {
+                Link: { $ref: "#/components/headers/LinkHeader" },
+                "X-Total-Count": { $ref: "#/components/headers/XTotalCount" },
+              },
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      webhooks: { type: "array", items: { type: "object" } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/webhooks/{publicKey}/failures": {
+        get: {
+          tags: ["Webhooks"],
+          summary: "List dead-letter deliveries (cursor-paginated)",
+          parameters: [
+            {
+              name: "publicKey",
+              in: "path",
+              required: true,
+              schema: { type: "string", pattern: "^G[A-Z2-7]{55}$" },
+            },
+            { $ref: "#/components/parameters/PaginationLimit" },
+            { $ref: "#/components/parameters/PaginationCursor" },
+          ],
+          responses: {
+            200: {
+              description: "Failed deliveries (one page)",
+              headers: {
+                Link: { $ref: "#/components/headers/LinkHeader" },
+                "X-Total-Count": { $ref: "#/components/headers/XTotalCount" },
+              },
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      failures: { type: "array", items: { type: "object" } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/scheduled-transactions/{publicKey}": {
+        get: {
+          tags: ["Scheduled Transactions"],
+          summary: "List scheduled transactions (cursor-paginated)",
+          parameters: [
+            {
+              name: "publicKey",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+            { $ref: "#/components/parameters/PaginationLimit" },
+            { $ref: "#/components/parameters/PaginationCursor" },
+          ],
+          responses: {
+            200: {
+              description: "Scheduled transactions (one page)",
+              headers: {
+                Link: { $ref: "#/components/headers/LinkHeader" },
+                "X-Total-Count": { $ref: "#/components/headers/XTotalCount" },
+              },
+              content: {
+                "application/json": {
+                  schema: { type: "array", items: { type: "object" } },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/events/{publicKey}": {
+        get: {
+          tags: ["Events"],
+          summary: "List contract events for a participant (paginated)",
+          description:
+            "Supports both `offset` and opaque `cursor` navigation. When more " +
+            'results exist, a `Link: rel="next"` header and ' +
+            "`pagination.nextCursor` are returned.",
+          parameters: [
+            {
+              name: "publicKey",
+              in: "path",
+              required: true,
+              schema: { type: "string", pattern: "^G[A-Z2-7]{55}$" },
+            },
+            { $ref: "#/components/parameters/PaginationLimit" },
+            { $ref: "#/components/parameters/PaginationCursor" },
+            {
+              name: "offset",
+              in: "query",
+              required: false,
+              description: "0-based offset (alternative to cursor).",
+              schema: { type: "integer", minimum: 0, default: 0 },
+            },
+          ],
+          responses: {
+            200: {
+              description: "Contract events (one page)",
+              headers: {
+                Link: { $ref: "#/components/headers/LinkHeader" },
+                "X-Total-Count": { $ref: "#/components/headers/XTotalCount" },
+              },
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      success: { type: "boolean" },
+                      data: { type: "array", items: { type: "object" } },
+                      pagination: {
+                        type: "object",
+                        properties: {
+                          limit: { type: "integer" },
+                          offset: { type: "integer" },
+                          total: { type: "integer" },
+                          hasMore: { type: "boolean" },
+                          nextCursor: { type: "string", nullable: true },
+                        },
                       },
                     },
                   },
@@ -780,11 +1200,93 @@ const options = {
           },
         },
       },
+      "/api/turrets/health": {
+        get: {
+          tags: ["Turrets"],
+          summary: "Turrets subsystem health (incl. price feed)",
+          description:
+            "Reports deployment counts, per-provider price-feed status, the active provider, and the freshness of the price cache. Returns 200 when at least one provider is healthy, 503 when every provider is currently down (the runner cannot evaluate stop-loss or DCA txFunctions without a price).",
+          responses: {
+            200: {
+              description: "Turrets subsystem is healthy",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      success: { type: "boolean", example: true },
+                      data: {
+                        type: "object",
+                        properties: {
+                          status: { type: "string", enum: ["ok", "degraded"] },
+                          priceFeed: {
+                            type: "object",
+                            properties: {
+                              activeProvider: {
+                                type: "string",
+                                nullable: true,
+                                enum: ["coingecko", "binance", "coincap"],
+                              },
+                              activeProviderAt: {
+                                type: "string",
+                                format: "date-time",
+                                nullable: true,
+                              },
+                              cacheTtlMs: { type: "integer", example: 30000 },
+                              timeoutMs: { type: "integer", example: 5000 },
+                              providers: {
+                                type: "object",
+                                additionalProperties: {
+                                  $ref: "#/components/schemas/PriceFeedProviderStatus",
+                                },
+                              },
+                              activePrice: {
+                                type: "object",
+                                nullable: true,
+                                properties: {
+                                  price: { type: "number" },
+                                  source: { type: "string" },
+                                  timestamp: {
+                                    type: "string",
+                                    format: "date-time",
+                                  },
+                                },
+                              },
+                            },
+                          },
+                          deployments: {
+                            type: "object",
+                            properties: {
+                              active: { type: "integer" },
+                              paused: { type: "integer" },
+                              total: { type: "integer" },
+                            },
+                          },
+                          uptime: { type: "number" },
+                          timestamp: {
+                            type: "string",
+                            format: "date-time",
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            503: {
+              description:
+                "Every price provider is currently unreachable. Stop-loss and DCA evaluations will fail until at least one provider recovers.",
+            },
+          },
+        },
+      },
       "/api/turrets": {
         get: {
           tags: ["Turrets"],
           summary: "List txFunction deployments",
-          description: "Returns all deployments. Filter by owner using `ownerPublicKey` query parameter.",
+          description:
+            "Returns all deployments. Filter by owner using `ownerPublicKey` query parameter.",
           parameters: [
             {
               name: "ownerPublicKey",
@@ -799,7 +1301,8 @@ const options = {
               description: "Array of deployments",
               headers: {
                 "RateLimit-Limit": {
-                  description: "Maximum requests allowed in the current window (20 per minute)",
+                  description:
+                    "Maximum requests allowed in the current window (20 per minute)",
                   schema: { type: "integer", example: 20 },
                 },
                 "RateLimit-Remaining": {
@@ -819,7 +1322,9 @@ const options = {
                       success: { type: "boolean", example: true },
                       data: {
                         type: "array",
-                        items: { $ref: "#/components/schemas/TxFunctionDeployment" },
+                        items: {
+                          $ref: "#/components/schemas/TxFunctionDeployment",
+                        },
                       },
                     },
                   },
@@ -830,7 +1335,9 @@ const options = {
               description: "Rate limit exceeded",
               headers: {
                 "RateLimit-Limit": { schema: { type: "integer" } },
-                "RateLimit-Remaining": { schema: { type: "integer", example: 0 } },
+                "RateLimit-Remaining": {
+                  schema: { type: "integer", example: 0 },
+                },
                 "RateLimit-Reset": { schema: { type: "integer" } },
               },
             },
@@ -841,12 +1348,15 @@ const options = {
         post: {
           tags: ["Turrets"],
           summary: "Create a txFunction signing challenge",
-          description: "Returns a ManageData transaction XDR that the user must sign with their Stellar keypair to prove ownership. The signed XDR is then passed to `POST /api/turrets/deploy`.",
+          description:
+            "Returns a ManageData transaction XDR that the user must sign with their Stellar keypair to prove ownership. The signed XDR is then passed to `POST /api/turrets/deploy`.",
           requestBody: {
             required: true,
             content: {
               "application/json": {
-                schema: { $ref: "#/components/schemas/TxFunctionChallengeRequest" },
+                schema: {
+                  $ref: "#/components/schemas/TxFunctionChallengeRequest",
+                },
               },
             },
           },
@@ -864,13 +1374,18 @@ const options = {
                     type: "object",
                     properties: {
                       success: { type: "boolean", example: true },
-                      data: { $ref: "#/components/schemas/TxFunctionChallengeResponse" },
+                      data: {
+                        $ref: "#/components/schemas/TxFunctionChallengeResponse",
+                      },
                     },
                   },
                 },
               },
             },
-            400: { description: "Invalid request body (bad public key, unknown type, invalid config)" },
+            400: {
+              description:
+                "Invalid request body (bad public key, unknown type, invalid config)",
+            },
             429: { description: "Rate limit exceeded" },
           },
         },
@@ -879,12 +1394,15 @@ const options = {
         post: {
           tags: ["Turrets"],
           summary: "Deploy a signed txFunction",
-          description: "Verifies the signed challenge and registers the txFunction. The runner begins evaluating the deployment immediately.",
+          description:
+            "Verifies the signed challenge and registers the txFunction. The runner begins evaluating the deployment immediately.",
           requestBody: {
             required: true,
             content: {
               "application/json": {
-                schema: { $ref: "#/components/schemas/TxFunctionDeployRequest" },
+                schema: {
+                  $ref: "#/components/schemas/TxFunctionDeployRequest",
+                },
               },
             },
           },
@@ -902,14 +1420,18 @@ const options = {
                     type: "object",
                     properties: {
                       success: { type: "boolean", example: true },
-                      data: { $ref: "#/components/schemas/TxFunctionDeployment" },
+                      data: {
+                        $ref: "#/components/schemas/TxFunctionDeployment",
+                      },
                     },
                   },
                 },
               },
             },
             400: { description: "Config hash mismatch or invalid asset" },
-            401: { description: "Signed challenge was not signed by the owner" },
+            401: {
+              description: "Signed challenge was not signed by the owner",
+            },
             429: { description: "Rate limit exceeded" },
           },
         },
@@ -940,7 +1462,9 @@ const options = {
                     type: "object",
                     properties: {
                       success: { type: "boolean", example: true },
-                      data: { $ref: "#/components/schemas/TxFunctionDeployment" },
+                      data: {
+                        $ref: "#/components/schemas/TxFunctionDeployment",
+                      },
                     },
                   },
                 },
@@ -979,7 +1503,9 @@ const options = {
                       success: { type: "boolean", example: true },
                       data: {
                         type: "array",
-                        items: { $ref: "#/components/schemas/ExecutionLogEntry" },
+                        items: {
+                          $ref: "#/components/schemas/ExecutionLogEntry",
+                        },
                       },
                     },
                   },
@@ -1054,7 +1580,8 @@ const options = {
                 "application/toml": {
                   schema: {
                     type: "string",
-                    example: 'FEDERATION_SERVER="https://stellarfinchippay.io/federation"',
+                    example:
+                      'FEDERATION_SERVER="https://stellarfinchippay.io/federation"\nTRANSFER_SERVER_SEP0024="https://stellarfinchippay.io"',
                   },
                 },
               },
@@ -1066,7 +1593,8 @@ const options = {
         post: {
           tags: ["AI Parsing"],
           summary: "Parse natural language into payment intent",
-          description: "Uses Anthropic's Claude to extract structured payment details (amount, recipient, memo) from natural language input. Requires `ANTHROPIC_API_KEY` to be set.",
+          description:
+            "Uses Anthropic's Claude to extract structured payment details (amount, recipient, memo) from natural language input. Requires `ANTHROPIC_API_KEY` to be set.",
           requestBody: {
             required: true,
             content: {
@@ -1121,9 +1649,20 @@ const options = {
                   type: "object",
                   required: ["signedXDR", "submitAt", "publicKey"],
                   properties: {
-                    signedXDR: { type: "string", description: "Signed transaction XDR (base64)" },
-                    submitAt: { type: "string", format: "date-time", description: "ISO 8601 timestamp" },
-                    publicKey: { type: "string", pattern: "^G[A-Z0-9]{55}$", description: "Owner public key" },
+                    signedXDR: {
+                      type: "string",
+                      description: "Signed transaction XDR (base64)",
+                    },
+                    submitAt: {
+                      type: "string",
+                      format: "date-time",
+                      description: "ISO 8601 timestamp",
+                    },
+                    publicKey: {
+                      type: "string",
+                      pattern: "^G[A-Z0-9]{55}$",
+                      description: "Owner public key",
+                    },
                   },
                 },
               },
@@ -1154,7 +1693,9 @@ const options = {
                 "application/json": {
                   schema: {
                     type: "array",
-                    items: { $ref: "#/components/schemas/ScheduledTransaction" },
+                    items: {
+                      $ref: "#/components/schemas/ScheduledTransaction",
+                    },
                   },
                 },
               },
@@ -1190,7 +1731,8 @@ const options = {
               in: "query",
               required: true,
               schema: { type: "string" },
-              description: "Federation query. Use user*domain for type=name or a public key for type=id.",
+              description:
+                "Federation query. Use user*domain for type=name or a public key for type=id.",
             },
             {
               name: "type",
@@ -1208,7 +1750,10 @@ const options = {
                   schema: {
                     type: "object",
                     properties: {
-                      stellar_address: { type: "string", example: "alice*stellarfinchippay.io" },
+                      stellar_address: {
+                        type: "string",
+                        example: "alice*stellarfinchippay.io",
+                      },
                       account_id: { type: "string", example: "GABC...XYZ" },
                     },
                   },
@@ -1220,9 +1765,191 @@ const options = {
           },
         },
       },
+      "/api/sep24/transactions/deposit/interactive": {
+        post: {
+          tags: ["SEP-0024"],
+          summary: "Initiate an interactive deposit session",
+          description:
+            "Initiates SEP-0024 interactive deposit flow. Returns a URL the user must visit in a browser to complete KYC and fund the deposit.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Sep24InitiateRequest" },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Interactive session initiated",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/Sep24InteractiveResponse",
+                  },
+                },
+              },
+            },
+            400: {
+              description:
+                "Missing asset_code or account, or invalid public key format",
+            },
+          },
+        },
+      },
+      "/api/sep24/transactions/withdraw/interactive": {
+        post: {
+          tags: ["SEP-0024"],
+          summary: "Initiate an interactive withdrawal session",
+          description:
+            "Initiates SEP-0024 interactive withdrawal flow. Returns a URL the user must visit in a browser to complete KYC and receive funds.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Sep24InitiateRequest" },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Interactive session initiated",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/Sep24InteractiveResponse",
+                  },
+                },
+              },
+            },
+            400: {
+              description:
+                "Missing asset_code or account, or invalid public key format",
+            },
+          },
+        },
+      },
+      "/api/sep24/transaction": {
+        get: {
+          tags: ["SEP-0024"],
+          summary: "Poll transaction status",
+          description:
+            "Retrieve the current status of an interactive deposit or withdrawal. Poll this endpoint after the user completes the interactive web flow.",
+          parameters: [
+            {
+              name: "id",
+              in: "query",
+              required: true,
+              schema: { type: "string", format: "uuid" },
+              description: "Transaction ID returned by the initiate endpoint",
+            },
+          ],
+          responses: {
+            200: {
+              description: "Transaction status",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      transaction: {
+                        $ref: "#/components/schemas/Sep24Transaction",
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            400: { description: "Missing id query parameter" },
+            404: { description: "Transaction not found" },
+          },
+        },
+      },
     },
   },
   apis: [],
 };
+
+// ─── Error responses ─────────────────────────────────────────────────────────
+
+/**
+ * Reusable error responses, one per HTTP status the API can return.
+ * Referenced as `$ref: "#/components/responses/BadRequest"` and used as the
+ * default content for any documented error status that lacks its own schema.
+ */
+const ERROR_RESPONSES = {
+  400: ["BadRequest", "The request was rejected by validation."],
+  401: ["Unauthorized", "Authentication is missing, invalid, or expired."],
+  403: ["Forbidden", "The caller may not access this resource."],
+  404: ["NotFound", "The requested resource does not exist."],
+  409: ["Conflict", "The resource is in a state that blocks this operation."],
+  410: ["Gone", "The resource is no longer available."],
+  413: ["PayloadTooLarge", "The request body exceeds the maximum size."],
+  415: ["UnsupportedMediaType", "Content-Type must be application/json."],
+  422: ["UnprocessableEntity", "An upstream service rejected the request."],
+  429: ["TooManyRequests", "The rate limit for this route was exceeded."],
+  500: ["InternalServerError", "An unexpected server error occurred."],
+  501: ["NotImplemented", "The feature is not enabled on this deployment."],
+  502: ["BadGateway", "An upstream service (Horizon, anchor) failed."],
+  503: ["ServiceUnavailable", "The service is temporarily unavailable."],
+  504: ["GatewayTimeout", "An upstream service did not respond in time."],
+};
+
+/** Response object carrying the canonical error body. */
+function errorResponseObject(description) {
+  return {
+    description,
+    headers: {
+      "X-Request-ID": {
+        description:
+          "Correlation ID for this request. Matches `error.correlationId`.",
+        schema: { type: "string" },
+      },
+    },
+    content: {
+      "application/json": {
+        schema: { $ref: "#/components/schemas/ErrorResponse" },
+      },
+    },
+  };
+}
+
+options.definition.components.responses = Object.fromEntries(
+  Object.values(ERROR_RESPONSES).map(([name, description]) => [
+    name,
+    errorResponseObject(description),
+  ]),
+);
+
+/**
+ * Give every documented error status a response schema.
+ *
+ * Most path entries declare error statuses as a bare `{ description: "..." }`,
+ * which renders in Swagger UI without a body. Rather than restate the schema at
+ * every one of them — and require every future endpoint to remember to — this
+ * walks the spec once and fills in the canonical error content, keeping each
+ * endpoint's own description. Entries that already define `content` are left
+ * untouched.
+ */
+function attachErrorSchemas(paths) {
+  for (const pathItem of Object.values(paths || {})) {
+    for (const operation of Object.values(pathItem)) {
+      const responses = operation?.responses;
+      if (!responses) continue;
+
+      for (const [status, response] of Object.entries(responses)) {
+        const code = Number(status);
+        if (!ERROR_RESPONSES[code]) continue;
+        if (!response || response.$ref || response.content) continue;
+
+        responses[status] = errorResponseObject(
+          response.description || ERROR_RESPONSES[code][1],
+        );
+      }
+    }
+  }
+}
+
+attachErrorSchemas(options.definition.paths);
 
 module.exports = swaggerJsdoc(options);
