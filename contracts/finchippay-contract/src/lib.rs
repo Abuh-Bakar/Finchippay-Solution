@@ -79,6 +79,8 @@ pub enum ContractError {
     /// Token transfer succeeded but the actual balance did not increase by
     /// the expected amount (possible malicious/fake token contract).
     TransferFailed = 17,
+    /// The recipient's escrow index already holds `MAX_USER_ESCROWS` entries.
+    IndexFull = 18,
     /// The emergency withdrawal has not yet reached its activation ledger.
     EmergencyWithdrawalNotReady = 18,
     /// The caller is not an authorised admin signer for this withdrawal.
@@ -189,6 +191,22 @@ pub struct Stream {
     pub closed: bool,
 }
 
+/// Pure arithmetic core of the streaming payment formula, factored out of
+/// `FinchippayContract::_claimable` so it can be exercised directly (without
+/// deploying a contract or an `Env`) by property tests.
+///
+/// Does not account for `stream.closed` — callers that care about closed
+/// streams (i.e. the contract itself) check that separately.
+pub fn claimable_at(stream: &Stream, current_ledger: u32) -> i128 {
+    let elapsed = current_ledger.saturating_sub(stream.start_ledger) as i128;
+    let total_streamed = stream
+        .rate_per_ledger
+        .checked_mul(elapsed)
+        .expect("overflow");
+    let capped = total_streamed.min(stream.deposited);
+    (capped - stream.claimed).max(0)
+}
+
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct VestingSchedule {
@@ -296,9 +314,9 @@ pub struct EmergencyWithdrawal {
 /// Maximum ledgers into the future an escrow can be created (≈ 30 days at 5 s).
 const MAX_ESCROW_LEDGERS: u32 = 518_400;
 /// Maximum deposit amount for a single stream (1 trillion stroops).
-const MAX_STREAM_DEPOSIT: i128 = 1_000_000_000_000_000_000;
+pub const MAX_STREAM_DEPOSIT: i128 = 1_000_000_000_000_000_000;
 /// Maximum rate per ledger for a stream (avoids overflow in elapsed * rate).
-const MAX_STREAM_RATE: i128 = 10_000_000_000;
+pub const MAX_STREAM_RATE: i128 = 10_000_000_000;
 /// Maximum amount for a single escrow deposit.
 const MAX_ESCROW_AMOUNT: i128 = 1_000_000_000_000_000_000;
 /// Maximum amount for a single multi-sig proposal.
@@ -351,6 +369,8 @@ pub enum DataKey {
     // Receipts
     ReceiptCount(Address),
     ReceiptRecord(Address, u32),
+    TotalReceiptCount,
+    ReceiptByIndex(u32),
     // Escrow
     EscrowCount,
     EscrowRecipient(u32),
@@ -1403,6 +1423,23 @@ impl FinchippayContract {
             .set(&DataKey::ReceiptCount(from.clone()), &(count + 1));
         bump(&env, &DataKey::ReceiptCount(from.clone()));
 
+        // Increment global receipt count and store index mapping
+        let global_count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::TotalReceiptCount)
+            .unwrap_or(0);
+        
+        env.storage()
+            .persistent()
+            .set(&DataKey::ReceiptByIndex(global_count), &(from.clone(), count));
+        bump(&env, &DataKey::ReceiptByIndex(global_count));
+        
+        env.storage()
+            .persistent()
+            .set(&DataKey::TotalReceiptCount, &(global_count + 1));
+        bump(&env, &DataKey::TotalReceiptCount);
+
         env.events()
             .publish((Symbol::new(&env, "receipt"), from), count);
         count
@@ -1434,6 +1471,28 @@ impl FinchippayContract {
         }
     }
 
+    /// Return the total number of receipts minted across all addresses.
+    pub fn total_receipt_count(env: Env) -> u32 {
+        let key = DataKey::TotalReceiptCount;
+        let val = env.storage().persistent().get(&key).unwrap_or(0);
+        if env.storage().persistent().has(&key) {
+            bump(&env, &key);
+        }
+        val
+    }
+
+    /// Return the (from_address, local_index) for a global receipt index.
+    pub fn get_receipt_by_index(env: Env, global_index: u32) -> (Address, u32) {
+        let key = DataKey::ReceiptByIndex(global_index);
+        let val: (Address, u32) = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .expect("Receipt index not found");
+        bump(&env, &key);
+        val
+    }
+
     /// Generate a `ReceiptProof` from the on-chain receipt at `index` for `payer`.
     /// This is a convenience helper that reads the stored receipt and packages
     /// the payer, amount, and memo into a proof struct for off-chain verification.
@@ -1447,6 +1506,7 @@ impl FinchippayContract {
             expected_memo: receipt.memo,
         }
     }
+
 
     /// Verify that a receipt at `payer` + `index` matches the given `expected_amount`
     /// and `expected_memo`. Returns `true` only if all fields match exactly, proving
@@ -1472,6 +1532,10 @@ impl FinchippayContract {
     /// Lock `amount` tokens from `from` until `release_ledger`. Returns the escrow ID.
     ///
     /// Funds are held by the contract itself until `claim_escrow` or `cancel_escrow`.
+    ///
+    /// # Errors
+    /// - Returns `ContractError::IndexFull` if `to` already has `MAX_USER_ESCROWS`
+    ///   escrows tracked in its recipient index, before any funds move.
     pub fn create_escrow(
         env: Env,
         token_address: Address,
@@ -1480,7 +1544,7 @@ impl FinchippayContract {
         amount: i128,
         release_ledger: u32,
         memo: Symbol,
-    ) -> u32 {
+    ) -> Result<u32, ContractError> {
         require_initialized(&env);
         require_not_paused(&env);
         from.require_auth();
@@ -1501,6 +1565,18 @@ impl FinchippayContract {
         }
         if release_ledger > env.ledger().sequence() + MAX_ESCROW_LEDGERS {
             panic!("release_ledger is too far in the future");
+        }
+
+        // Enforce the recipient escrow index cap before any funds move, so a
+        // rejected call has no side effects.
+        let rkey = DataKey::EscrowByRecipient(to.clone());
+        let mut r_escrows: Vec<Escrow> = env
+            .storage()
+            .persistent()
+            .get(&rkey)
+            .unwrap_or(Vec::new(&env));
+        if r_escrows.len() >= MAX_USER_ESCROWS {
+            return Err(ContractError::IndexFull);
         }
 
         let token = get_token_client(&env, &token_address);
@@ -1534,23 +1610,15 @@ impl FinchippayContract {
             .set(&DataKey::EscrowCount, &(next_id + 1));
         bump(&env, &DataKey::EscrowCount);
 
-        let rkey = DataKey::EscrowByRecipient(to.clone());
-        let mut r_escrows: Vec<Escrow> = env
-            .storage()
-            .persistent()
-            .get(&rkey)
-            .unwrap_or(Vec::new(&env));
-        if r_escrows.len() < MAX_USER_ESCROWS {
-            r_escrows.push_back(escrow);
-            env.storage().persistent().set(&rkey, &r_escrows);
-            bump(&env, &rkey);
-        }
+        r_escrows.push_back(escrow);
+        env.storage().persistent().set(&rkey, &r_escrows);
+        bump(&env, &rkey);
 
         env.events().publish(
             (Symbol::new(&env, "escrow_create"), next_id),
             (from.clone(), to.clone(), amount, release_ledger),
         );
-        next_id
+        Ok(next_id)
     }
 
     /// Claim a partial amount from the escrow. The caller must be the
@@ -2239,14 +2307,7 @@ impl FinchippayContract {
         if stream.closed {
             return 0;
         }
-        let current = env.ledger().sequence();
-        let elapsed = current.saturating_sub(stream.start_ledger) as i128;
-        let total_streamed = stream
-            .rate_per_ledger
-            .checked_mul(elapsed)
-            .expect("overflow");
-        let capped = total_streamed.min(stream.deposited);
-        (capped - stream.claimed).max(0)
+        claimable_at(stream, env.ledger().sequence())
     }
 
     // ─── Multi-sig payments ───────────────────────────────────────────────────
@@ -3009,53 +3070,6 @@ mod tests {
         env.ledger().with_mut(|i| i.sequence_number = to);
     }
 
-    /// Deterministic input generator for property tests. Keeping this local
-    /// avoids adding a test-only dependency to the contract crate while still
-    /// giving each test 10,000 varied inputs.
-    struct PropertyRng(u64);
-
-    impl PropertyRng {
-        fn new(seed: u64) -> Self {
-            Self(seed)
-        }
-
-        fn next(&mut self) -> u64 {
-            let mut value = self.0;
-            value ^= value << 13;
-            value ^= value >> 7;
-            value ^= value << 17;
-            self.0 = value;
-            value
-        }
-
-        fn u32(&mut self) -> u32 {
-            self.next() as u32
-        }
-
-        fn range_u32(&mut self, upper_exclusive: u32) -> u32 {
-            self.u32() % upper_exclusive
-        }
-
-        fn range_i128(&mut self, upper_exclusive: i128) -> i128 {
-            (self.next() as i128) % upper_exclusive
-        }
-    }
-
-    fn stream_for_property(env: &Env, rate: i128, deposited: i128, start_ledger: u32) -> Stream {
-        let address = Address::generate(env);
-        Stream {
-            id: 0,
-            payer: address.clone(),
-            recipient: address.clone(),
-            token: address,
-            rate_per_ledger: rate,
-            deposited,
-            claimed: 0,
-            start_ledger,
-            closed: false,
-        }
-    }
-
     // ── Admin ──────────────────────────────────────────────────────────────────
 
     #[test]
@@ -3126,6 +3140,45 @@ mod tests {
         let r = client.get_receipt(&payer, &0);
         assert_eq!(r.amount, 1000);
         assert_eq!(r.memo, memo);
+    }
+
+    #[test]
+    fn test_global_receipt_count() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let payer1 = Address::generate(&env);
+        let payer2 = Address::generate(&env);
+        let payer3 = Address::generate(&env);
+        let payee = Address::generate(&env);
+        env.mock_all_auths();
+        
+        // Mint 2 receipts from payer1
+        client.mint_receipt(&payer1, &payee, &1000, &Symbol::new(&env, "r1"));
+        client.mint_receipt(&payer1, &payee, &2000, &Symbol::new(&env, "r2"));
+        
+        // Mint 2 receipts from payer2
+        client.mint_receipt(&payer2, &payee, &3000, &Symbol::new(&env, "r3"));
+        client.mint_receipt(&payer2, &payee, &4000, &Symbol::new(&env, "r4"));
+        
+        // Mint 1 receipt from payer3
+        client.mint_receipt(&payer3, &payee, &5000, &Symbol::new(&env, "r5"));
+        
+        // Assert global count is 5
+        assert_eq!(client.total_receipt_count(), 5);
+        
+        // Verify individual counts
+        assert_eq!(client.get_receipt_count(&payer1), 2);
+        assert_eq!(client.get_receipt_count(&payer2), 2);
+        assert_eq!(client.get_receipt_count(&payer3), 1);
+        
+        // Verify receipt by index mapping
+        let (from, local_idx) = client.get_receipt_by_index(&0);
+        assert_eq!(from, payer1);
+        assert_eq!(local_idx, 0);
+        
+        let (from, local_idx) = client.get_receipt_by_index(&4);
+        assert_eq!(from, payer3);
+        assert_eq!(local_idx, 0);
     }
 
     // ── Escrow ─────────────────────────────────────────────────────────────────
@@ -3653,6 +3706,36 @@ mod tests {
         assert_eq!(client.get_tip_total(&r3), 500);
     }
 
+    // ── Escrow recipient index cap ─────────────────────────────────────────
+
+    #[test]
+    fn test_create_escrow_rejects_when_recipient_index_full() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        env.mock_all_auths();
+        let token_id = create_token(
+            &env,
+            &admin,
+            &from,
+            (MAX_USER_ESCROWS as i128 + 1) * MIN_ESCROW_AMOUNT,
+        );
+        let release = env.ledger().sequence() + 10;
+        let memo = Symbol::new(&env, "e");
+
+        for _ in 0..MAX_USER_ESCROWS {
+            client.create_escrow(&token_id, &from, &to, &MIN_ESCROW_AMOUNT, &release, &memo);
+        }
+
+        // The 101st escrow to the same recipient must be rejected rather than
+        // silently created without being indexed.
+        let res =
+            client.try_create_escrow(&token_id, &from, &to, &MIN_ESCROW_AMOUNT, &release, &memo);
+        assert_eq!(res.unwrap_err().unwrap(), ContractError::IndexFull);
+    }
+
     // ── Self-transfer prevention ───────────────────────────────────────────
 
     #[test]
@@ -3710,100 +3793,10 @@ mod tests {
         assert_eq!(claimable, expected);
     }
 
-    #[test]
-    fn property_stream_claimable_is_monotonic() {
-        let env = Env::default();
-        let mut rng = PropertyRng::new(0x5eed_f00d_cafe_babe);
-
-        for _ in 0..10_000 {
-            let start = rng.range_u32(u32::MAX / 2);
-            let first_elapsed = rng.range_u32(u32::MAX - start);
-            let second_elapsed = first_elapsed
-                .saturating_add(1)
-                .saturating_add(rng.range_u32(u32::MAX - start - first_elapsed));
-            let rate = 1 + rng.range_i128(MAX_STREAM_RATE);
-            let deposited = 1 + rng.range_i128(MAX_STREAM_DEPOSIT);
-            let stream = stream_for_property(&env, rate, deposited, start);
-
-            advance(&env, start + first_elapsed);
-            let first = FinchippayContract::_claimable(&env, &stream);
-            advance(&env, start + second_elapsed);
-            let second = FinchippayContract::_claimable(&env, &stream);
-            assert!(second >= first, "claimable decreased: {first} -> {second}");
-        }
-    }
-
-    #[test]
-    fn property_stream_close_never_claims_above_deposit() {
-        let env = Env::default();
-        let mut rng = PropertyRng::new(0x1234_5678_9abc_def0);
-
-        for _ in 0..10_000 {
-            let start = rng.range_u32(u32::MAX / 2);
-            let elapsed = rng.u32().saturating_sub(start);
-            let rate = 1 + rng.range_i128(MAX_STREAM_RATE);
-            let deposited = 1 + rng.range_i128(MAX_STREAM_DEPOSIT);
-            let stream = stream_for_property(&env, rate, deposited, start);
-
-            advance(&env, start.saturating_add(elapsed));
-            let claimable = FinchippayContract::_claimable(&env, &stream);
-            let total_claimed_at_close = stream.claimed + claimable;
-            assert!(total_claimed_at_close <= deposited);
-        }
-    }
-
-    #[test]
-    fn property_stream_close_preserves_every_deposited_token() {
-        let env = Env::default();
-        let mut rng = PropertyRng::new(0x0ddc_0ffe_e15e_beef);
-
-        for _ in 0..10_000 {
-            let start = rng.range_u32(u32::MAX / 2);
-            let elapsed = rng.u32().saturating_sub(start);
-            let rate = 1 + rng.range_i128(MAX_STREAM_RATE);
-            let deposited = 1 + rng.range_i128(MAX_STREAM_DEPOSIT);
-            let stream = stream_for_property(&env, rate, deposited, start);
-
-            advance(&env, start.saturating_add(elapsed));
-            let claimable = FinchippayContract::_claimable(&env, &stream);
-            let total_claimed_at_close = stream.claimed + claimable;
-            let payer_refund = deposited - total_claimed_at_close;
-            assert_eq!(payer_refund + total_claimed_at_close, deposited);
-        }
-    }
-
-    #[test]
-    fn property_stream_max_rate_is_safe_near_max_ledger() {
-        let env = Env::default();
-        let mut rng = PropertyRng::new(0xa11c_e5af_e123_4567);
-
-        for _ in 0..10_000 {
-            let start = rng.range_u32(1_000);
-            let elapsed = u32::MAX - start - rng.range_u32(1_000);
-            let deposited = 1 + rng.range_i128(MAX_STREAM_DEPOSIT);
-            let stream = stream_for_property(&env, MAX_STREAM_RATE, deposited, start);
-
-            advance(&env, start + elapsed);
-            let claimable = FinchippayContract::_claimable(&env, &stream);
-            assert_eq!(claimable, deposited);
-        }
-    }
-
-    #[test]
-    fn property_stream_zero_elapsed_has_no_claimable_amount() {
-        let env = Env::default();
-        let mut rng = PropertyRng::new(0xface_feed_4242_0001);
-
-        for _ in 0..10_000 {
-            let start = rng.u32();
-            let rate = 1 + rng.range_i128(MAX_STREAM_RATE);
-            let deposited = 1 + rng.range_i128(MAX_STREAM_DEPOSIT);
-            let stream = stream_for_property(&env, rate, deposited, start);
-
-            advance(&env, start);
-            assert_eq!(FinchippayContract::_claimable(&env, &stream), 0);
-        }
-    }
+    // Property-based coverage for the streaming payment formula (the
+    // invariants formerly exercised here with a hand-rolled `PropertyRng`)
+    // now lives in `tests/property_streaming.rs`, driven by the `proptest`
+    // crate against the shared `claimable_at` core.
 
     // ── Escrow boundary conditions ─────────────────────────────────────────
 

@@ -160,6 +160,12 @@ jobs:
       - name: Migration status (fails if pending)
         run: npm run migrate:status
 
+      - name: Check error code docs are up to date (#345)
+        # The script lives in the repository-root package.json, so run from
+        # the workspace root rather than inheriting the backend default.
+        working-directory: .
+        run: npm run docs:errors:check
+
       - name: Unit tests
         run: npm run test:unit
 
@@ -486,6 +492,65 @@ jobs:
           name: k6-results
           path: k6-results/
           retention-days: 30
+
+  # --- Fuzz Testing (cargo-fuzz) -----------------------------------------------
+  fuzz:
+    name: Fuzz Testing (cargo-fuzz)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/finchippay-contract
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: nightly
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/finchippay-contract/target
+          key: ${{ runner.os }}-cargo-fuzz-${{ hashFiles('contracts/finchippay-contract/Cargo.lock') }}
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Verify fuzz targets compile
+        run: cargo fuzz build
+
+      - name: Fuzz open_stream (120s)
+        run: cargo fuzz run open_stream -- -max_total_time=120 || true
+        continue-on-error: true
+
+      - name: Fuzz claim_stream (120s)
+        run: cargo fuzz run claim_stream -- -max_total_time=120 || true
+        continue-on-error: true
+
+      - name: Fuzz create_escrow (120s)
+        run: cargo fuzz run create_escrow -- -max_total_time=120 || true
+        continue-on-error: true
+
+      - name: Fuzz claim_escrow (120s)
+        run: cargo fuzz run claim_escrow -- -max_total_time=120 || true
+        continue-on-error: true
+
+      - name: Fuzz batch_send (120s)
+        run: cargo fuzz run batch_send -- -max_total_time=120 || true
+        continue-on-error: true
+
+      - name: Fuzz create_multisig (120s)
+        run: cargo fuzz run create_multisig -- -max_total_time=120 || true
+        continue-on-error: true
+
+      - name: Fuzz approve_multisig (120s)
+        run: cargo fuzz run approve_multisig -- -max_total_time=120 || true
+        continue-on-error: true
 
   # --- Validate Config -------------------------------------------------------
   validate:

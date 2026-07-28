@@ -1,6 +1,8 @@
 // frontend/lib/onboardingState.ts
 "use client";
 
+import { useState } from "react";
+
 export const STORAGE_KEY = "finchippay:onboarding";
 
 export interface OnboardingProgress {
@@ -14,31 +16,22 @@ export interface OnboardingProgress {
   featureVersions: Record<string, boolean>;
 }
 
-function getStored(): OnboardingProgress | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-function save(progress: OnboardingProgress) {
+function saveProgress(progress: OnboardingProgress): void {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+  } catch {}
 }
 
 export function getTourProgress(): OnboardingProgress {
-  const stored = getStored();
-  return (
-    stored || {
-      completedSteps: [],
-      completed: false,
-      lastSeen: 0,
-      featureVersions: {},
-    }
-  );
+  if (typeof window === "undefined") {
+    return { completedSteps: [], completed: false, lastSeen: 0, featureVersions: {} };
+  }
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return { completedSteps: [], completed: false, lastSeen: 0, featureVersions: {} };
 }
 
 export function markStepComplete(stepIndex: number): void {
@@ -47,19 +40,19 @@ export function markStepComplete(stepIndex: number): void {
     progress.completedSteps.push(stepIndex);
   }
   progress.lastSeen = Date.now();
-  save(progress);
+  saveProgress(progress);
 }
 
 export function markTourComplete(): void {
   const progress = getTourProgress();
   progress.completed = true;
   progress.lastSeen = Date.now();
-  save(progress);
+  saveProgress(progress);
 }
 
 export function resetTour(): void {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(STORAGE_KEY);
 }
 
 /** Return true if the tour should be shown for the given feature version. */
@@ -74,7 +67,7 @@ export function markFeatureSeen(featureVersion: string): void {
   const progress = getTourProgress();
   progress.featureVersions[featureVersion] = true;
   progress.lastSeen = Date.now();
-  save(progress);
+  saveProgress(progress);
 }
 
 /** Simple analytics – uses Plausible if available */
@@ -85,7 +78,6 @@ export function trackOnboardingEvent(event: string, data?: Record<string, unknow
 }
 
 /** React hook for easy consumption */
-import { useState } from "react";
 export function useOnboarding() {
   const [progress, setProgress] = useState<OnboardingProgress>(getTourProgress());
   const refresh = () => setProgress(getTourProgress());
@@ -108,4 +100,3 @@ export function useOnboarding() {
     trackOnboardingEvent,
   };
 }
-

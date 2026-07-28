@@ -13,8 +13,8 @@ import {
   type ReactNode,
 } from "react";
 
-export type Theme = "light" | "dark" | "system" | "highContrast";
-export type ResolvedTheme = "light" | "dark";
+export type Theme = "light" | "dark" | "system" | "highContrast" | "high-contrast";
+export type ResolvedTheme = "light" | "dark" | "high-contrast";
 
 interface ThemeContextValue {
   theme: Theme;
@@ -38,7 +38,8 @@ function isTheme(value: string | null): value is Theme {
     value === "light" ||
     value === "dark" ||
     value === "system" ||
-    value === "highContrast"
+    value === "highContrast" ||
+    value === "high-contrast"
   );
 }
 
@@ -64,8 +65,8 @@ function getInitialResolvedTheme(): ResolvedTheme {
 }
 
 function resolveTheme(theme: Theme, systemPrefersDark: boolean): ResolvedTheme {
-  if (theme === "highContrast") {
-    return systemPrefersDark ? "dark" : "light";
+  if (theme === "highContrast" || theme === "high-contrast") {
+    return "high-contrast";
   }
   if (theme === "system") {
     return systemPrefersDark ? "dark" : "light";
@@ -100,10 +101,17 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
 
       setResolved(nextResolvedTheme);
 
-      root.classList.toggle("dark", nextResolvedTheme === "dark");
-      root.classList.toggle("high-contrast", theme === "highContrast");
+      root.classList.toggle(
+        "dark",
+        nextResolvedTheme === "dark" || nextResolvedTheme === "high-contrast",
+      );
+      root.classList.toggle(
+        "high-contrast",
+        theme === "highContrast" || theme === "high-contrast",
+      );
       root.dataset.theme = theme;
-      root.style.colorScheme = nextResolvedTheme;
+      root.style.colorScheme =
+        nextResolvedTheme === "high-contrast" ? "dark" : nextResolvedTheme;
 
       const themeColorMeta = document.querySelector<HTMLMetaElement>(
         'meta[name="theme-color"]',

@@ -38,6 +38,7 @@ const { propagation, context } = require("@opentelemetry/api");
 const { getRequestIdHeader } = require("../utils/correlationId");
 const { generateWebhookSignature } = require("../utils/webhookSignature");
 const { encryptSecret, decryptSecret } = require("../utils/encryption");
+
 const knex = require("../db/connection");
 require("dotenv").config();
 

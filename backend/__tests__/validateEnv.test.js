@@ -13,6 +13,26 @@ const {
 // ─── collectErrors ────────────────────────────────────────────────────────────
 
 describe("validateEnv.collectErrors", () => {
+  it("throws if JWT_SECRET is not set in production", () => {
+    expect(() => {
+      collectErrors({
+        NODE_ENV: "production",
+        STELLAR_NETWORK: "testnet",
+        HORIZON_URL: "https://horizon-testnet.stellar.org",
+      });
+    }).toThrow("FATAL: JWT_SECRET must be set in production.");
+  });
+
+  it("throws if JWT_SECRET is set to the insecure default value", () => {
+    expect(() => {
+      collectErrors({
+        JWT_SECRET: "finchippay_secret_key",
+        STELLAR_NETWORK: "testnet",
+        HORIZON_URL: "https://horizon-testnet.stellar.org",
+      });
+    }).toThrow("FATAL: JWT_SECRET is set to the insecure default value.");
+  });
+
   it("returns no errors when required vars are valid", () => {
     expect(
       collectErrors({

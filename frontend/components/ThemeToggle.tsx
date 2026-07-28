@@ -53,20 +53,30 @@ const themeOptions: Array<{
   {
     value: "highContrast",
     label: "High Contrast",
-    description: "Force high‑contrast mode (WCAG AAA)",
+    description: "Force high‑contrast mode (WCAG AAA)",
   },
 ];
 
-// Detect prefers‑contrast: more media query and auto‑set high‑contrast if no explicit mode stored
-useEffect(() => {
-  const stored = localStorage.getItem("themeMode");
-  if (!stored) {
-    const mql = window.matchMedia("(prefers-contrast: more)");
-    if (mql.matches) {
-      setTheme("highContrast");
-    }
-  }
-}, []);
+function ContrastIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 3v18"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
 
 function ThemeOptionIcon({
   theme,
@@ -81,6 +91,10 @@ function ThemeOptionIcon({
 
   if (theme === "dark") {
     return <MoonIcon className={className} />;
+  }
+
+  if (theme === "highContrast" || theme === "high-contrast") {
+    return <ContrastIcon className={className} />;
   }
 
   return <SystemIcon className={className} />;
@@ -137,6 +151,8 @@ export default function ThemeToggle() {
   const currentThemeLabel =
     theme === "system"
       ? `System theme, currently ${resolved}`
+      : theme === "high-contrast"
+      ? "High contrast theme"
       : `${theme} theme`;
 
   return (
