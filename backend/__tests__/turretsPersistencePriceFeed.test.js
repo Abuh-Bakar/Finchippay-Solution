@@ -13,7 +13,10 @@ describe("turrets DB persistence", () => {
 
   beforeEach(async () => {
     jest.resetModules();
-    dbFile = path.join(os.tmpdir(), `turrets-${Date.now()}-${Math.random()}.db`);
+    dbFile = path.join(
+      os.tmpdir(),
+      `turrets-${Date.now()}-${Math.random()}.db`,
+    );
     process.env.DB_PROVIDER = "sqlite";
     process.env.DB_FILENAME = dbFile;
 
@@ -61,7 +64,13 @@ describe("turrets DB persistence", () => {
       owner_pk: "GC72GRI7BO2TU5VN2RTB5KURJVFTUHVFS46TNJR2HDQYJ3QWGTXZHXIU",
       type: "stop_loss",
       status: "active",
-      config: JSON.stringify({ thresholdPrice: 0.1, amountSell: 5, sellAssetCode: "XLM", sellAssetIssuer: null, cooldownMinutes: 30 }),
+      config: JSON.stringify({
+        thresholdPrice: 0.1,
+        amountSell: 5,
+        sellAssetCode: "XLM",
+        sellAssetIssuer: null,
+        cooldownMinutes: 30,
+      }),
       deployment_hash: "hash",
       signed_challenge_xdr: "signed-xdr",
       created_at: new Date().toISOString(),
@@ -83,7 +92,9 @@ describe("turrets DB persistence", () => {
     delete require.cache[require.resolve("../src/services/turretsService")];
     const reloadedService = require("../src/services/turretsService");
 
-    const deployments = await reloadedService.listDeployments(deployment.owner_pk);
+    const deployments = await reloadedService.listDeployments(
+      deployment.owner_pk,
+    );
     expect(deployments).toHaveLength(1);
     expect(deployments[0]).toMatchObject({
       id: deployment.id,
@@ -143,15 +154,31 @@ describe("priceFeedService", () => {
     const first = await priceFeedService.getXLMPrice();
     const second = await priceFeedService.getXLMPrice();
 
-    expect(first).toMatchObject({ price: 0.11, source: "CoinGecko", cached: false });
-    expect(second).toMatchObject({ price: 0.11, source: "CoinGecko", cached: true });
+    expect(first).toMatchObject({
+      price: 0.11,
+      source: "CoinGecko",
+      cached: false,
+    });
+    expect(second).toMatchObject({
+      price: 0.11,
+      source: "CoinGecko",
+      cached: true,
+    });
     expect(nock.isDone()).toBe(true);
   });
 
   test("health reports provider status", async () => {
-    nock("https://api.coingecko.com").get("/api/v3/simple/price").query(true).reply(500);
-    nock("https://api.binance.com").get("/api/v3/ticker/price").query(true).reply(200, { price: "0.12" });
-    nock("https://api.coincap.io").get("/v2/assets/stellar").reply(200, { data: { priceUsd: "0.13" } });
+    nock("https://api.coingecko.com")
+      .get("/api/v3/simple/price")
+      .query(true)
+      .reply(500);
+    nock("https://api.binance.com")
+      .get("/api/v3/ticker/price")
+      .query(true)
+      .reply(200, { price: "0.12" });
+    nock("https://api.coincap.io")
+      .get("/v2/assets/stellar")
+      .reply(200, { data: { priceUsd: "0.13" } });
 
     const health = await priceFeedService.getHealth();
     expect(health.status).toBe("ok");

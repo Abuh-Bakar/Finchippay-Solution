@@ -373,17 +373,54 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+
+  const targetUrl = event.notification.data?.url || "/dashboard";
+  let targetPath = targetUrl;
+  try {
+    targetPath = new URL(targetUrl, self.location.origin).pathname;
+  } catch {
+    targetPath = "/dashboard";
+  }
+
   event.waitUntil(
     clients
       .matchAll({ type: "window", includeUncontrolled: true })
-      .then((clientList) => {
+      .then(async (clientList) => {
+        // Prefer a window already showing the target page.
         for (const client of clientList) {
-          if ("focus" in client) return client.focus();
+          try {
+            if (
+              new URL(client.url).pathname === targetPath &&
+              "focus" in client
+            ) {
+              return client.focus();
+            }
+          } catch {
+            // Unparseable client URL — fall through to the generic handling.
+          }
         }
+
+        // Otherwise reuse an open window, but navigate it to the target first:
+        // focusing alone leaves the user on whatever page they already had
+        // open, which is not where the notification pointed.
+        for (const client of clientList) {
+          if ("focus" in client) {
+            const focused = await client.focus();
+            if ("navigate" in client) {
+              try {
+                return await client.navigate(targetUrl);
+              } catch {
+                // navigate() rejects for cross-origin or unloaded clients; a
+                // focused window still beats doing nothing.
+                return focused;
+              }
+            }
+            return focused;
+          }
+        }
+
         if (clients.openWindow) {
-          return clients.openWindow(
-            event.notification.data?.url || "/dashboard"
-          );
+          return clients.openWindow(targetUrl);
         }
       })
   );

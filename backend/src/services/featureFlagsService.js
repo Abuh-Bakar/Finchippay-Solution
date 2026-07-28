@@ -18,8 +18,9 @@
 
 "use strict";
 
+const fs = require("fs");
 const path = require("path");
-const fs   = require("fs");
+const logger = require("../utils/logger");
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -59,7 +60,10 @@ function loadFlags() {
   } catch (err) {
     // Non-fatal in test environments where the config path may differ.
     if (process.env.NODE_ENV !== "test") {
-      console.error("[FeatureFlags] Could not read featureFlags.json:", err.message);
+      logger.error(
+        { err },
+        "[FeatureFlags] Could not read featureFlags.json",
+      );
     }
     return;
   }
@@ -68,7 +72,10 @@ function loadFlags() {
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    console.error("[FeatureFlags] Invalid JSON in featureFlags.json:", err.message);
+    logger.error(
+      { err },
+      "[FeatureFlags] Invalid JSON in featureFlags.json",
+    );
     return;
   }
 
@@ -92,7 +99,7 @@ loadFlags();
 function currentEnv() {
   const env = (process.env.NODE_ENV || "development").toLowerCase();
   if (env === "production") return "production";
-  if (env === "staging")    return "staging";
+  if (env === "staging") return "staging";
   return "development";
 }
 
@@ -136,7 +143,7 @@ function evaluateFlag(key, env) {
   if (!envEnabled) return false;
 
   const pct = typeof flag.rolloutPercent === "number" ? flag.rolloutPercent : 0;
-  if (pct <= 0)   return false;
+  if (pct <= 0) return false;
   if (pct >= 100) return true;
 
   return Math.random() * 100 < pct;

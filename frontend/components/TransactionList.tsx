@@ -24,6 +24,9 @@ import {
   ExternalLinkIcon,
   PrinterIcon,
 } from "@/components/icons";
+import TransactionSearchBar from "./TransactionSearchBar";
+import HighlightedTransactionRow from "./HighlightedTransactionRow";
+import { SearchResult } from "@/lib/transactionSearch";
 import clsx from "clsx";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -134,6 +137,7 @@ function TransactionList({
   onPaymentsChange,
   onPrintReceipt,
   incomingPayment,
+  onSendAgain,
 }: TransactionListProps) {
   const { t } = useTranslation("common");
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
@@ -144,6 +148,7 @@ function TransactionList({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const [stalePaymentsAt, setStalePaymentsAt] = useState<number | null>(null);
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   
   type PendingAction =
     | { type: "ADD"; payload: PaymentRecord }
@@ -535,11 +540,30 @@ function TransactionList({
               Offline history snapshot from {formatSnapshotTime(stalePaymentsAt)}
             </div>
           )}
+
+          {/* Advanced Transaction Search Bar */}
+          {!compact && (
+            <div className="mb-6">
+              <TransactionSearchBar
+                payments={payments}
+                onSearchResults={setSearchResults}
+              />
+            </div>
+          )}
           
           <div className="mb-4 flex items-center gap-3 text-xs text-stellar-700 dark:text-stellar-400">
             <span className="w-1 h-1 rounded-full bg-stellar-400 flex-shrink-0" />
             <span>{t("transactions.keyboardNav")}</span>
           </div>
+
+          {/* Search Results Summary */}
+          {searchResults.length > 0 && (
+            <div className="mb-4 p-3 rounded-lg bg-amber-50 dark:bg-amber-500/5 border border-amber-200 dark:border-amber-800">
+              <p className="text-sm text-amber-900 dark:text-amber-200">
+                Found <strong>{searchResults.length}</strong> matching transaction{searchResults.length !== 1 ? "s" : ""}
+              </p>
+            </div>
+          )}
           
           <div
             role="list"
@@ -547,7 +571,27 @@ function TransactionList({
             className="space-y-2"
           >
         <AnimatePresence initial={false}>
-        {visiblePayments.map((tx, index) => (
+        {/* Display search results if available, otherwise display filtered transactions */}
+        {searchResults.length > 0
+          ? searchResults.map((result) => (
+              <motion.div
+                key={result.payment.id}
+                layout
+                initial={{ opacity: 0, height: 0, scale: 0.95 }}
+                animate={{ opacity: 1, height: "auto", scale: 1 }}
+                exit={{ opacity: 0, height: 0, scale: 0.95 }}
+                transition={{ duration: 0.15 }}
+              >
+                <HighlightedTransactionRow
+                  result={result}
+                  payment={result.payment}
+                  compact={compact}
+                  onPrintReceipt={onPrintReceipt}
+                  onSendAgain={onSendAgain}
+                />
+              </motion.div>
+            ))
+          : visiblePayments.map((tx, index) => (
           <motion.div
             key={tx.id}
             layout
@@ -566,16 +610,14 @@ function TransactionList({
                 setFocusedIndex((prev) => Math.max(prev - 1, 0));
               } else if (e.key === 'Enter' && focusedIndex === index) {
                 e.preventDefault();
-                const address = tx.type === "sent" ? tx.to : tx.from;
-                copyToClipboard(address);
-                setCopiedId(tx.id);
-                setTimeout(() => setCopiedId(null), 2000);
+                router.push(`/tx/${tx.transactionHash}`);
               }
             }}
             onBlur={() => setFocusedIndex(-1)}
             onFocus={() => setFocusedIndex(index)}
+            onClick={() => router.push(`/tx/${tx.transactionHash}`)}
             className={clsx(
-              "flex items-center gap-3 p-3 rounded-xl bg-slate-50 rtl:flex-row-reverse dark:bg-white/3 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors group relative",
+              "flex items-center gap-3 p-3 rounded-xl bg-slate-50 rtl:flex-row-reverse dark:bg-white/3 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors group relative cursor-pointer",
               focusedIndex === index && "outline-none ring-2 ring-stellar-500 ring-offset-2"
             )}
             aria-label={`${tx.type === "sent" ? "Sent" : "Received"} ${formatAsset(tx.amount, tx.asset)} ${tx.type === "sent" ? "to" : "from"} ${tx.type === "sent" ? tx.to : tx.from}`}
@@ -609,12 +651,13 @@ function TransactionList({
                   </span>
                 )}
                 <button
-                  onClick={() =>
+                  onClick={(e) => {
+                    e.stopPropagation();
                     handleCopy(
                       tx.type === "sent" ? tx.to : tx.from,
                       tx.id
-                    )
-                  }
+                    );
+                  }}
                   aria-label={`Copy ${tx.type === "sent" ? "recipient" : "sender"} address`}
                   className="address-pill hover:border-stellar-500/40 transition-colors text-xs dark:hover:border-stellar-300/60"
                 >
@@ -659,9 +702,10 @@ function TransactionList({
               {/* Send Again — only for sent transactions */}
               {tx.type === "sent" && (
                 <button
-                  onClick={() =>
-                    router.push(`/dashboard?to=${encodeURIComponent(tx.to)}&amount=${encodeURIComponent(tx.amount)}`)
-                  }
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    router.push(`/dashboard?to=${encodeURIComponent(tx.to)}&amount=${encodeURIComponent(tx.amount)}`);
+                  }}
                   className="opacity-0 group-hover:opacity-100 transition-opacity text-xs text-stellar-700 dark:text-stellar-400 hover:text-stellar-600 dark:hover:text-stellar-300 font-medium whitespace-nowrap"
                   title={t("transactions.prefillSendForm")}
                   aria-label={t("transactions.sendAgainToRecipient")}
@@ -674,6 +718,7 @@ function TransactionList({
                 href={explorerUrl(tx.transactionHash) ?? undefined}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
                 className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-600 dark:text-slate-400 hover:text-stellar-700 dark:hover:text-stellar-400"
                 title={t("transactions.viewOnExpert")}
                 aria-label={t("transactions.viewOnExpert")}

@@ -134,9 +134,36 @@ Swagger docs: http://localhost:4000/api/docs
 
 ```bash
 cd contracts/finchippay-contract
-cargo test
+cargo test                    # unit tests
+cargo test --test integration # end-to-end sandbox integration tests
 cargo build --release --target wasm32v1-none
 ```
+
+The integration tests deploy the contract in a simulated Soroban sandbox and verify full workflows (Tip, Escrow, Stream, MultiSig, Receipt, Batch Send, Vesting, Emergency Withdrawal) including event emission, pagination, circuit-breaker pausing, and view function `NotFound` error handling. Each test starts with a fresh `Env` and deploys a clean contract instance.
+
+From the project root:
+```bash
+make test-integration
+```
+
+### Generate TypeScript contract bindings
+
+The frontend uses auto-generated TypeScript bindings from the deployed Soroban contract ABI for type-safe contract interaction. This eliminates manual `nativeToScVal`/`scValToNative` conversions.
+
+```bash
+# Generate bindings for testnet (default)
+bash scripts/gen-contract-bindings.sh
+
+# Generate bindings for mainnet
+NETWORK=mainnet bash scripts/gen-contract-bindings.sh
+
+# Generate bindings with explicit contract ID
+CONTRACT_ID=C… bash scripts/gen-contract-bindings.sh
+```
+
+The generated files live in `frontend/lib/contract-bindings/` and are checked into version control. CI ensures the checked-in bindings stay in sync with the deployed contract — if the contract ABI changes, CI will fail until bindings are regenerated.
+
+**Prerequisites:** Stellar CLI (`cargo install --locked stellar-cli`).
 
 ### Deploy the contract to Stellar testnet
 

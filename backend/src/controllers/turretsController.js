@@ -40,7 +40,7 @@ async function createChallenge(req, res, next) {
  * Body: { ownerPublicKey, type, config, deploymentHash, signedChallengeXDR }
  * Response: { success: true, data: DeploymentRecord } — HTTP 201
  *
- * @param {import('express').Request}  req
+ * @param {import('express').Request} req
  * @param {import('express').Response} res
  * @param {import('express').NextFunction} next
  */
@@ -68,7 +68,7 @@ async function deploy(req, res, next) {
  * Query: { ownerPublicKey?: string }
  * Response: { success: true, data: DeploymentRecord[] }
  *
- * @param {import('express').Request}  req
+ * @param {import('express').Request} req
  * @param {import('express').Response} res
  * @param {import('express').NextFunction} next
  */
@@ -88,7 +88,7 @@ async function list(req, res, next) {
  *
  * Response: { success: true, data: DeploymentRecord }
  *
- * @param {import('express').Request}  req
+ * @param {import('express').Request} req
  * @param {import('express').Response} res
  * @param {import('express').NextFunction} next
  */
@@ -108,7 +108,7 @@ async function getOne(req, res, next) {
  *
  * Response: { success: true, data: ExecutionRecord[] }
  *
- * @param {import('express').Request}  req
+ * @param {import('express').Request} req
  * @param {import('express').Response} res
  * @param {import('express').NextFunction} next
  */
@@ -129,7 +129,7 @@ async function getHistory(req, res, next) {
  *
  * Response: { success: true, data: DeploymentRecord }
  *
- * @param {import('express').Request}  req
+ * @param {import('express').Request} req
  * @param {import('express').Response} res
  * @param {import('express').NextFunction} next
  */
@@ -149,7 +149,7 @@ async function pause(req, res, next) {
  *
  * Response: { success: true, data: DeploymentRecord }
  *
- * @param {import('express').Request}  req
+ * @param {import('express').Request} req
  * @param {import('express').Response} res
  * @param {import('express').NextFunction} next
  */
@@ -167,7 +167,8 @@ async function resume(req, res, next) {
 async function health(req, res, next) {
   try {
     const priceFeed = await priceFeedService.getHealth();
-    const activeDeployments = await turretsService.countDeploymentsByStatus("active");
+    const activeDeployments =
+      await turretsService.countDeploymentsByStatus("active");
     res.status(priceFeed.status === "ok" ? 200 : 503).json({
       success: priceFeed.status === "ok",
       service: "turrets",

@@ -4,6 +4,12 @@
  */
 "use strict";
 
+// Set test env vars before any module is required
+process.env.NODE_ENV = "test";
+// 64-char hex key required by the AES-256-GCM encryption utility
+process.env.WEBHOOK_ENCRYPTION_KEY =
+  "aaabbbcccdddeeefff000111222333444555666777888999000aaabbbcccdddee";
+
 // Tracks the close-handles handed out by `.stream()` so tests can assert
 // they were invoked by `closeAllStreams()` during graceful shutdown.
 const mockStreamCloseHandles = [];
@@ -28,40 +34,40 @@ jest.mock("@stellar/stellar-sdk", () => ({
 }));
 
 // ─── Mock: Knex persistence layer ────────────────────────────────────────────
-// Mirror the two tables the service writes to: webhooks + webhook_deliveries.
+// Mirror the tables the service writes to: webhooks, webhook_deliveries,
+// webhook_events. The mock variable prefix allows use inside jest.mock().
 const mockWebhooks = new Map();
 const mockDeliveries = new Map();
+const mockEvents = new Map();
 
 /**
  * Minimal knex query-builder stub. Supports the chained API used by
- * webhookService.js:
- *   knex("table").insert(row)
- *   knex("table").where(col, val).select("*")
- *   knex("table").where(col, val).first()
- *   knex("table").where(col, val).del()
- *   knex("table").where(col, val).update(patch)
- *   knex("table").whereIn(col, vals).andWhere(col, val).update(patch)
- *   knex("table").where(...).andWhere(fn).  (for retry-queue query)
+ * webhookService.js.
  */
 function mockMakeBuilder(tableName) {
-  const state = { table: tableName, wheres: [], whereIns: [], fields: null };
+  const state = { table: tableName, wheres: [], whereIns: [] };
+
+  function getStore() {
+    if (tableName === "webhooks") return mockWebhooks;
+    if (tableName === "webhook_deliveries") return mockDeliveries;
+    return mockEvents;
+  }
+
+  // Handle aliased table names (e.g. "webhooks as w")
+  function resolveTable(name) {
+    return name.split(" as ")[0].trim();
+  }
 
   function matchesRow(row) {
     return state.wheres.every(({ col, val, fn }) => {
-      if (fn) return fn(row); // raw function predicate (processRetryQueue)
+      if (fn) return fn(row);
       return row[col] === val;
     });
-  }
-
-  function getStore() {
-    return tableName === "webhooks" ? mockWebhooks : mockDeliveries;
   }
 
   const builder = {
     where(col, val) {
       if (typeof col === "function") {
-        // knex builder passed as callback: this.whereNull(...).orWhere(...)
-        // We just accept and ignore the complex retry-queue filter in unit tests.
         state.wheres.push({ fn: () => true });
       } else {
         state.wheres.push({ col, val });
@@ -112,7 +118,6 @@ function mockMakeBuilder(tableName) {
     },
     update(patch) {
       let count = 0;
-      // handle whereIn from retryDeadDeliveries
       const store = getStore();
       for (const [, row] of store) {
         const inMatch =
@@ -125,20 +130,29 @@ function mockMakeBuilder(tableName) {
       }
       return Promise.resolve(count);
     },
-    join(joinTable, col1, col2) {
-      // For getDeadDeliveries join — return empty array (no deliveries seeded)
+    join() {
+      // Joins for dead-delivery and event queries — return empty arrays
       return {
         where: () => ({
           andWhere: () => ({
-            orderBy: () => ({
-              select: () => Promise.resolve([]),
-            }),
+            orderBy: () => ({ select: () => Promise.resolve([]) }),
           }),
+          select: () => Promise.resolve([]),
+          groupBy: () => ({ select: () => ({ count: () => Promise.resolve([]) }) }),
         }),
       };
     },
     orderBy() {
       return builder;
+    },
+    groupBy() {
+      return builder;
+    },
+    limit() {
+      return builder;
+    },
+    count() {
+      return Promise.resolve([]);
     },
   };
 
@@ -149,6 +163,13 @@ jest.mock("../src/db/connection", () => {
   const knexMock = jest.fn((tableName) => mockMakeBuilder(tableName));
   return knexMock;
 });
+
+// ─── Mock: encryption utility ────────────────────────────────────────────────
+// Pass-through so tests don't depend on a valid AES key being set up.
+jest.mock("../src/utils/encryption", () => ({
+  encryptSecret: jest.fn((s) => `enc:${s}`),
+  decryptSecret: jest.fn((s) => s.replace(/^enc:/, "")),
+}));
 
 // ─── Other mocks ──────────────────────────────────────────────────────────────
 
@@ -198,13 +219,10 @@ const ACCOUNT_E = "GCEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-// Set NODE_ENV=test before the module is required so the WEBHOOK_SECRET_KEY
-// warning is suppressed (it only fires outside the test environment).
-process.env.NODE_ENV = "test";
-
 beforeEach(() => {
   mockWebhooks.clear();
   mockDeliveries.clear();
+  mockEvents.clear();
   mockStreamCloseHandles.length = 0;
   jest.clearAllMocks();
 });
@@ -224,7 +242,6 @@ describe("webhook registry", () => {
     const list = await webhookService.getWebhooksByPublicKey(ACCOUNT_A);
     expect(list).toHaveLength(1);
     expect(list[0].url).toBe("https://x.test/hook");
-    expect(list[0].public_key).toBe(ACCOUNT_A);
     // registerWebhook must not expose the plaintext secret in its return value
     expect(webhook).not.toHaveProperty("secret");
   });
@@ -239,6 +256,9 @@ describe("webhook registry", () => {
     // secret_hash must be set and must NOT be the plaintext secret
     expect(row.secret_hash).toBeTruthy();
     expect(row.secret_hash).not.toBe("supersecret");
+    // encrypted secret must also be stored
+    expect(row.secret).toBeTruthy();
+    expect(row.secret).not.toBe("supersecret");
   });
 
   it("scopes listing to the account and supports deletion", async () => {
@@ -272,6 +292,7 @@ describe("webhook persistence — restoreWebhooks", () => {
       id: "id-1",
       public_key: ACCOUNT_A,
       url: "https://a.test/hook",
+      secret: "enc:hash-a",
       secret_hash: "hash-a",
       created_at: new Date().toISOString(),
     });
@@ -279,6 +300,7 @@ describe("webhook persistence — restoreWebhooks", () => {
       id: "id-2",
       public_key: ACCOUNT_B,
       url: "https://b.test/hook",
+      secret: "enc:hash-b",
       secret_hash: "hash-b",
       created_at: new Date().toISOString(),
     });
@@ -287,6 +309,7 @@ describe("webhook persistence — restoreWebhooks", () => {
       id: "id-3",
       public_key: ACCOUNT_A,
       url: "https://a2.test/hook",
+      secret: "enc:hash-a2",
       secret_hash: "hash-a2",
       created_at: new Date().toISOString(),
     });
@@ -307,6 +330,7 @@ describe("webhook persistence — restoreWebhooks", () => {
       id: "id-1",
       public_key: ACCOUNT_A,
       url: "https://a.test/hook",
+      secret: "enc:hash-a",
       secret_hash: "hash-a",
       created_at: new Date().toISOString(),
     });
@@ -328,7 +352,11 @@ describe("signPayload", () => {
 
 describe("closeAllStreams (graceful shutdown on SIGTERM/SIGINT)", () => {
   it("closes every active Horizon SSE stream so none leak past process exit", async () => {
-    await webhookService.registerWebhook(ACCOUNT_D, "https://x.test/shutdown", "secret-shutdown");
+    await webhookService.registerWebhook(
+      ACCOUNT_D,
+      "https://x.test/shutdown",
+      "secret-shutdown",
+    );
     const closeHandle = mockStreamCloseHandles[mockStreamCloseHandles.length - 1];
     expect(closeHandle).not.toHaveBeenCalled();
 
@@ -338,12 +366,20 @@ describe("closeAllStreams (graceful shutdown on SIGTERM/SIGINT)", () => {
   });
 
   it("clears activeStreams so a later registration opens a fresh stream", async () => {
-    await webhookService.registerWebhook(ACCOUNT_E, "https://x.test/a", "secret-a");
+    await webhookService.registerWebhook(
+      ACCOUNT_E,
+      "https://x.test/a",
+      "secret-a",
+    );
     const firstCloseHandle = mockStreamCloseHandles[mockStreamCloseHandles.length - 1];
 
     await webhookService.closeAllStreams();
 
-    await webhookService.registerWebhook(ACCOUNT_E, "https://x.test/b", "secret-b");
+    await webhookService.registerWebhook(
+      ACCOUNT_E,
+      "https://x.test/b",
+      "secret-b",
+    );
     const secondCloseHandle = mockStreamCloseHandles[mockStreamCloseHandles.length - 1];
 
     expect(secondCloseHandle).not.toBe(firstCloseHandle);

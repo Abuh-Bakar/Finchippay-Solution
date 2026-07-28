@@ -7,15 +7,16 @@
  * (Knex-backed SQLite/PostgreSQL).
  *
  * Routes handled:
- *   POST /api/tips                            → record a new tip
- *   GET  /api/tips/received/:creatorPublicKey → list tips received + stats
- *   GET  /api/tips/stats/:creatorPublicKey    → tip statistics only
- *   GET  /api/tips/sent/:senderPublicKey      → list tips sent by a user
+ *   POST /api/tips                               → record a new tip
+ *   GET  /api/tips/received/:creatorPublicKey    → list tips received + stats
+ *   GET  /api/tips/stats/:creatorPublicKey     → tip statistics only
+ *   GET  /api/tips/sent/:senderPublicKey       → list tips sent by a user
  */
 
 "use strict";
 
 const tipsService = require("../services/tipsService");
+const pushNotifier = require("../services/pushNotifier");
 const { buildPage, setPaginationHeaders } = require("../utils/paginate");
 
 // Extract the keyset cursor fields from a mapped tip record. `timestamp` holds
@@ -65,6 +66,19 @@ async function recordTip(req, res, next) {
       // cache invalidation is best-effort
     }
 
+    // Notify the creator's registered devices. Best-effort for the same reason
+    // as the cache invalidation above: the tip is already recorded, and a push
+    // failure must not turn a successful tip into an error for the sender.
+    try {
+      await pushNotifier.notifyTipReceived({
+        creatorPublicKey,
+        amount,
+        asset,
+      });
+    } catch {
+      // push delivery is best-effort
+    }
+
     return res.status(201).json({
       success: true,
       data: tip,
@@ -84,10 +98,13 @@ async function getTipsReceived(req, res, next) {
     const { creatorPublicKey } = req.validated;
     const { limit, cursor } = req.pagination;
 
-    const { tips, total } = await tipsService.getTipsReceived(creatorPublicKey, {
-      limit,
-      cursor,
-    });
+    const { tips, total } = await tipsService.getTipsReceived(
+      creatorPublicKey,
+      {
+        limit,
+        cursor,
+      },
+    );
     const stats = await tipsService.getTipsStats(creatorPublicKey);
 
     const { data, nextCursor } = buildPage(tips, limit, tipCursor);

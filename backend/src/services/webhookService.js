@@ -10,22 +10,23 @@
  *
  * Flow:
  *   1. Caller registers a webhook via `registerWebhook(publicKey, url, secret)`.
- *   2. The raw secret is never stored; a keyed HMAC-SHA256 digest is persisted
- *      instead.
+ *   2. The raw secret is never stored in plaintext; an AES-256-GCM ciphertext
+ *      is persisted (for signing) and a keyed HMAC-SHA256 digest (secret_hash)
+ *      is stored for verification without decryption.
  *   3. The service starts a Horizon SSE stream for that public key (if not
  *      already monitoring it).
  *   4. When a `payment.received` event arrives it is delivered to every
  *      registered URL for that account, signed with HMAC-SHA256.
- *   4. Failed deliveries are retried with exponential backoff
+ *   5. Failed deliveries are retried with exponential backoff
  *      (1s, 5s, 25s, 125s, 625s).
- *   5. After 5 failures the delivery is marked 'dead' in the dead letter
+ *   6. After 5 failures the delivery is marked 'dead' in the dead letter
  *      queue.
- *   6. A background worker runs every 30 seconds to retry pending
- *      deliveries.
+ *   7. A background worker runs every 30 seconds to retry pending deliveries.
  *
  * Security:
- *   - Secrets are stored as HMAC-SHA256(WEBHOOK_SECRET_KEY, id:secret) — a keyed
- *     digest, never the raw value.
+ *   - Secrets are stored as AES-256-GCM ciphertext (via encryptSecret).
+ *   - A keyed HMAC-SHA256 digest (secret_hash) is also stored for
+ *     verification. Raw secrets are never written to disk.
  *   - Payloads are signed using HMAC-SHA256; consumers verify via
  *     X-Webhook-Signature.
  *   - Secrets should be long random strings (>= 32 bytes); never logged.
@@ -33,9 +34,8 @@
  *
  * NOTE: Because delivery requires the original plaintext secret, the in-memory
  * Map holds the raw secret for webhooks registered in the current process.
- * Webhooks reloaded on restart cannot sign payloads until the merchant
- * re-registers. This is a deliberate security trade-off: never store plaintext
- * secrets on disk.
+ * Webhooks reloaded on restart use the stored encrypted secret via
+ * decryptSecret() — no re-registration required.
  */
 
 "use strict";
@@ -48,6 +48,7 @@ const tracer = require("../config/tracing").getTracer("webhook-service");
 const { propagation, context } = require("@opentelemetry/api");
 const { getRequestIdHeader } = require("../utils/correlationId");
 const { generateWebhookSignature } = require("../utils/webhookSignature");
+const { encryptSecret, decryptSecret } = require("../utils/encryption");
 const knex = require("../db/connection");
 require("dotenv").config();
 
@@ -68,7 +69,7 @@ const RETRY_INTERVALS = [1000, 5000, 25000, 125000, 625000];
 const RETRY_WORKER_INTERVAL = 30000;
 
 /**
- * Server-side secret used to produce the stored hash.
+ * Server-side secret used to produce the stored HMAC-SHA256 hash.
  * Must be set in the environment; defaults to a generated value that won't
  * survive restarts — force explicit configuration in production.
  */
@@ -101,7 +102,8 @@ let retryWorkerTimer = null;
 
 /**
  * Produce a deterministic HMAC-SHA256 hash of `secret` keyed by `id`.
- * This is what gets written to the database — never the raw secret.
+ * This is stored alongside the encrypted secret so the hash can be
+ * verified without decryption.
  *
  * @param {string} id
  * @param {string} secret
@@ -118,7 +120,6 @@ function hashSecret(id, secret) {
 
 /**
  * Generate a collision-resistant webhook ID.
- * Uses crypto.randomUUID() so IDs survive process restarts without a counter.
  *
  * @returns {string}
  */
@@ -131,14 +132,10 @@ function generateId() {
 /**
  * Register a new webhook for a Stellar public key.
  *
- * Persists the registration to the database (secret stored as a keyed hash),
- * keeps the raw secret in memory for this process lifetime, and starts a
+ * Persists the registration to the database with the secret stored as
+ * AES-256-GCM ciphertext and a keyed HMAC-SHA256 hash (for verification).
+ * Keeps the raw secret in memory for this process lifetime and starts a
  * Horizon SSE monitor for the account if none is already active.
- *
- * ⚠️  Session-scoped secret: the signing secret is held in memory only and is
- * never written to disk. If the server restarts, Horizon SSE monitoring
- * resumes automatically but signed delivery requires the merchant to
- * re-register the webhook (providing the secret again).
  *
  * @param {string} publicKey - Stellar public key to monitor (G...)
  * @param {string} url - HTTPS endpoint that will receive POST payloads
@@ -148,12 +145,14 @@ function generateId() {
 async function registerWebhook(publicKey, url, secret) {
   const id = generateId();
   const createdAt = new Date().toISOString();
+  const encryptedSecret = encryptSecret(secret);
   const secretHash = hashSecret(id, secret);
 
   await knex("webhooks").insert({
     id,
     public_key: publicKey,
     url,
+    secret: encryptedSecret,
     secret_hash: secretHash,
     created_at: createdAt,
   });
@@ -168,26 +167,45 @@ async function registerWebhook(publicKey, url, secret) {
 }
 
 /**
- * Return all webhooks registered for `publicKey`.
+ * Return all webhooks registered for `publicKey` (secrets redacted).
  *
  * @param {string} publicKey
  * @returns {Promise<Array<{id:string,publicKey:string,url:string,createdAt:string}>>}
  */
 async function getWebhooksByPublicKey(publicKey) {
-  return knex("webhooks").where("public_key", publicKey).select("*");
+  const rows = await knex("webhooks").where("public_key", publicKey).select("*");
+  return rows.map((row) => ({
+    id: row.id,
+    publicKey: row.public_key,
+    url: row.url,
+    secret: "[protected]",
+    createdAt: row.created_at,
+  }));
 }
 
 /**
- * Delete a webhook by ID.
+ * Delete a webhook by ID. Stops SSE monitoring if this was the last
+ * webhook for the associated public key.
  *
  * @returns {Promise<boolean>} true if the webhook existed and was deleted
  */
 async function deleteWebhook(id) {
+  const webhook = webhooks.get(id);
+  const publicKey = webhook ? webhook.publicKey : null;
   const deleted = await knex("webhooks").where("id", id).del();
   webhooks.delete(id);
 
   if (deleted) {
     logger.info({ type: "webhook_deleted", id });
+    const remaining = Array.from(webhooks.values()).filter(
+      (w) => w.publicKey === publicKey,
+    );
+    if (remaining.length === 0 && publicKey && activeStreams.has(publicKey)) {
+      activeStreams.get(publicKey)();
+      activeStreams.delete(publicKey);
+      metrics.activeWebhookStreams.set(activeStreams.size);
+      logger.info({ type: "horizon_monitoring_stopped", publicKey });
+    }
     return true;
   }
   return false;
@@ -195,35 +213,32 @@ async function deleteWebhook(id) {
 
 /**
  * Look up a webhook by ID. Falls back to the database if the in-process
- * cache hasn't seen it yet (e.g. a retry worker replaying a delivery
- * recorded by another process).
+ * cache hasn't seen it yet. Decrypts the stored secret so delivery can sign.
  *
  * @param {string} id
- * @returns {Promise<{id:string, publicKey:string, url:string, secret:string|null}|undefined>}
+ * @returns {Promise<{id:string, publicKey:string, url:string, secret:string|null}|null>}
  */
 async function getWebhookById(id) {
   if (webhooks.has(id)) return webhooks.get(id);
   const row = await knex("webhooks").where("id", id).first();
-  if (!row) return undefined;
-  // Plaintext secret is not stored; return null so callers can gate on it
-  const entry = {
+  if (!row) return null;
+  const webhook = {
     id: row.id,
     publicKey: row.public_key,
     url: row.url,
-    secret: null,
+    secret: row.secret, // encrypted; decryptSecret() called at delivery time
     createdAt: row.created_at,
   };
-  webhooks.set(id, entry);
-  return entry;
+  webhooks.set(id, webhook);
+  return webhook;
 }
 
 /**
- * Reload all active webhook registrations from the database and re-establish
+ * Reload all webhook registrations from the database and re-establish
  * Horizon SSE streams for each unique public key.
  *
- * Call this once during server startup. Because the raw secrets are not
- * persisted, reloaded webhooks can monitor for events but cannot sign delivery
- * payloads — the merchant will need to re-register to restore signing.
+ * Call this once during server startup. Secrets are decrypted at delivery
+ * time via decryptSecret() — no re-registration required after restart.
  *
  * @returns {Promise<number>} Count of unique accounts for which streams were started.
  */
@@ -238,7 +253,7 @@ async function restoreWebhooks() {
         id: row.id,
         publicKey: row.public_key,
         url: row.url,
-        secret: null, // plaintext not persisted by design
+        secret: row.secret, // encrypted; decryptSecret() called at delivery time
         createdAt: row.created_at,
       });
     }
@@ -258,14 +273,20 @@ async function restoreWebhooks() {
 
 /**
  * Compute the HMAC-SHA256 signature for a payload.
- * Uses the shared webhookSignature utility.
  *
  * @param {string} secret
- * @param {object} payload - Will be JSON.stringify'd before signing
+ * @param {object} payload
  * @returns {string} Hex-encoded digest
  */
 function signPayload(secret, payload) {
   return generateWebhookSignature(payload, secret);
+}
+
+function generateIdempotencyKey(webhookId, eventType, payloadStr, timestamp) {
+  return crypto
+    .createHash("sha256")
+    .update(webhookId + eventType + payloadStr + timestamp)
+    .digest("hex");
 }
 
 // ─── Delivery ─────────────────────────────────────────────────────────────────
@@ -273,11 +294,13 @@ function signPayload(secret, payload) {
 /**
  * Attempt to deliver a signed webhook payload to a single endpoint.
  */
-async function attemptDelivery(webhook, payload) {
-  const signature = signPayload(webhook.secret, payload);
+async function attemptDelivery(webhook, payload, idempotencyKey) {
+  const plainSecret = decryptSecret(webhook.secret);
+  const signature = signPayload(plainSecret, payload);
   const headers = {
     "Content-Type": "application/json",
     "X-Webhook-Signature": signature,
+    "X-Idempotency-Key": idempotencyKey || "legacy-retry",
     ...getRequestIdHeader(),
   };
 
@@ -289,27 +312,20 @@ async function attemptDelivery(webhook, payload) {
     body: JSON.stringify(payload),
   });
 
-  if (!res.ok) {
-    return { ok: false, error: `HTTP ${res.status}` };
-  }
-
+  if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
   return { ok: true };
 }
 
 /**
  * Deliver a signed webhook payload to a single registered endpoint.
- * Creates a delivery record and manages retry logic with exponential
- * backoff.
- *
- * Webhooks with a null secret (restored from DB without plaintext) are
- * skipped — they cannot produce a valid signature.
+ * Creates a delivery record and manages retry logic with exponential backoff.
  */
 async function deliverWebhook(webhook, payload, eventType = "payment.received") {
   if (!webhook.secret) {
     logger.warn({
       type: "webhook_delivery_skipped",
       id: webhook.id,
-      reason: "secret_not_available_after_restart",
+      reason: "secret_not_available",
     });
     return;
   }
@@ -323,6 +339,32 @@ async function deliverWebhook(webhook, payload, eventType = "payment.received") 
 
   const deliveryId = crypto.randomUUID();
   const payloadStr = JSON.stringify(payload);
+  const timestamp = new Date().toISOString();
+  const idempotencyKey = generateIdempotencyKey(
+    webhook.id,
+    eventType,
+    payloadStr,
+    timestamp,
+  );
+
+  try {
+    await knex("webhook_events").insert({
+      id: crypto.randomUUID(),
+      webhook_id: webhook.id,
+      event_type: eventType,
+      payload: payloadStr,
+      idempotency_key: idempotencyKey,
+      created_at: timestamp,
+    });
+  } catch (err) {
+    if (err.code !== "23505" && err.code !== "SQLITE_CONSTRAINT") {
+      logger.error({
+        type: "webhook_event_db_error",
+        webhookId: webhook.id,
+        error: err.message,
+      });
+    }
+  }
 
   try {
     await knex("webhook_deliveries").insert({
@@ -330,9 +372,10 @@ async function deliverWebhook(webhook, payload, eventType = "payment.received") 
       webhook_id: webhook.id,
       event_type: eventType,
       payload: payloadStr,
+      idempotency_key: idempotencyKey,
       status: "pending",
       attempts: 0,
-      created_at: new Date().toISOString(),
+      created_at: timestamp,
     });
   } catch (err) {
     logger.error({
@@ -346,21 +389,15 @@ async function deliverWebhook(webhook, payload, eventType = "payment.received") 
   }
 
   try {
-    const result = await attemptDelivery(webhook, payload);
-
+    const result = await attemptDelivery(webhook, payload, idempotencyKey);
     if (result.ok) {
       await knex("webhook_deliveries")
         .where("id", deliveryId)
-        .update({
-          status: "delivered",
-          last_attempt_at: new Date().toISOString(),
-        });
-      logger.info({
-        type: "webhook_delivered",
-        id: webhook.id,
-        url: webhook.url,
-        deliveryId,
-      });
+        .update({ status: "delivered", last_attempt_at: new Date().toISOString() });
+      await knex("webhook_events")
+        .where("idempotency_key", idempotencyKey)
+        .update({ delivered_at: new Date().toISOString() });
+      logger.info({ type: "webhook_delivered", id: webhook.id, url: webhook.url, deliveryId });
       span.setStatus({ code: 1 });
     } else {
       await handleDeliveryFailure(deliveryId, webhook, result.error);
@@ -378,8 +415,7 @@ async function deliverWebhook(webhook, payload, eventType = "payment.received") 
  */
 async function handleDeliveryFailure(deliveryId, webhook, errorMsg) {
   const currentAttempt = (webhook.attempts || 0) + 1;
-  const nextRetryMs =
-    RETRY_INTERVALS[Math.min(currentAttempt - 1, RETRY_INTERVALS.length - 1)];
+  const nextRetryMs = RETRY_INTERVALS[Math.min(currentAttempt - 1, RETRY_INTERVALS.length - 1)];
   const nextRetryAt = new Date(Date.now() + nextRetryMs).toISOString();
   const isDead = currentAttempt >= MAX_RETRIES;
 
@@ -405,6 +441,7 @@ async function handleDeliveryFailure(deliveryId, webhook, errorMsg) {
     logger.error({
       type: "webhook_delivery_dead",
       id: webhook.id,
+      deliveryId,
       url: webhook.url,
       error: errorMsg,
       attempts: currentAttempt,
@@ -413,10 +450,11 @@ async function handleDeliveryFailure(deliveryId, webhook, errorMsg) {
     logger.warn({
       type: "webhook_delivery_retry_scheduled",
       id: webhook.id,
+      deliveryId,
       url: webhook.url,
       error: errorMsg,
       attempt: currentAttempt,
-      nextRetryMs,
+      nextRetryAt,
     });
   }
 }
@@ -441,23 +479,12 @@ async function processRetryQueue() {
 
     for (const delivery of pending) {
       const webhook = await getWebhookById(delivery.webhook_id);
-      if (!webhook) {
-        logger.warn({
-          type: "webhook_not_found_for_retry",
-          deliveryId: delivery.id,
-          webhookId: delivery.webhook_id,
-        });
-        continue;
-      }
+      if (!webhook) continue;
 
       let payload;
       try {
         payload = JSON.parse(delivery.payload);
       } catch {
-        logger.error({
-          type: "webhook_invalid_payload",
-          deliveryId: delivery.id,
-        });
         await handleDeliveryFailure(delivery.id, webhook, "Invalid payload");
         continue;
       }
@@ -470,15 +497,16 @@ async function processRetryQueue() {
       });
 
       try {
-        const result = await attemptDelivery(webhook, payload);
-
+        const result = await attemptDelivery(webhook, payload, delivery.idempotency_key);
         if (result.ok) {
           await knex("webhook_deliveries")
             .where("id", delivery.id)
-            .update({
-              status: "delivered",
-              last_attempt_at: new Date().toISOString(),
-            });
+            .update({ status: "delivered", last_attempt_at: new Date().toISOString() });
+          if (delivery.idempotency_key) {
+            await knex("webhook_events")
+              .where("idempotency_key", delivery.idempotency_key)
+              .update({ delivered_at: new Date().toISOString() });
+          }
           logger.info({
             type: "webhook_retry_delivered",
             id: webhook.id,
@@ -501,7 +529,7 @@ async function processRetryQueue() {
 }
 
 /**
- * Start the background retry worker that processes the retry queue.
+ * Start the background retry worker.
  */
 function startRetryWorker() {
   if (retryWorkerTimer) return;
@@ -552,16 +580,8 @@ async function retryDeadDeliveries(publicKey) {
   const count = await knex("webhook_deliveries")
     .whereIn("webhook_id", webhookIds)
     .andWhere("status", "dead")
-    .update({
-      status: "pending",
-      attempts: 0,
-      next_retry_at: null,
-    });
-  logger.info({
-    type: "webhook_dead_deliveries_reset",
-    publicKey,
-    count,
-  });
+    .update({ status: "pending", attempts: 0, next_retry_at: null });
+  logger.info({ type: "webhook_dead_deliveries_reset", publicKey, count });
   return { reset: count };
 }
 
@@ -576,9 +596,7 @@ async function retryDeadDeliveries(publicKey) {
  */
 function startMonitoring(webhook) {
   metrics.horizonRequestsTotal.inc({ operation: "startSSE", status: "success" });
-  if (activeStreams.has(webhook.publicKey)) {
-    return;
-  }
+  if (activeStreams.has(webhook.publicKey)) return;
 
   const closeStream = server
     .payments()
@@ -644,8 +662,7 @@ function startMonitoring(webhook) {
 /**
  * Close all active Horizon SSE streams and wait for in-flight deliveries.
  *
- * @param {number} [timeoutMs=5000] - Maximum time to wait for in-flight deliveries
- * @returns {Promise<void>}
+ * @param {number} [timeoutMs=5000]
  */
 async function closeAllStreams(timeoutMs = 5000) {
   stopRetryWorker();
@@ -669,6 +686,58 @@ async function closeAllStreams(timeoutMs = 5000) {
   pendingDeliveries.clear();
 }
 
+// ─── Event Replay & Querying ──────────────────────────────────────────────────
+
+async function getEvents(publicKey, { since, until, type, limit = 50, cursor } = {}) {
+  const query = knex("webhook_events as e")
+    .join("webhooks as w", "e.webhook_id", "w.id")
+    .where("w.public_key", publicKey)
+    .orderBy("e.created_at", "desc")
+    .select("e.*");
+  if (since) query.andWhere("e.created_at", ">=", since);
+  if (until) query.andWhere("e.created_at", "<=", until);
+  if (type) query.andWhere("e.event_type", type);
+  if (cursor) query.andWhere("e.id", "<", cursor);
+  query.limit(limit);
+  return query;
+}
+
+async function replayEvents(publicKey, { eventIds, since, until }) {
+  const query = knex("webhook_events as e")
+    .join("webhooks as w", "e.webhook_id", "w.id")
+    .where("w.public_key", publicKey)
+    .select("e.*");
+  if (eventIds && eventIds.length > 0) {
+    query.whereIn("e.id", eventIds);
+  } else {
+    if (since) query.andWhere("e.created_at", ">=", since);
+    if (until) query.andWhere("e.created_at", "<=", until);
+  }
+  const eventsToReplay = await query;
+  if (!eventsToReplay.length) return { replayed: 0 };
+  let replayCount = 0;
+  for (const event of eventsToReplay) {
+    const webhook = await getWebhookById(event.webhook_id);
+    if (!webhook) continue;
+    const payload =
+      typeof event.payload === "string"
+        ? JSON.parse(event.payload)
+        : event.payload;
+    deliverWebhook(webhook, payload, event.event_type);
+    replayCount++;
+  }
+  return { replayed: replayCount };
+}
+
+async function getEventStats(publicKey) {
+  return knex("webhook_events as e")
+    .join("webhooks as w", "e.webhook_id", "w.id")
+    .where("w.public_key", publicKey)
+    .groupBy("e.event_type")
+    .select("e.event_type")
+    .count("e.id as count");
+}
+
 module.exports = {
   registerWebhook,
   getWebhooksByPublicKey,
@@ -681,4 +750,7 @@ module.exports = {
   startRetryWorker,
   stopRetryWorker,
   closeAllStreams,
+  getEvents,
+  replayEvents,
+  getEventStats,
 };

@@ -39,9 +39,7 @@ describe("GET /health — liveness probe", () => {
 
   it("includes timestamp in ISO 8601 format", async () => {
     const res = await request(app).get("/health");
-    expect(res.body.timestamp).toMatch(
-      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/,
-    );
+    expect(res.body.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
   });
 
   it("does NOT call checkDependencies (no external I/O)", async () => {

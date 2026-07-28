@@ -19,6 +19,7 @@ import {
   TurretsDeployment,
 } from "@/lib/turrets";
 import { shortenAddress } from "@/lib/stellar";
+import { resetTour } from '@/lib/onboardingState';
 import { SUPPORTED_LANGUAGES, getCurrentLanguage, setLanguage, type SupportedLanguage } from "@/lib/i18n";
 import KyCForm from "@/components/KyCForm";
 import AccountSettings from "@/components/AccountSettings";
@@ -224,16 +225,11 @@ export default function SettingsPage({
     setTurretsError(null);
 
     try {
-      deployment.status === "active"
-        ? await pauseTurretsFunction(deployment.id)
-        : await resumeTurretsFunction(deployment.id);
-      setDeployments((prev: TurretsDeployment[]) =>
-        prev.map((item: TurretsDeployment) =>
-          item.id === deployment.id
-            ? { ...item, status: item.status === "active" ? "paused" as const : "active" as const }
-            : item
-        )
-      );
+      const updated =
+        deployment.status === "active"
+          ? await pauseTurretsFunction(deployment.id)
+          : await resumeTurretsFunction(deployment.id);
+      setDeployments((prev) => prev.map((item) => (item.id === deployment.id ? updated : item)));
     } catch (err) {
       setTurretsError(err instanceof Error ? err.message : "Failed to update deployment status");
     } finally {
@@ -830,7 +826,13 @@ export default function SettingsPage({
             </div>
           </div>
         
-          {/* ── Stellar Name Service ── */}
+          {/* ──             <div className="bg-white dark:bg-cosmos-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">Onboarding Tour</h2>
+              <p className="text-sm text-slate-400 dark:text-slate-400 mb-4">Replay the onboarding tour to refamiliarize yourself with the app.</p>
+              <button onClick={() => { resetTour(); window.location.href = '/dashboard'; }} className="px-4 py-2 bg-stellar-500 hover:bg-stellar-600 text-white font-medium rounded-lg transition-colors text-sm">Replay Onboarding Tour</button>
+            </div>
+
+            {/*  ── */}
           <div className="card">
             <h2 className="text-lg font-semibold mb-2">Your Stellar Name</h2>
             <p className="text-sm text-gray-500 mb-4">

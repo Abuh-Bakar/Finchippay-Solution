@@ -7,6 +7,8 @@
 
 "use strict";
 
+const logger = require("../utils/logger");
+
 const stellarService = require("./stellarService");
 
 // Lazy-loaded cache service (avoids circular dependency at parse time)
@@ -99,7 +101,7 @@ async function getTopRecipients(publicKey) {
         if (recipientTotals.has(recipient)) {
           recipientTotals.set(
             recipient,
-            recipientTotals.get(recipient) + amount,
+            recipientTotals.get(recipient) + amount
           );
         } else {
           recipientTotals.set(recipient, amount);
@@ -153,15 +155,7 @@ async function getActivityByDay(publicKey) {
     }
 
     // Convert to array format
-    const days = [
-      "Sunday",
-      "Monday",
-      "Tuesday",
-      "Wednesday",
-      "Thursday",
-      "Friday",
-      "Saturday",
-    ];
+    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     const activity = days.map((dayName, index) => ({
       day: dayName,
       dayIndex: index,
@@ -190,9 +184,50 @@ async function clearCache(publicKey) {
   await cache.del(`analytics:activity:${publicKey}`);
 }
 
+/**
+ * Get platform-wide receipt count from the on-chain contract.
+ * This uses the total_receipt_count() view function from the FinchippayContract.
+ *
+ * Note: This requires the Soroban contract to be deployed and accessible.
+ * The contract address should be configured via environment variable CONTRACT_ADDRESS.
+ *
+ * @returns {Promise<{totalReceiptCount: number}>}
+ */
+async function getTotalReceiptCount() {
+  return withCache("analytics:total-receipt-count", async () => {
+    const contractAddress = process.env.CONTRACT_ADDRESS;
+
+    if (!contractAddress) {
+      return { totalReceiptCount: 0 };
+    }
+
+    try {
+      const { Server } = require("@stellar/soroban-sdk");
+
+      const server = new Server(process.env.SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org");
+      const contract = new Contract(contractAddress);
+
+      const result = await server.simulateTransaction(
+        new TransactionBuilder(new Account("GAAAA", "0"), { fee: "100" })
+          .addOperation(contract.call("total_receipt_count"))
+          .setTimeout(30)
+          .build()
+      );
+
+      const totalReceiptCount = Number(result.result.toXdr("base64"));
+
+      return { totalReceiptCount };
+    } catch (error) {
+      logger.error({ error }, "Failed to fetch total receipt count from contract");
+      return { totalReceiptCount: 0 };
+    }
+  });
+}
+
 module.exports = {
   getSummary,
   getTopRecipients,
   getActivityByDay,
   clearCache,
+  getTotalReceiptCount,
 };

@@ -21,6 +21,7 @@ import { useWallet } from "@/lib/useWallet";
 import ThemeToggle from "@/components/ThemeToggle";
 import AccountSwitcher from "@/components/AccountSwitcher";
 import { NavStarIcon } from "@/components/icons";
+import { loadAlerts, PRICE_ALERTS_STORAGE_KEY } from "@/lib/priceAlerts";
 
 /** Prop interface allowing _app.tsx to wire the tour launcher. */
 export interface NavbarProps {
@@ -36,6 +37,40 @@ export default function Navbar({ onTakeTour }: NavbarProps) {
   const [feeLevel, setFeeLevel] = useState<FeeLevel | null>(null);
   const helpMenuRef = useRef<HTMLDivElement>(null);
 
+  // ── Price alert badge ────────────────────────────────────────────────────
+  /** Number of recently triggered (≤ 24 h) price alerts shown as a badge. */
+  const [alertBadgeCount, setAlertBadgeCount] = useState(0);
+
+  useEffect(() => {
+    const updateBadge = () => {
+      const alerts = loadAlerts();
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000; // last 24 hours
+      const recentlyTriggered = alerts.filter(
+        (a) =>
+          !a.active &&
+          a.triggeredAt !== null &&
+          new Date(a.triggeredAt).getTime() > cutoff
+      ).length;
+      setAlertBadgeCount(recentlyTriggered);
+    };
+
+    updateBadge();
+
+    // Re-evaluate whenever localStorage is written from another component.
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === PRICE_ALERTS_STORAGE_KEY) updateBadge();
+    };
+    window.addEventListener("storage", handleStorage);
+
+    // Also poll every 30 s in case the event doesn't fire in the same tab.
+    const intervalId = window.setInterval(updateBadge, 30_000);
+
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
   const config = getNetworkConfig();
   const isMainnet = config.network === "mainnet";
   const networkLabel =
@@ -44,6 +79,7 @@ export default function Navbar({ onTakeTour }: NavbarProps) {
   const navLinks = [
     { href: "/", label: t("nav.home") },
     { href: "/dashboard", label: t("nav.dashboard") },
+    { href: "/portfolio", label: t("nav.portfolio") },
     { href: "/trade", label: t("nav.trade") },
     { href: "/transactions", label: t("nav.transactions") },
     { href: "/network", label: t("nav.network") },
@@ -180,6 +216,42 @@ export default function Navbar({ onTakeTour }: NavbarProps) {
 
         <div className="flex items-center gap-3">
           <ThemeToggle />
+
+          {/* ── Price alert bell badge ── */}
+          <Link
+            href="/dashboard"
+            aria-label={
+              alertBadgeCount > 0
+                ? `${alertBadgeCount} price alert${alertBadgeCount > 1 ? "s" : ""} triggered`
+                : "Price alerts"
+            }
+            className="relative flex items-center justify-center rounded-lg p-2 text-slate-500 transition-all duration-150 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-slate-200"
+            data-testid="price-alerts-bell"
+          >
+            <svg
+              className="h-5 w-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+              />
+            </svg>
+            {alertBadgeCount > 0 && (
+              <span
+                className="absolute top-0.5 right-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-red-500 px-0.5 text-[10px] font-bold text-white leading-none"
+                aria-hidden="true"
+                data-testid="price-alerts-badge"
+              >
+                {alertBadgeCount > 9 ? "9+" : alertBadgeCount}
+              </span>
+            )}
+          </Link>
 
           {/* ── Help menu (contains "Take a Tour") ── */}
           <div className="relative hidden md:block" ref={helpMenuRef}>

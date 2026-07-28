@@ -12,7 +12,10 @@
 "use strict";
 
 const jwt = require("jsonwebtoken");
-const { formatErrorResponse, ERROR_CODES } = require("../../../shared/errorCodes");
+const {
+  formatErrorResponse,
+  ERROR_CODES,
+} = require("../../../shared/errorCodes");
 
 const JWT_SECRET = process.env.JWT_SECRET || "finchippay_secret_key";
 
@@ -52,9 +55,11 @@ function verifyJWT(req, res, next) {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     if (!decoded.publicKey || !/^G[A-Z0-9]{55}$/.test(decoded.publicKey)) {
-      return res
-        .status(ERROR_CODES.AUTH_INVALID_TOKEN.httpStatus)
-        .json(formatErrorResponse("AUTH_INVALID_TOKEN", { reason: "Token payload is malformed." }));
+      return res.status(ERROR_CODES.AUTH_INVALID_TOKEN.httpStatus).json(
+        formatErrorResponse("AUTH_INVALID_TOKEN", {
+          reason: "Token payload is malformed.",
+        }),
+      );
     }
     req.user = decoded; // { publicKey: "G...", iat, exp }
     next();
@@ -66,7 +71,9 @@ function verifyJWT(req, res, next) {
       // carries a correlation ID (#270).
       return res
         .status(ERROR_CODES.TOKEN_EXPIRED.httpStatus)
-        .json(formatErrorResponse("TOKEN_EXPIRED", { expiredAt: err.expiredAt }));
+        .json(
+          formatErrorResponse("TOKEN_EXPIRED", { expiredAt: err.expiredAt }),
+        );
     }
     const errorCode = "AUTH_INVALID_TOKEN";
     return res

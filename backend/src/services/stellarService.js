@@ -132,7 +132,10 @@ async function getAccount(publicKey) {
     const cacheKey = `account:${publicKey}`;
     const cached = await cache.get(cacheKey);
     if (cached) {
-      metrics.horizonRequestsTotal.inc({ operation: "loadAccount", status: "cache_hit" });
+      metrics.horizonRequestsTotal.inc({
+        operation: "loadAccount",
+        status: "cache_hit",
+      });
       return cached;
     }
 
@@ -165,7 +168,10 @@ async function getAccount(publicKey) {
       await cache.set(cacheKey, result, ACCOUNT_CACHE_TTL_SEC);
       return result;
     } catch (err) {
-      metrics.horizonRequestsTotal.inc({ operation: "loadAccount", status: "error" });
+      metrics.horizonRequestsTotal.inc({
+        operation: "loadAccount",
+        status: "error",
+      });
       if (err?.response?.status === 404) {
         const error = new Error(
           "Account not found. It may not be funded yet. Use Friendbot on testnet.",
@@ -221,7 +227,10 @@ async function getPayments(publicKey, { limit = 20, cursor } = {}) {
   if (shouldCache) {
     const cached = await cache.get(paymentsCacheKey);
     if (cached) {
-      metrics.horizonRequestsTotal.inc({ operation: "getPayments", status: "cache_hit" });
+      metrics.horizonRequestsTotal.inc({
+        operation: "getPayments",
+        status: "cache_hit",
+      });
       return cached;
     }
   }
@@ -354,12 +363,7 @@ async function countPaymentsApprox(publicKey, { cap = 200 } = {}) {
     "Horizon.countPayments",
     () =>
       withTimeoutAndRetry(() =>
-        server
-          .payments()
-          .forAccount(publicKey)
-          .limit(cap)
-          .order("desc")
-          .call(),
+        server.payments().forAccount(publicKey).limit(cap).order("desc").call(),
       ),
   );
 

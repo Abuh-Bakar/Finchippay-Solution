@@ -19,11 +19,12 @@ const { sdk: otelSdk } = require("./config/tracing");
 // Must load before any route requiring axios so the global interceptor
 // can forward the correlation ID on every outbound HTTP call.
 require("./config/axiosInterceptors");
+require("./config/fetchInterceptor");
 
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
-const pinoHttp = require("pino-http");
+const requestLogger = require("./middleware/requestLogger");
 const rateLimit = require("express-rate-limit");
 const Sentry = require("@sentry/node");
 const { formatErrorResponse, ERROR_CODES } = require("../../shared/errorCodes");
@@ -31,6 +32,7 @@ const { formatErrorResponse, ERROR_CODES } = require("../../shared/errorCodes");
 const accountRoutes = require("./routes/accounts");
 const authRoutes = require("./routes/auth");
 const paymentRoutes = require("./routes/payments");
+const receiptsRoutes = require("./routes/receipts");
 const analyticsRoutes = require("./routes/analytics");
 const healthRoutes = require("./routes/health");
 const federationRoutes = require("./routes/federation");
@@ -42,25 +44,44 @@ const parsePaymentRoutes = require("./routes/parsePayment");
 const scheduledTransactionRoutes = require("./routes/scheduledTransactions");
 const sep24Routes = require("./routes/sep24");
 const sep12Routes = require("./routes/sep12");
+const sep38Routes = require("./routes/sep38");
 const eventRoutes = require("./routes/events");
+const notificationRoutes = require("./routes/notifications");
 const featuresRoutes = require("./routes/features");
 const adminFeatureFlagsRoutes = require("./routes/adminFeatureFlags");
+const tokensRoutes = require("./routes/tokens");
+const pushRoutes = require("./routes/push");
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./swagger");
 const { startTurretsServer } = require("./turretsServer");
 const eventIndexer = require("./services/eventIndexer");
-const { startRetryWorker, closeAllStreams: closeWebhookStreams } = require("./services/webhookService");
+const {
+  startRetryWorker,
+  closeAllStreams: closeWebhookStreams,
+} = require("./services/webhookSubscriptionService");
+const {
+  startCleanupWorker,
+  stopCleanupWorker,
+} = require("./services/eventCleanupService");
 const logger = require("./utils/logger");
 const { validateEnv, parseAllowedOrigins } = require("./config/validateEnv");
 const { requireJsonContentType } = require("./middleware/bodyParsing");
 const { trackHttpMetrics } = require("./middleware/metrics");
 const metricsRoutes = require("./routes/metrics");
-const { correlationMiddleware, getRequestId } = require("./utils/correlationId");
+const {
+  correlationMiddleware,
+  getRequestId,
+} = require("./utils/correlationId");
 const { errorLogFields } = require("./utils/errorResponse");
 const { initRedis, closeRedis } = require("./services/cacheService");
-const { closeAll: closeBalanceStreams } = require("./services/balanceStreamService");
+const {
+  closeAll: closeBalanceStreams,
+} = require("./services/balanceStreamService");
 const { zodErrorHandler } = require("./validation/middleware");
 const traceContextMiddleware = require("./middleware/tracing");
+const correlationIdMiddleware = require("./middleware/correlationId");
+const { setCorrelationIdProvider } = require("../../shared/errorCodes");
+setCorrelationIdProvider(correlationIdMiddleware.getCorrelationId);
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -157,32 +178,30 @@ app.use(trackHttpMetrics);
 // Correlation ID middleware — generates/adopts X-Request-ID, stores in ALS.
 app.use(correlationMiddleware);
 app.use(traceContextMiddleware);
-// Structured JSON request logging (#269) — machine-parseable JSON logs.
-app.use(
-  pinoHttp({
-    logger,
-    genReqId: (req) => req.id || crypto.randomUUID(),
-    customProps: () => {
-      const requestId = getRequestId();
-      return requestId ? { requestId } : {};
-    },
-  }),
-);
+app.use(correlationIdMiddleware);
+// Structured JSON request logging
+app.use(requestLogger);
 
 // Content-Type enforcement (#81)
 app.use(requireJsonContentType);
 
-// JSON body size limits (#81) — turrets gets larger limit for txFunction payloads.
+// JSON body size limits (#81, #353) — configurable via env vars.
+// Apply standard body parsing with env-configured limits.
+const { bodyParsing } = require("./middleware/bodyParsing");
+bodyParsing(app);
+// /api/turrets gets a larger limit for txFunction payloads.
 app.use("/api/turrets", express.json({ limit: "512kb" }));
-app.use(express.json({ limit: "100kb" }));
 
-// JSON body parsing error handler
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
     return res.status(400).json({ error: "Invalid JSON body" });
   }
   if (err.type === "entity.too.large" || err.status === 413) {
-    return res.status(413).json({ error: "Request body too large" });
+    const limit = err.limit || "unknown";
+    return res.status(413).json({
+      error: "PAYLOAD_TOO_LARGE",
+      message: `Request body exceeds the ${limit} limit.`,
+    });
   }
   next();
 });
@@ -202,12 +221,12 @@ app.use(
       }
     },
     methods: ["GET", "POST", "DELETE"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    // traceparent/tracestate: W3C Trace Context headers the frontend's
+    // OpenTelemetry instrumentation attaches to every fetch() call.
+    allowedHeaders: ["Content-Type", "Authorization", "traceparent", "tracestate"],
     credentials: true,
   }),
 );
-
-// ─── Health route (exempt from rate limiting) ─────────────────────────────────
 
 app.use("/health", healthRoutes);
 app.use("/api/health", healthRoutes);
@@ -248,6 +267,7 @@ app.use(limiter);
 app.use("/api/auth", authRoutes);
 app.use("/api/accounts", accountRoutes);
 app.use("/api/payments", paymentRoutes);
+app.use("/api/receipts", receiptsRoutes);
 app.use("/api/webhooks", webhookRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/turrets", turretsRoutes);
@@ -255,10 +275,14 @@ app.use("/api/tips", tipsRoutes);
 app.use("/api/parse-payment", parsePaymentRoutes);
 app.use("/api/scheduled-transactions", scheduledTransactionRoutes);
 app.use("/api/events", eventRoutes);
+app.use("/api/notifications", notificationRoutes);
 app.use("/api/sep24", sep24Routes);
 app.use("/api/sep12", sep12Routes);
+app.use("/sep38", sep38Routes);
+app.use("/api/push", pushRoutes);
 app.use("/api/features", featuresRoutes);
 app.use("/api/admin/feature-flags", adminFeatureFlagsRoutes);
+app.use("/api/v1/tokens", tokensRoutes);
 app.use("/federation", federationRoutes);
 app.use("/metrics", metricsRoutes);
 
@@ -291,7 +315,6 @@ app.use((req, res) => {
 
 // ─── Error Handling ────────────────────────────────────────────────────────────
 
-// Sentry must capture errors before the generic handler responds
 Sentry.setupExpressErrorHandler(app);
 
 // Convert any stray ZodError into the standard 400 payload.
@@ -299,7 +322,6 @@ app.use(zodErrorHandler);
 
 app.use((err, req, res, next) => {
   void next;
-  // If the error already has a code from our registry, use it directly.
   if (err.errorCode) {
     const entry = formatErrorResponse(err.errorCode, err.details);
     const status = err.status || ERROR_CODES[err.errorCode]?.httpStatus || 500;
@@ -311,8 +333,12 @@ app.use((err, req, res, next) => {
   }
 
   const status = err.status || 500;
-  const message = sanitizeMessage(err.message) || ERROR_CODES.SRV_INTERNAL.message;
-  logger.error({ ...errorLogFields("SRV_INTERNAL"), status, message }, "Request error");
+  const message =
+    sanitizeMessage(err.message) || ERROR_CODES.SRV_INTERNAL.message;
+  logger.error(
+    { ...errorLogFields("SRV_INTERNAL"), status, message },
+    "Request error",
+  );
 
   const fallback = formatErrorResponse("SRV_INTERNAL", {
     originalMessage: sanitizeMessage(err.message),
@@ -320,15 +346,21 @@ app.use((err, req, res, next) => {
   res.status(status).json(fallback);
 });
 
-// ─── Graceful shutdown ────────────────────────────────────────────────────────
+// ─── Graceful shutdown ────────────────────────────────────────────────
 
 async function gracefulShutdown(signal, server, otelSdk) {
   logger.info({ signal }, "Received shutdown signal — draining…");
 
-  // 1. Stop accepting new connections
   server.close((err) => {
     if (err) logger.error({ err }, "Error closing HTTP server");
   });
+
+  // 1. Stop scheduled executor
+  try {
+    require("./services/scheduledExecutor").stop();
+  } catch (err) {
+    logger.error({ err }, "Error stopping scheduled executor");
+  }
 
   // 2. Close webhook Horizon SSE streams (stops retry worker, waits for deliveries)
   try {
@@ -396,12 +428,15 @@ if (require.main === module) {
     require("./services/scheduledTransactionService").loadActiveSchedules().catch((err) => {
       logger.error({ err }, "Failed to load active scheduled transactions");
     });
+    // Start scheduled transaction executor and data retention cron
+    require("./services/scheduledExecutor").start();
+    require("./services/dataRetentionService").startRetentionCron();
     const server = app.listen(PORT, async () => {
-      console.log(`
-  ✨ Finchippay Solution API
-  🚀 Server running at http://localhost:${PORT}
-  🌐 Network: ${process.env.STELLAR_NETWORK || "testnet"}
-  `);
+      logger.info(`
+ ✨ Finchippay Solution API
+ 🚀 Server running at http://localhost:${PORT}
+ 🌐 Network: ${process.env.STELLAR_NETWORK || "testnet"}
+ `);
       // Reload persisted webhook registrations and re-establish Horizon SSE
       // streams. Must run after the server is bound so the port is guaranteed
       // ready before any incoming payment events trigger deliveries.

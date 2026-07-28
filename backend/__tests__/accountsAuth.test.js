@@ -60,7 +60,9 @@ describe("SEP-0010 token refresh and rotation (#132)", () => {
 
   it("verifies access token expires and returns TOKEN_EXPIRED code", async () => {
     // Generate a token that is already expired
-    const expiredToken = jwt.sign({ publicKey: ME }, JWT_SECRET, { expiresIn: "-1s" });
+    const expiredToken = jwt.sign({ publicKey: ME }, JWT_SECRET, {
+      expiresIn: "-1s",
+    });
 
     const res = await request(app)
       .get(`/api/accounts/${ME}`)

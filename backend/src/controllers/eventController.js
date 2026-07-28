@@ -67,7 +67,9 @@ async function getEvents(req, res, next) {
     );
 
     const hasMore = offset + limit < total;
-    const nextCursor = hasMore ? encodeCursor({ offset: offset + limit }) : null;
+    const nextCursor = hasMore
+      ? encodeCursor({ offset: offset + limit })
+      : null;
     setPaginationHeaders(req, res, { nextCursor, total, limit });
 
     res.json({

@@ -1,58 +1,49 @@
 /**
  * src/routes/webhooks.js
- * Webhook registration and management endpoints.
+ * Webhook management API endpoints.
  */
 
 "use strict";
 
 const express = require("express");
 const router = express.Router();
-const webhookService = require("../services/webhookService");
+const webhookService = require("../services/webhookSubscriptionService");
 const {
   formatErrorResponse,
   ERROR_CODES,
 } = require("../../../shared/errorCodes");
 const { validate } = require("../validation/middleware");
-const { pagination } = require("../middleware/pagination");
-const { paginateInMemory, setPaginationHeaders } = require("../utils/paginate");
+const { registerWebhookSchema } = require("../validation/webhookSchemas");
 const {
-  registerWebhookSchema,
   publicKeyParamSchema,
   idParamSchema,
+  getEventsQuerySchema,
+  replayEventsBodySchema,
 } = require("../validation/schemas");
-
-// Newest-first ordering with `id` as the stable tiebreaker, used for the
-// cursor keyset on webhook and dead-delivery lists.
-const byCreatedDesc = (a, b) =>
-  String(b.createdAt || b.created_at || "").localeCompare(
-    String(a.createdAt || a.created_at || ""),
-  ) || String(b.id).localeCompare(String(a.id));
-const rowCursor = (r) => ({ created_at: r.createdAt || r.created_at, id: r.id });
 
 /**
  * POST /api/webhooks
  * Register a webhook for a Stellar account.
  *
- * Body: { publicKey: "G...", url: "https://...", secret: "whsec_..." }
+ * Body: { publicKey: "G...", url: "https://...", secret: "whsec_...", topics?: string[] }
  *
  * Validation:
  *   - publicKey must be a valid 56-char Stellar address.
  *   - url must be an HTTPS endpoint (reject http:// in production).
  *   - secret must be at least 8 characters (HMAC-SHA256 signing secret).
  *
- * ⚠️  Session-scoped secret: the signing secret is held in memory only and is
- * never written to disk. If the server restarts, Horizon SSE monitoring
- * resumes automatically but signed delivery requires the merchant to
- * re-register the webhook (providing the secret again). The old registration
- * can then be deleted.
+ * Secrets are stored encrypted (AES-256-GCM) and a keyed HMAC-SHA256 hash
+ * is also persisted for verification. The server restores all webhooks on
+ * startup — re-registration is not required after a restart.
  */
 router.post("/", validate(registerWebhookSchema), async (req, res, next) => {
   try {
-    const { publicKey, url, secret } = req.validated;
+    const { publicKey, url, secret, topics } = req.validated;
     const webhook = await webhookService.registerWebhook(
       publicKey,
       url,
       secret,
+      topics,
     );
     return res.status(201).json({ success: true, webhook });
   } catch (err) {
@@ -69,25 +60,71 @@ router.post("/", validate(registerWebhookSchema), async (req, res, next) => {
 router.get(
   "/:publicKey",
   validate(publicKeyParamSchema, "params"),
-  pagination,
   async (req, res, next) => {
     try {
       const { publicKey } = req.validated;
       const hooks = await webhookService.getWebhooksByPublicKey(publicKey);
-      const { data, nextCursor, total } = paginateInMemory(
-        hooks,
-        req.pagination,
-        rowCursor,
-        byCreatedDesc,
-      );
-      setPaginationHeaders(req, res, {
-        nextCursor,
-        total,
-        limit: req.pagination.limit,
-      });
-      return res.json({ webhooks: data });
+      return res.json({ webhooks: hooks });
     } catch (err) {
-      return next(err);
+      next(err);
+    }
+  },
+);
+
+/**
+ * GET /api/webhooks/:publicKey/events
+ * Get paginated past events for a Stellar account.
+ */
+router.get(
+  "/:publicKey/events",
+  validate(publicKeyParamSchema, "params"),
+  validate(getEventsQuerySchema, "query"),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validatedParams || req.params;
+      const options = req.validatedQuery || req.query;
+      const events = await webhookService.getEvents(publicKey, options);
+      return res.json({ events });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * POST /api/webhooks/:publicKey/replay
+ * Replay selected events.
+ */
+router.post(
+  "/:publicKey/replay",
+  validate(publicKeyParamSchema, "params"),
+  validate(replayEventsBodySchema),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validatedParams || req.params;
+      const options = req.validated;
+      const result = await webhookService.replayEvents(publicKey, options);
+      return res.json({ success: true, ...result });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * GET /api/webhooks/:publicKey/events/stats
+ * Get event stats by type.
+ */
+router.get(
+  "/:publicKey/events/stats",
+  validate(publicKeyParamSchema, "params"),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validatedParams || req.params;
+      const stats = await webhookService.getEventStats(publicKey);
+      return res.json({ stats });
+    } catch (err) {
+      next(err);
     }
   },
 );
@@ -99,25 +136,13 @@ router.get(
 router.get(
   "/:publicKey/failures",
   validate(publicKeyParamSchema, "params"),
-  pagination,
   async (req, res, next) => {
     try {
       const { publicKey } = req.validated;
       const failures = await webhookService.getDeadDeliveries(publicKey);
-      const { data, nextCursor, total } = paginateInMemory(
-        failures,
-        req.pagination,
-        rowCursor,
-        byCreatedDesc,
-      );
-      setPaginationHeaders(req, res, {
-        nextCursor,
-        total,
-        limit: req.pagination.limit,
-      });
-      return res.json({ failures: data });
+      return res.json({ failures });
     } catch (err) {
-      return next(err);
+      next(err);
     }
   },
 );
@@ -135,7 +160,7 @@ router.post(
       const result = await webhookService.retryDeadDeliveries(publicKey);
       return res.json({ success: true, ...result });
     } catch (err) {
-      return next(err);
+      next(err);
     }
   },
 );
@@ -152,13 +177,16 @@ router.delete(
       const { id } = req.validated;
       const deleted = await webhookService.deleteWebhook(id);
       if (!deleted) {
-        return res
-          .status(ERROR_CODES.RES_NOT_FOUND.httpStatus)
-          .json(formatErrorResponse("RES_NOT_FOUND", { resourceType: "webhook", id }));
+        return res.status(ERROR_CODES.RES_NOT_FOUND.httpStatus).json(
+          formatErrorResponse("RES_NOT_FOUND", {
+            resourceType: "webhook",
+            id,
+          }),
+        );
       }
-      return res.json({ success: true, message: `Webhook ${id} deleted` });
+      return res.json({ success: true, message: "Webhook " + id + " deleted" });
     } catch (err) {
-      return next(err);
+      next(err);
     }
   },
 );

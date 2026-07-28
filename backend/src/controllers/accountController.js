@@ -3,7 +3,7 @@
  * HTTP handlers for Stellar account data and username registration.
  *
  * Routes handled:
- *   GET  /api/accounts/:publicKey           → account details + balances
+ *   GET  /api/accounts/:publicKey          → account details + balances
  *   GET  /api/accounts/:publicKey/balance   → XLM balance only
  *   POST /api/accounts/register             → register username ↔ public key
  *   GET  /api/accounts/resolve/:username    → resolve username → public key
@@ -23,7 +23,6 @@ const stellarService = require("../services/stellarService");
 const usernameService = require("../services/usernameService");
 const balanceStreamService = require("../services/balanceStreamService");
 const logger = require("../utils/logger");
-const { formatErrorResponse, ERROR_CODES } = require("../../../shared/errorCodes");
 
 /** Comment frames keep proxies and load balancers from idling the connection out. */
 const SSE_HEARTBEAT_INTERVAL_MS = 30_000;
@@ -216,7 +215,59 @@ async function streamBalance(req, res) {
   }
 }
 
+async function gdprDelete(req, res, next) {
+  try {
+    const { publicKey } = req.validated.params;
+    const crypto = require("crypto");
+    const db = require("../db");
+    const { writeAuditLog } = require("../services/dataRetentionService");
+
+    const hash = crypto.createHash("sha256").update(publicKey).digest("hex");
+    const anonymized = {};
+
+    anonymized.tipsAsSender = await db("tips").where("sender_pk", publicKey).update({ sender_pk: hash, memo: "[redacted]" });
+    anonymized.tipsAsCreator = await db("tips").where("creator_pk", publicKey).update({ creator_pk: hash, memo: "[redacted]" });
+    anonymized.usernameMappings = await db("usernames").where("public_key", publicKey).del();
+
+    await writeAuditLog("gdpr_delete", { anonymized }, publicKey);
+
+    res.json({ success: true, data: { publicKey, anonymized } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function gdprExport(req, res, next) {
+  try {
+    const { publicKey } = req.validated.params;
+    const db = require("../db");
+    const { writeAuditLog } = require("../services/dataRetentionService");
+
+    const [tipsSent, tipsReceived, usernameRow] = await Promise.all([
+      db("tips").where("sender_pk", publicKey).select("*"),
+      db("tips").where("creator_pk", publicKey).select("*"),
+      db("usernames").where("public_key", publicKey).first(),
+    ]);
+
+    const data = {
+      publicKey,
+      tipsSent,
+      tipsReceived,
+      username: usernameRow?.username || null,
+      exportedAt: new Date().toISOString(),
+    };
+
+    await writeAuditLog("gdpr_export", { fieldsExported: Object.keys(data) }, publicKey);
+
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
+  gdprDelete,
+  gdprExport,
   getAccount,
   getBalance,
   registerUsername,

@@ -22,7 +22,10 @@ const {
   sep24TransactionQuerySchema,
   sep24DepositWithdrawSchema,
 } = require("../validation/schemas");
-const { formatErrorResponse, ERROR_CODES } = require("../../../shared/errorCodes");
+const {
+  formatErrorResponse,
+  ERROR_CODES,
+} = require("../../../shared/errorCodes");
 
 /**
  * POST /api/sep24/transactions/deposit/interactive
@@ -105,7 +108,9 @@ router.get(
     if (!record) {
       return res
         .status(ERROR_CODES.RES_NOT_FOUND.httpStatus)
-        .json(formatErrorResponse("RES_NOT_FOUND", { resourceType: "transaction" }));
+        .json(
+          formatErrorResponse("RES_NOT_FOUND", { resourceType: "transaction" }),
+        );
     }
 
     const txn = {
@@ -134,48 +139,71 @@ router.get(
  * POST /api/sep24/deposit
  * Initiates a REAL interactive deposit against a configured Stellar anchor.
  */
-router.post("/deposit", validate(sep24DepositWithdrawSchema), async (req, res) => {
-  try {
-    const { assetCode, assetIssuer, amount, anchorName, account, token } =
-      req.validated;
-    const result = await sep24Service.callAnchorDeposit({
-      account,
-      assetCode,
-      assetIssuer,
-      amount,
-      anchorName,
-      token,
-    });
-    res.json(result);
-  } catch (err) {
-    const status = err.status || 500;
-    res.status(status).json(formatErrorResponse(err.errorCode || "SRV_INTERNAL", { reason: err.message }));
-  }
-});
+router.post(
+  "/deposit",
+  validate(sep24DepositWithdrawSchema),
+  async (req, res) => {
+    try {
+      const { assetCode, assetIssuer, amount, anchorName, account, token } =
+        req.validated;
+      const result = await sep24Service.callAnchorDeposit({
+        account,
+        assetCode,
+        assetIssuer,
+        amount,
+        anchorName,
+        token,
+      });
+      res.json(result);
+    } catch (err) {
+      const status = err.status || 500;
+      res.status(status).json(
+        formatErrorResponse(err.errorCode || "SRV_INTERNAL", {
+          reason: err.message,
+        }),
+      );
+    }
+  },
+);
 
 /**
  * POST /api/sep24/withdraw
  * Initiates a REAL interactive withdrawal against a configured Stellar anchor.
  */
-router.post("/withdraw", validate(sep24DepositWithdrawSchema), async (req, res) => {
-  try {
-    const { assetCode, assetIssuer, amount, destAccount, anchorName, account, token } =
-      req.validated;
-    const result = await sep24Service.callAnchorWithdraw({
-      account,
-      assetCode,
-      assetIssuer,
-      amount,
-      destAccount,
-      anchorName,
-      token,
-    });
-    res.json(result);
-  } catch (err) {
-    const status = err.status || 500;
-    res.status(status).json(formatErrorResponse(err.errorCode || "SRV_INTERNAL", { reason: err.message }));
-  }
-});
+router.post(
+  "/withdraw",
+  validate(sep24DepositWithdrawSchema),
+  async (req, res) => {
+    try {
+      const {
+        assetCode,
+        assetIssuer,
+        amount,
+        destAccount,
+        anchorName,
+        account,
+        token,
+      } = req.validated;
+      const result = await sep24Service.callAnchorWithdraw({
+        account,
+        assetCode,
+        assetIssuer,
+        amount,
+        destAccount,
+        anchorName,
+        token,
+      });
+      res.json(result);
+    } catch (err) {
+      const status = err.status || 500;
+      res.status(status).json(
+        formatErrorResponse(err.errorCode || "SRV_INTERNAL", {
+          reason: err.message,
+        }),
+      );
+    }
+  },
+);
 
 /**
  * GET /api/sep24/transactions/:txId
@@ -186,7 +214,9 @@ router.get("/transactions/:txId", (req, res) => {
   if (!record) {
     return res
       .status(ERROR_CODES.RES_NOT_FOUND.httpStatus)
-      .json(formatErrorResponse("RES_NOT_FOUND", { resourceType: "transaction" }));
+      .json(
+        formatErrorResponse("RES_NOT_FOUND", { resourceType: "transaction" }),
+      );
   }
   res.json({ transaction: record });
 });
@@ -201,7 +231,11 @@ router.post("/callback", (req, res) => {
     res.status(200).json({ received: true });
   } catch (err) {
     const status = err.status || 400;
-    res.status(status).json(formatErrorResponse(err.errorCode || "VAL_INVALID_JSON", { reason: err.message }));
+    res.status(status).json(
+      formatErrorResponse(err.errorCode || "VAL_INVALID_JSON", {
+        reason: err.message,
+      }),
+    );
   }
 });
 

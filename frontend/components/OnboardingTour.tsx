@@ -18,13 +18,30 @@
  */
 
 import dynamic from "next/dynamic";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import type { CallBackProps, Step } from "react-joyride";
 import type { OnboardingTourState } from "@/hooks/useOnboardingTour";
 import { useOnboardingTour } from "@/hooks/useOnboardingTour";
 
+// Import onboarding state utilities for progress tracking and analytics
+import {
+  getTourProgress,
+  markStepComplete,
+  markTourComplete,
+  resetTour,
+  shouldShowTour,
+  trackOnboardingEvent,
+} from "@/lib/onboardingState";
+
 // ─── react-joyride is client-only (uses DOM APIs) ────────────────────────────
 const Joyride = dynamic(() => import("react-joyride"), { ssr: false });
+
+// Compute filtered steps based on persisted onboarding progress
+const filteredSteps: Step[] = useMemo(() => {
+  const { completedSteps } = getTourProgress();
+  // Exclude steps that have already been completed
+  return TOUR_STEPS.filter((_, idx) => !completedSteps.includes(idx));
+}, []);
 
 // ─── Tour steps ───────────────────────────────────────────────────────────────
 
@@ -131,35 +148,48 @@ export default function OnboardingTour({ tour: externalTour, isVisible, onComple
 
   const handleJoyrideCallback = useCallback(
     (data: CallBackProps) => {
-      const { action, index, status, type } = data;
+      const { action, index, status, type, step } = data;
+
+      // Emit analytics events for step navigation
+      if (type === "step:after") {
+        if (action === "next" || action === "prev") {
+          trackOnboardingEvent("onboarding_step_completed", { stepIndex: index });
+        }
+      }
 
       const isFinished = status === "finished";
       const isSkipped = status === "skipped";
 
       if (type === "step:after") {
         if (action === "next") {
-          tour.nextStep(STEP_COUNT);
+          // Mark the current step as completed
+          markStepComplete(index);
+          tour.nextStep(filteredSteps.length);
         } else if (action === "prev") {
           tour.prevStep();
         } else if (action === "close" || action === "skip") {
           tour.setStepIndex(index);
           tour.skipTour();
           onSkip?.();
+          trackOnboardingEvent("onboarding_skipped");
         }
       }
 
       if (type === "tour:end") {
         if (isFinished) {
+          markTourComplete();
           tour.completeTour();
           onComplete?.();
+          trackOnboardingEvent("onboarding_completed");
         } else if (isSkipped) {
           tour.setStepIndex(index);
           tour.skipTour();
           onSkip?.();
+          trackOnboardingEvent("onboarding_skipped");
         }
       }
     },
-    [tour, onComplete, onSkip]
+    [tour, onComplete, onSkip, filteredSteps]
   );
 
   const isRunning = externalTour ? tour.isRunning : (isVisible ?? tour.isRunning);
@@ -169,7 +199,7 @@ export default function OnboardingTour({ tour: externalTour, isVisible, onComple
       {/* ── react-joyride tour overlay ────────────────────────────────── */}
       {isRunning && (
         <Joyride
-          steps={TOUR_STEPS}
+          steps={filteredSteps}
           stepIndex={tour.stepIndex}
           run={isRunning}
           continuous
