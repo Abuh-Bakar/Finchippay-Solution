@@ -27,35 +27,130 @@ jest.mock("@stellar/stellar-sdk", () => ({
   },
 }));
 
-// ─── Mock: SQLite persistence layer ──────────────────────────────────────────
-// Prefix the shared store with "mock" so Jest allows it inside the factory.
-const mockDbStore = new Map();
+// ─── Mock: Knex persistence layer ────────────────────────────────────────────
+// Mirror the two tables the service writes to: webhooks + webhook_deliveries.
+const mockWebhooks = new Map();
+const mockDeliveries = new Map();
 
-jest.mock("../db/webhookDb", () => ({
-  insertWebhook: jest.fn(({ id, publicKey, url, secretHash, createdAt }) => {
-    mockDbStore.set(id, { id, publicKey, url, secretHash, createdAt, active: 1 });
-  }),
-  getByPublicKey: jest.fn((publicKey) =>
-    Array.from(mockDbStore.values())
-      .filter((r) => r.publicKey === publicKey && r.active === 1)
-      .map(({ id, publicKey: pk, url, createdAt }) => ({ id, publicKey: pk, url, createdAt }))
-  ),
-  getAllActive: jest.fn(() =>
-    Array.from(mockDbStore.values())
-      .filter((r) => r.active === 1)
-      .map(({ id, publicKey, url, secretHash, createdAt }) => ({
-        id, publicKey, url, secretHash, createdAt,
-      }))
-  ),
-  getById: jest.fn((id) => mockDbStore.get(id) ?? null),
-  deactivate: jest.fn((id) => {
-    const row = mockDbStore.get(id);
-    if (!row || row.active === 0) return false;
-    row.active = 0;
-    return true;
-  }),
-  close: jest.fn(),
-}));
+/**
+ * Minimal knex query-builder stub. Supports the chained API used by
+ * webhookService.js:
+ *   knex("table").insert(row)
+ *   knex("table").where(col, val).select("*")
+ *   knex("table").where(col, val).first()
+ *   knex("table").where(col, val).del()
+ *   knex("table").where(col, val).update(patch)
+ *   knex("table").whereIn(col, vals).andWhere(col, val).update(patch)
+ *   knex("table").where(...).andWhere(fn).  (for retry-queue query)
+ */
+function mockMakeBuilder(tableName) {
+  const state = { table: tableName, wheres: [], whereIns: [], fields: null };
+
+  function matchesRow(row) {
+    return state.wheres.every(({ col, val, fn }) => {
+      if (fn) return fn(row); // raw function predicate (processRetryQueue)
+      return row[col] === val;
+    });
+  }
+
+  function getStore() {
+    return tableName === "webhooks" ? mockWebhooks : mockDeliveries;
+  }
+
+  const builder = {
+    where(col, val) {
+      if (typeof col === "function") {
+        // knex builder passed as callback: this.whereNull(...).orWhere(...)
+        // We just accept and ignore the complex retry-queue filter in unit tests.
+        state.wheres.push({ fn: () => true });
+      } else {
+        state.wheres.push({ col, val });
+      }
+      return builder;
+    },
+    andWhere(colOrFn, val) {
+      if (typeof colOrFn === "function") {
+        state.wheres.push({ fn: () => true });
+      } else {
+        state.wheres.push({ col: colOrFn, val });
+      }
+      return builder;
+    },
+    whereNull(col) {
+      state.wheres.push({ col, val: null });
+      return builder;
+    },
+    orWhere() {
+      return builder;
+    },
+    whereIn(col, vals) {
+      state.whereIns.push({ col, vals });
+      return builder;
+    },
+    select() {
+      return Promise.resolve(
+        Array.from(getStore().values()).filter(matchesRow),
+      );
+    },
+    first() {
+      const row = Array.from(getStore().values()).find(matchesRow);
+      return Promise.resolve(row || null);
+    },
+    insert(row) {
+      getStore().set(row.id, { ...row });
+      return Promise.resolve([1]);
+    },
+    del() {
+      let count = 0;
+      for (const [key, row] of getStore()) {
+        if (matchesRow(row)) {
+          getStore().delete(key);
+          count++;
+        }
+      }
+      return Promise.resolve(count);
+    },
+    update(patch) {
+      let count = 0;
+      // handle whereIn from retryDeadDeliveries
+      const store = getStore();
+      for (const [, row] of store) {
+        const inMatch =
+          state.whereIns.length === 0 ||
+          state.whereIns.every(({ col, vals }) => vals.includes(row[col]));
+        if (inMatch && matchesRow(row)) {
+          Object.assign(row, patch);
+          count++;
+        }
+      }
+      return Promise.resolve(count);
+    },
+    join(joinTable, col1, col2) {
+      // For getDeadDeliveries join — return empty array (no deliveries seeded)
+      return {
+        where: () => ({
+          andWhere: () => ({
+            orderBy: () => ({
+              select: () => Promise.resolve([]),
+            }),
+          }),
+        }),
+      };
+    },
+    orderBy() {
+      return builder;
+    },
+  };
+
+  return builder;
+}
+
+jest.mock("../src/db/connection", () => {
+  const knexMock = jest.fn((tableName) => mockMakeBuilder(tableName));
+  return knexMock;
+});
+
+// ─── Other mocks ──────────────────────────────────────────────────────────────
 
 jest.mock("../src/utils/logger", () => ({
   info: jest.fn(),
@@ -103,8 +198,13 @@ const ACCOUNT_E = "GCEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
+// Set NODE_ENV=test before the module is required so the WEBHOOK_SECRET_KEY
+// warning is suppressed (it only fires outside the test environment).
+process.env.NODE_ENV = "test";
+
 beforeEach(() => {
-  mockDbStore.clear();
+  mockWebhooks.clear();
+  mockDeliveries.clear();
   mockStreamCloseHandles.length = 0;
   jest.clearAllMocks();
 });
@@ -114,107 +214,106 @@ const webhookService = require("../src/services/webhookService");
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("webhook registry", () => {
-  it("registers and lists webhooks for an account", () => {
-    const webhook = webhookService.registerWebhook(
+  it("registers and lists webhooks for an account", async () => {
+    const webhook = await webhookService.registerWebhook(
       ACCOUNT_A,
       "https://x.test/hook",
       "supersecret",
     );
 
-    const list = webhookService.getWebhooksByPublicKey(ACCOUNT_A);
+    const list = await webhookService.getWebhooksByPublicKey(ACCOUNT_A);
     expect(list).toHaveLength(1);
     expect(list[0].url).toBe("https://x.test/hook");
-    expect(list[0].publicKey).toBe(ACCOUNT_A);
+    expect(list[0].public_key).toBe(ACCOUNT_A);
+    // registerWebhook must not expose the plaintext secret in its return value
     expect(webhook).not.toHaveProperty("secret");
   });
 
-  it("persists the webhook to the database with a hashed secret", () => {
-    const webhookDb = require("../db/webhookDb");
-    webhookService.registerWebhook(ACCOUNT_A, "https://x.test/hook", "supersecret");
+  it("persists the webhook to the database with a hashed secret", async () => {
+    await webhookService.registerWebhook(ACCOUNT_A, "https://x.test/hook", "supersecret");
 
-    expect(webhookDb.insertWebhook).toHaveBeenCalledTimes(1);
-    const call = webhookDb.insertWebhook.mock.calls[0][0];
-    expect(call.publicKey).toBe(ACCOUNT_A);
-    expect(call.url).toBe("https://x.test/hook");
-    expect(call.secretHash).toBeTruthy();
-    expect(call.secretHash).not.toBe("supersecret");
+    expect(mockWebhooks.size).toBe(1);
+    const [row] = Array.from(mockWebhooks.values());
+    expect(row.public_key).toBe(ACCOUNT_A);
+    expect(row.url).toBe("https://x.test/hook");
+    // secret_hash must be set and must NOT be the plaintext secret
+    expect(row.secret_hash).toBeTruthy();
+    expect(row.secret_hash).not.toBe("supersecret");
   });
 
-  it("scopes listing to the account and supports deletion", () => {
-    const webhook = webhookService.registerWebhook(
+  it("scopes listing to the account and supports deletion", async () => {
+    const webhook = await webhookService.registerWebhook(
       ACCOUNT_B,
       "https://x.test/a",
       "secret-aaa",
     );
-    webhookService.registerWebhook(ACCOUNT_C, "https://x.test/b", "secret-bbb");
+    await webhookService.registerWebhook(ACCOUNT_C, "https://x.test/b", "secret-bbb");
 
-    expect(webhookService.getWebhooksByPublicKey(ACCOUNT_B)).toHaveLength(1);
+    const listB = await webhookService.getWebhooksByPublicKey(ACCOUNT_B);
+    expect(listB).toHaveLength(1);
 
-    const deleted = webhookService.deleteWebhook(webhook.id);
+    const deleted = await webhookService.deleteWebhook(webhook.id);
     expect(deleted).toBe(true);
 
-    expect(webhookService.getWebhooksByPublicKey(ACCOUNT_B)).toHaveLength(0);
+    const listAfterDelete = await webhookService.getWebhooksByPublicKey(ACCOUNT_B);
+    expect(listAfterDelete).toHaveLength(0);
   });
 
-  it("returns false when deleting a non-existent webhook", () => {
-    expect(webhookService.deleteWebhook("nonexistent-id")).toBe(false);
+  it("returns false when deleting a non-existent webhook", async () => {
+    const deleted = await webhookService.deleteWebhook("nonexistent-id");
+    expect(deleted).toBe(false);
   });
 });
 
 describe("webhook persistence — restoreWebhooks", () => {
-  it("re-establishes monitoring for every unique public key in the DB", () => {
-    mockDbStore.set("id-1", {
+  it("re-establishes monitoring for every unique public key in the DB", async () => {
+    // Seed two public keys (three rows: ACCOUNT_A appears twice)
+    mockWebhooks.set("id-1", {
       id: "id-1",
-      publicKey: ACCOUNT_A,
+      public_key: ACCOUNT_A,
       url: "https://a.test/hook",
-      secretHash: "hash-a",
-      createdAt: new Date().toISOString(),
-      active: 1,
+      secret_hash: "hash-a",
+      created_at: new Date().toISOString(),
     });
-    mockDbStore.set("id-2", {
+    mockWebhooks.set("id-2", {
       id: "id-2",
-      publicKey: ACCOUNT_B,
+      public_key: ACCOUNT_B,
       url: "https://b.test/hook",
-      secretHash: "hash-b",
-      createdAt: new Date().toISOString(),
-      active: 1,
+      secret_hash: "hash-b",
+      created_at: new Date().toISOString(),
     });
     // Second entry for ACCOUNT_A — same key, different URL
-    mockDbStore.set("id-3", {
+    mockWebhooks.set("id-3", {
       id: "id-3",
-      publicKey: ACCOUNT_A,
+      public_key: ACCOUNT_A,
       url: "https://a2.test/hook",
-      secretHash: "hash-a2",
-      createdAt: new Date().toISOString(),
-      active: 1,
+      secret_hash: "hash-a2",
+      created_at: new Date().toISOString(),
     });
 
-    const webhookDb = require("../db/webhookDb");
-    const streams = webhookService.restoreWebhooks();
+    const streams = await webhookService.restoreWebhooks();
 
     // 2 unique public keys → 2 SSE streams started
     expect(streams).toBe(2);
-    expect(webhookDb.getAllActive).toHaveBeenCalled();
   });
 
-  it("returns 0 when the DB is empty", () => {
-    const streams = webhookService.restoreWebhooks();
+  it("returns 0 when the DB is empty", async () => {
+    const streams = await webhookService.restoreWebhooks();
     expect(streams).toBe(0);
   });
 
-  it("makes restored webhooks visible via getWebhooksByPublicKey", () => {
-    mockDbStore.set("id-1", {
+  it("makes restored webhooks visible via getWebhooksByPublicKey", async () => {
+    mockWebhooks.set("id-1", {
       id: "id-1",
-      publicKey: ACCOUNT_A,
+      public_key: ACCOUNT_A,
       url: "https://a.test/hook",
-      secretHash: "hash-a",
-      createdAt: new Date().toISOString(),
-      active: 1,
+      secret_hash: "hash-a",
+      created_at: new Date().toISOString(),
     });
 
-    webhookService.restoreWebhooks();
+    await webhookService.restoreWebhooks();
 
-    const list = webhookService.getWebhooksByPublicKey(ACCOUNT_A);
+    const list = await webhookService.getWebhooksByPublicKey(ACCOUNT_A);
     expect(list).toHaveLength(1);
     expect(list[0].url).toBe("https://a.test/hook");
   });
@@ -229,7 +328,7 @@ describe("signPayload", () => {
 
 describe("closeAllStreams (graceful shutdown on SIGTERM/SIGINT)", () => {
   it("closes every active Horizon SSE stream so none leak past process exit", async () => {
-    webhookService.registerWebhook(ACCOUNT_D, "https://x.test/shutdown", "secret-shutdown");
+    await webhookService.registerWebhook(ACCOUNT_D, "https://x.test/shutdown", "secret-shutdown");
     const closeHandle = mockStreamCloseHandles[mockStreamCloseHandles.length - 1];
     expect(closeHandle).not.toHaveBeenCalled();
 
@@ -239,12 +338,12 @@ describe("closeAllStreams (graceful shutdown on SIGTERM/SIGINT)", () => {
   });
 
   it("clears activeStreams so a later registration opens a fresh stream", async () => {
-    webhookService.registerWebhook(ACCOUNT_E, "https://x.test/a", "secret-a");
+    await webhookService.registerWebhook(ACCOUNT_E, "https://x.test/a", "secret-a");
     const firstCloseHandle = mockStreamCloseHandles[mockStreamCloseHandles.length - 1];
 
     await webhookService.closeAllStreams();
 
-    webhookService.registerWebhook(ACCOUNT_E, "https://x.test/b", "secret-b");
+    await webhookService.registerWebhook(ACCOUNT_E, "https://x.test/b", "secret-b");
     const secondCloseHandle = mockStreamCloseHandles[mockStreamCloseHandles.length - 1];
 
     expect(secondCloseHandle).not.toBe(firstCloseHandle);
@@ -272,13 +371,13 @@ describe("retry worker", () => {
 });
 
 describe("dead letter queue", () => {
-  it("retrieves dead deliveries", () => {
-    const deliveries = webhookService.getDeadDeliveries(ACCOUNT_A);
+  it("retrieves dead deliveries", async () => {
+    const deliveries = await webhookService.getDeadDeliveries(ACCOUNT_A);
     expect(Array.isArray(deliveries)).toBe(true);
   });
 
-  it("resets dead deliveries for retry", () => {
-    const result = webhookService.retryDeadDeliveries(ACCOUNT_A);
+  it("resets dead deliveries for retry", async () => {
+    const result = await webhookService.retryDeadDeliveries(ACCOUNT_A);
     expect(result).toHaveProperty("reset");
   });
 });

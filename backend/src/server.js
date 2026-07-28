@@ -257,6 +257,8 @@ app.use("/api/scheduled-transactions", scheduledTransactionRoutes);
 app.use("/api/events", eventRoutes);
 app.use("/api/sep24", sep24Routes);
 app.use("/api/sep12", sep12Routes);
+app.use("/api/features", featuresRoutes);
+app.use("/api/admin/feature-flags", adminFeatureFlagsRoutes);
 app.use("/federation", federationRoutes);
 app.use("/metrics", metricsRoutes);
 
@@ -394,19 +396,20 @@ if (require.main === module) {
     require("./services/scheduledTransactionService").loadActiveSchedules().catch((err) => {
       logger.error({ err }, "Failed to load active scheduled transactions");
     });
-    const server = app.listen(PORT, () => {
+    const server = app.listen(PORT, async () => {
       console.log(`
   ✨ Finchippay Solution API
   🚀 Server running at http://localhost:${PORT}
   🌐 Network: ${process.env.STELLAR_NETWORK || "testnet"}
   `);
+      // Reload persisted webhook registrations and re-establish Horizon SSE
+      // streams. Must run after the server is bound so the port is guaranteed
+      // ready before any incoming payment events trigger deliveries.
+      await restoreWebhooks();
+      startTurretsServer();
+      eventIndexer.start();
+      startRetryWorker();
     });
-
-    // Reload persisted webhook registrations and re-establish Horizon SSE streams.
-    await restoreWebhooks();
-    startTurretsServer();
-    eventIndexer.start();
-    startRetryWorker();
 
     process.on("SIGTERM", () => {
       eventIndexer.stop();

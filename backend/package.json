@@ -26,6 +26,7 @@
     "@sentry/node": "^8.53.0",
     "@stellar/stellar-sdk": "^15.1.0",
     "axios": "^1.6.8",
+    "better-sqlite3": "^11.7.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
@@ -55,6 +56,6 @@
     "supertest": "^7.2.2"
   },
   "engines": {
-    "node": ">=22.5.0"
+    "node": "20.19.5"
   }
 }

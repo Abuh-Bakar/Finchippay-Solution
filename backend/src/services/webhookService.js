@@ -75,37 +75,12 @@ const RETRY_WORKER_INTERVAL = 30000;
 const WEBHOOK_SECRET_KEY =
   process.env.WEBHOOK_SECRET_KEY || crypto.randomBytes(32).toString("hex");
 
-if (!process.env.WEBHOOK_SECRET_KEY) {
+if (!process.env.WEBHOOK_SECRET_KEY && process.env.NODE_ENV !== "test") {
   logger.warn(
     "WEBHOOK_SECRET_KEY is not set — a random key will be used. " +
       "Stored secret hashes will not be reproducible across restarts. " +
       "Set WEBHOOK_SECRET_KEY in your environment for production use.",
   );
-}
-
-/**
- * Produce a deterministic HMAC-SHA256 hash of `secret` keyed by `id`.
- * This is what gets written to the database — never the raw secret.
- *
- * @param {string} id
- * @param {string} secret
- * @returns {string} hex digest
- */
-function hashSecret(id, secret) {
-  return crypto
-    .createHmac("sha256", WEBHOOK_SECRET_KEY)
-    .update(`${id}:${secret}`)
-    .digest("hex");
-}
-
-/**
- * Generate a collision-resistant webhook ID.
- * Uses crypto.randomUUID() so IDs survive process restarts without a counter.
- *
- * @returns {string}
- */
-function generateId() {
-  return crypto.randomUUID();
 }
 
 /** In-process cache of the most recently registered webhooks (by id). The DB
@@ -388,7 +363,7 @@ async function deliverWebhook(webhook, payload, eventType = "payment.received") 
       });
       span.setStatus({ code: 1 });
     } else {
-      handleDeliveryFailure(webhook, payload, eventType, result.error, span);
+      await handleDeliveryFailure(deliveryId, webhook, result.error);
     }
   } catch (err) {
     await handleDeliveryFailure(deliveryId, webhook, err.message);
@@ -435,7 +410,6 @@ async function handleDeliveryFailure(deliveryId, webhook, errorMsg) {
       attempts: currentAttempt,
     });
   } else {
-    const nextRetryMs = RETRY_INTERVALS[Math.min(currentAttempt - 1, RETRY_INTERVALS.length - 1)];
     logger.warn({
       type: "webhook_delivery_retry_scheduled",
       id: webhook.id,
