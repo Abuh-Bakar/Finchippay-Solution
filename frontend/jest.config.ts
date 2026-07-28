@@ -8,7 +8,7 @@ const config: Config = {
     "^@stellar/stellar-sdk$": "<rootDir>/node_modules/@stellar/stellar-sdk/lib/index.js",
   },
   setupFiles: ["<rootDir>/jest.setup.ts"],
-  setupFilesAfterEnv: ["@testing-library/jest-dom"],
+  setupFilesAfterEnv: ["@testing-library/jest-dom", "<rootDir>/jest.a11y.setup.ts"],
   testPathIgnorePatterns: ["<rootDir>/e2e/"],
   collectCoverageFrom: [
     "components/RecurringPayments.tsx",

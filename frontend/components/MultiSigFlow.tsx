@@ -19,7 +19,7 @@
  *  https://developers.stellar.org/docs/learn/encyclopedia/security/signatures-multisig
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { Transaction } from "@stellar/stellar-sdk";
 import clsx from "clsx";
 import {
@@ -79,6 +79,19 @@ export default function MultiSigFlow({
   services,
 }: MultiSigFlowProps) {
   const [step, setStep] = useState<Step>("build");
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Focus management when step changes
+  useEffect(() => {
+    // Focus the first heading or button in the new step
+    const container = containerRef.current;
+    if (container) {
+      const focusable = container.querySelector<HTMLElement>(
+        "button, input, [tabindex]:not([tabindex='-1'])",
+      );
+      focusable?.focus();
+    }
+  }, [step]);
 
   // Build step
   const [destination, setDestination] = useState(prefill?.destination ?? "");
@@ -236,9 +249,9 @@ export default function MultiSigFlow({
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="card animate-fade-in border-stellar-400/20">
+    <div ref={containerRef} className="card animate-fade-in border-stellar-400/20" role="region" aria-label="Multi-signature payment flow">
       <h2 className="font-display text-lg font-semibold text-white mb-1 flex items-center gap-2">
-        <MultiSigIcon className="w-5 h-5 text-stellar-400" />
+        <MultiSigIcon className="w-5 h-5 text-stellar-400" aria-hidden="true" />
         Multi-Signature Payment
       </h2>
       <p className="text-xs text-slate-500 mb-5">
@@ -251,7 +264,7 @@ export default function MultiSigFlow({
       </p>
 
       {/* Step indicator */}
-      <div className="flex items-center mb-6 overflow-x-auto pb-1">
+      <div className="flex items-center mb-6 overflow-x-auto pb-1" role="progressbar" aria-valuenow={stepIndex + 1} aria-valuemin={1} aria-valuemax={STEPS.length} aria-label={`Step ${stepIndex + 1} of ${STEPS.length}`}>
         {STEPS.map((s, i) => (
           <div key={s} className="flex items-center flex-shrink-0">
             <div
@@ -263,6 +276,7 @@ export default function MultiSigFlow({
                   ? "bg-stellar-400 text-black ring-2 ring-stellar-400/30"
                   : "bg-white/10 text-slate-500"
               )}
+              aria-current={i === stepIndex ? "step" : undefined}
             >
               {i < stepIndex ? <CheckSmallIcon className="w-3.5 h-3.5" /> : i + 1}
             </div>
@@ -290,32 +304,40 @@ export default function MultiSigFlow({
       {step === "build" && (
         <div className="space-y-4">
           <div>
-            <label className="label">Recipient Address</label>
-            <input
-              type="text"
-              value={destination}
-              onChange={(e) => setDestination(e.target.value)}
-              placeholder="G..."
-              className={clsx("input-field font-mono text-sm", destination && !isValidDest && "border-red-500/50")}
-            />
+            <label className="label">Recipient Address</label>              <input
+                type="text"
+                value={destination}
+                onChange={(e) => setDestination(e.target.value)}
+                placeholder="G..."
+                aria-required="true"
+                aria-invalid={destination !== "" && !isValidDest ? "true" : undefined}
+                aria-describedby={destination !== "" && !isValidDest ? "dest-error" : undefined}
+                className={clsx("input-field font-mono text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stellar-400/60", destination && !isValidDest && "border-red-500/50")}
+              />
+              {destination !== "" && !isValidDest && (
+                <p id="dest-error" className="text-xs text-red-400 mt-1" role="alert">
+                  Please enter a valid Stellar address starting with G.
+                </p>
+              )}
           </div>
           <div>
-            <label className="label">Amount (XLM)</label>
-            <input
-              type="number"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="0.0"
-              min="0"
-              step="0.0000001"
-              className={clsx("input-field", amount && !isValidAmt && "border-red-500/50")}
-            />
-            {amountNum >= MULTISIG_THRESHOLD_XLM && (
-              <p className="text-xs text-amber-400 mt-1 flex items-center gap-1">
-                <WarnIcon className="w-3.5 h-3.5 flex-shrink-0" />
-                High-value payment — multi-sig required.
-              </p>
-            )}
+            <label className="label">Amount (XLM)</label>              <input
+                type="number"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0.0"
+                min="0"
+                step="0.0000001"
+                aria-required="true"
+                aria-invalid={amount !== "" && !isValidAmt ? "true" : undefined}
+                className={clsx("input-field focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stellar-400/60", amount && !isValidAmt && "border-red-500/50")}
+              />
+              {amountNum >= MULTISIG_THRESHOLD_XLM && (
+                <p className="text-xs text-amber-400 mt-1 flex items-center gap-1" role="status">
+                  <WarnIcon className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+                  High-value payment — multi-sig required.
+                </p>
+              )}
           </div>
           <div>
             <label className="label">Memo (optional)</label>
@@ -328,24 +350,26 @@ export default function MultiSigFlow({
             />
           </div>
           <div>
-            <label className="label">
+            <label htmlFor="multisig-threshold" className="label">
               Required Signatures
               <span className="ml-1 text-slate-500 font-normal">(minimum 2)</span>
             </label>
             <input
+              id="multisig-threshold"
               type="number"
               value={threshold}
               onChange={(e) => setThreshold(Math.max(2, parseInt(e.target.value) || 2))}
               min="2"
-              className="input-field"
+              className="input-field focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stellar-400/60"
             />
           </div>
           <button
             onClick={handleBuild}
             disabled={!canBuild || loading}
-            className="btn-primary w-full py-2.5 flex items-center justify-center gap-2"
+            aria-busy={loading}
+            className="btn-primary w-full py-2.5 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stellar-400/60"
           >
-            {loading ? <Spinner /> : null}
+            {loading ? <Spinner aria-hidden="true" /> : null}
             {loading ? "Building..." : "Build Transaction"}
           </button>
         </div>
@@ -371,7 +395,7 @@ export default function MultiSigFlow({
             {loading ? <Spinner /> : <FreighterIcon className="w-4 h-4" />}
             {loading ? "Waiting for Freighter..." : "Sign with Freighter"}
           </button>
-          <button onClick={handleReset} className="text-xs text-slate-500 hover:text-slate-300 w-full text-center transition-colors">
+          <button onClick={handleReset} className="text-xs text-slate-500 hover:text-slate-300 w-full text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stellar-400/60">
             ← Start over
           </button>
         </div>
@@ -446,7 +470,8 @@ export default function MultiSigFlow({
                   value={pastedXDR}
                   onChange={(e) => setPastedXDR(e.target.value)}
                   placeholder="AAAA..."
-                  className="input-field h-24 font-mono text-xs"
+                  aria-label="Paste signed XDR from co-signer"
+                  className="input-field h-24 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stellar-400/60"
                 />
               </div>
               <button
@@ -460,12 +485,12 @@ export default function MultiSigFlow({
           )}
 
           {thresholdMet && (
-            <button
-              onClick={() => setStep("submit")}
-              className="btn-primary w-full py-2.5"
-            >
-              Proceed to Submit →
-            </button>
+          <button
+            onClick={() => setStep("submit")}
+            className="btn-primary w-full py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stellar-400/60"
+          >
+            Proceed to Submit →
+          </button>
           )}
         </div>
       )}
@@ -510,9 +535,10 @@ export default function MultiSigFlow({
             href={`https://stellar.expert/explorer/testnet/tx/${txHash}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="btn-secondary w-full py-2.5 flex items-center justify-center gap-2"
+            aria-label={`View transaction on Stellar Explorer: ${txHash}`}
+            className="btn-secondary w-full py-2.5 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stellar-400/60"
           >
-            View on Explorer <ExternalLinkIcon className="w-4 h-4" />
+            View on Explorer <ExternalLinkIcon className="w-4 h-4" aria-hidden="true" />
           </a>
           <button onClick={handleReset} className="btn-primary w-full py-2.5">
             New Multi-Sig Payment

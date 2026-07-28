@@ -5,7 +5,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
 import {
@@ -29,6 +29,8 @@ export default function Navbar() {
   const { t } = useTranslation("common");
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
   const [feeLevel, setFeeLevel] = useState<FeeLevel | null>(null);
+  const [skipLinkFocused, setSkipLinkFocused] = useState(false);
+  const skipLinkRef = useRef<HTMLAnchorElement>(null);
   const config = getNetworkConfig();
   const isMainnet = config.network === "mainnet";
   const networkLabel =
@@ -102,8 +104,36 @@ export default function Navbar() {
     connectWallet(nextPublicKey);
   };
 
+  const handleSkipLinkClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault();
+    const mainContent = document.querySelector("main");
+    if (mainContent) {
+      mainContent.setAttribute("tabindex", "-1");
+      mainContent.focus();
+      mainContent.removeAttribute("tabindex");
+    }
+  };
+
   return (
-    <nav className="sticky top-0 z-50 border-b border-[rgba(14,165,233,0.12)] bg-white/80 backdrop-blur-xl transition-colors duration-300 dark:bg-cosmos-900/80">
+    <>
+      {/* Skip-to-content link — first focusable element on the page */}
+      <a
+        ref={skipLinkRef}
+        href="#main-content"
+        onClick={handleSkipLinkClick}
+        onFocus={() => setSkipLinkFocused(true)}
+        onBlur={() => setSkipLinkFocused(false)}
+        className={clsx(
+          "fixed top-2 left-2 z-[100] rounded-lg border border-stellar-500/30 bg-cosmos-900 px-4 py-2 text-sm font-medium text-white shadow-lg transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stellar-400/60",
+          skipLinkFocused
+            ? "translate-y-0 opacity-100"
+            : "-translate-y-20 opacity-0 pointer-events-none",
+        )}
+      >
+        Skip to content
+      </a>
+
+      <nav className="sticky top-0 z-50 border-b border-[rgba(14,165,233,0.12)] bg-white/80 backdrop-blur-xl transition-colors duration-300 dark:bg-cosmos-900/80" aria-label="Main navigation">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
         <div className="flex items-center gap-4">
           <Link href="/" className="group flex items-center gap-2">
@@ -208,13 +238,14 @@ export default function Navbar() {
               )}
             </div>
           ) : (
-            <button onClick={handleConnectClick} className="btn-primary px-4 py-2 text-sm">
+            <button onClick={handleConnectClick} className="btn-primary px-4 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stellar-400/60">
               {t("nav.connectWallet")}
             </button>
           )}
         </div>
       </div>
     </nav>
+    </>
   );
 }
 

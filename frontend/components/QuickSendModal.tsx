@@ -7,7 +7,6 @@
 
 import { useEffect, useRef } from "react";
 import SendPaymentForm from "@/components/SendPaymentForm";
-import {  } from "@/components/icons";
 
 interface QuickSendModalProps {
   isOpen: boolean;
@@ -26,19 +25,53 @@ export default function QuickSendModal({
 }: QuickSendModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
 
-  // Close on Escape key
+  // Close on Escape key with focus management
   useEffect(() => {
     if (!isOpen) return;
+
+    const previouslyFocused = document.activeElement as HTMLElement | null;
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         onClose();
       }
+
+      // Trap focus within the modal
+      if (e.key === "Tab") {
+        const focusableElements = overlayRef.current?.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        );
+        if (!focusableElements || focusableElements.length === 0) return;
+
+        const first = focusableElements[0];
+        const last = focusableElements[focusableElements.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
     };
 
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+
+    // Focus the close button or first focusable element on open
+    const closeBtn = overlayRef.current?.querySelector<HTMLElement>('[aria-label="Close quick send modal"]');
+    setTimeout(() => closeBtn?.focus(), 50);
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      // Restore focus to previously focused element
+      previouslyFocused?.focus();
+    };
   }, [isOpen, onClose]);
 
   // Prevent body scroll while modal is open
@@ -65,7 +98,7 @@ export default function QuickSendModal({
         <button
           onClick={onClose}
           aria-label="Close quick send modal"
-          className="absolute -top-3 -right-3 z-10 w-7 h-7 flex items-center justify-center rounded-full border border-slate-700 bg-slate-900 text-slate-400 hover:text-white hover:border-slate-500 transition-colors shadow-lg"
+          className="absolute -top-3 -right-3 z-10 w-7 h-7 flex items-center justify-center rounded-full border border-slate-700 bg-slate-900 text-slate-400 hover:text-white hover:border-slate-500 transition-colors shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stellar-400/60"
         >
           <XIcon className="w-3.5 h-3.5" />
         </button>

@@ -160,7 +160,7 @@ function AppShellInner({
       <div className="min-h-screen bg-white bg-grid transition-colors duration-300 dark:bg-cosmos-900">
         <OfflineBanner />
         <Navbar />
-        <main>
+        <main id="main-content">
           <Component {...pageProps} stellarURI={stellarURI} />
         </main>
         <InstallBanner />

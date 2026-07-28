@@ -100,6 +100,8 @@ export default function PaymentStatusModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="payment-status-title"
+        aria-live={isTerminal ? "polite" : "assertive"}
+        aria-describedby="payment-status-description"
         className="w-full max-w-xl overflow-hidden rounded-3xl border border-white/10 bg-slate-900/95 shadow-2xl"
       >
         <div className="border-b border-white/10 px-6 py-5">
@@ -118,7 +120,7 @@ export default function PaymentStatusModal({
                     ? "Payment failed"
                     : "Processing payment"}
               </h3>
-              <p className="mt-1 text-sm text-slate-400">
+              <p id="payment-status-description" className="mt-1 text-sm text-slate-400">
                 {status === "success"
                   ? "Your transaction has been confirmed on the Stellar network."
                   : status === "error"
@@ -131,7 +133,8 @@ export default function PaymentStatusModal({
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-lg border border-white/10 px-3 py-1.5 text-sm font-medium text-slate-300 transition-colors hover:border-white/20 hover:text-white"
+                aria-label="Close payment status modal"
+                className="rounded-lg border border-white/10 px-3 py-1.5 text-sm font-medium text-slate-300 transition-colors hover:border-white/20 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stellar-400/60"
               >
                 Close
               </button>
