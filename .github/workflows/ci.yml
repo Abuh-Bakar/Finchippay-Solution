@@ -374,9 +374,9 @@ jobs:
           name: playwright-report
           path: frontend/playwright-report/
 
-# --- Lighthouse -----------------------------------------------------------
+# --- Lighthouse & Accessibility --------------------------------------------
   lighthouse:
-    name: Lighthouse CI
+    name: Lighthouse & Axe a11y CI
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -387,7 +387,9 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
+      - run: npx playwright install --with-deps chromium
       - run: npm run build
+      - run: npm run test:a11y
       - run: npx lhci autorun
 
   # ─── Load Tests (k6) — manual trigger only ─────────────────────────────────

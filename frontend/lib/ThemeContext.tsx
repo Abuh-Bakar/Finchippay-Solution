@@ -13,7 +13,7 @@ import {
   type ReactNode,
 } from "react";
 
-export type Theme = "light" | "dark" | "system";
+export type Theme = "light" | "dark" | "system" | "highContrast";
 export type ResolvedTheme = "light" | "dark";
 
 interface ThemeContextValue {
@@ -34,7 +34,12 @@ const DARK_THEME_COLOR = "#050a1a";
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
 function isTheme(value: string | null): value is Theme {
-  return value === "light" || value === "dark" || value === "system";
+  return (
+    value === "light" ||
+    value === "dark" ||
+    value === "system" ||
+    value === "highContrast"
+  );
 }
 
 function getStoredTheme(): Theme {
@@ -59,6 +64,9 @@ function getInitialResolvedTheme(): ResolvedTheme {
 }
 
 function resolveTheme(theme: Theme, systemPrefersDark: boolean): ResolvedTheme {
+  if (theme === "highContrast") {
+    return systemPrefersDark ? "dark" : "light";
+  }
   if (theme === "system") {
     return systemPrefersDark ? "dark" : "light";
   }
@@ -93,6 +101,7 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
       setResolved(nextResolvedTheme);
 
       root.classList.toggle("dark", nextResolvedTheme === "dark");
+      root.classList.toggle("high-contrast", theme === "highContrast");
       root.dataset.theme = theme;
       root.style.colorScheme = nextResolvedTheme;
 

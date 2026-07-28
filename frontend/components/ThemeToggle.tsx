@@ -51,11 +51,22 @@ const themeOptions: Array<{
     description: "Always use the dark theme",
   },
   {
-    value: "system",
-    label: "System",
-    description: "Follow your device preference",
+    value: "highContrast",
+    label: "High Contrast",
+    description: "Force high‑contrast mode (WCAG AAA)",
   },
 ];
+
+// Detect prefers‑contrast: more media query and auto‑set high‑contrast if no explicit mode stored
+useEffect(() => {
+  const stored = localStorage.getItem("themeMode");
+  if (!stored) {
+    const mql = window.matchMedia("(prefers-contrast: more)");
+    if (mql.matches) {
+      setTheme("highContrast");
+    }
+  }
+}, []);
 
 function ThemeOptionIcon({
   theme,
