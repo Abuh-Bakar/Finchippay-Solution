@@ -207,9 +207,15 @@ function collectErrors(env) {
   }
 
   // WEBHOOK_ENCRYPTION_KEY is required in production for encrypting webhook secrets at rest.
+  // SMTP configuration for email notifications
+  // SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM are validated at runtime in notificationService.js
   if (env.NODE_ENV === "production" && !env.WEBHOOK_ENCRYPTION_KEY?.trim()) {
+  // SMTP configuration for email notifications
+  // SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM are validated at runtime in notificationService.js
     errors.push(
       'WEBHOOK_ENCRYPTION_KEY is required in production — generate one with: openssl rand -hex 32',
+  // SMTP configuration for email notifications
+  // SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM are validated at runtime in notificationService.js
     );
   }
 

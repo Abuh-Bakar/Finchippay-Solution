@@ -216,22 +216,28 @@ const registerWebhookSchema = z.object({
     .min(8, "Secret must be at least 8 characters for HMAC-SHA256 security"),
 });
 
-
 const getEventsQuerySchema = z.object({
   since: z.string().datetime().optional(),
   until: z.string().datetime().optional(),
   type: z.string().optional(),
-  limit: z.preprocess((val) => parseInt(val, 10), z.number().int().min(1).max(100).optional()).optional(),
+  limit: z
+    .preprocess(
+      (val) => parseInt(val, 10),
+      z.number().int().min(1).max(100).optional(),
+    )
+    .optional(),
   cursor: z.string().optional(),
 });
 
-const replayEventsBodySchema = z.object({
-  eventIds: z.array(z.string()).optional(),
-  since: z.string().datetime().optional(),
-  until: z.string().datetime().optional(),
-}).refine(data => (data.eventIds && data.eventIds.length > 0) || data.since, {
-  message: "Either eventIds or since must be provided",
-});
+const replayEventsBodySchema = z
+  .object({
+    eventIds: z.array(z.string()).optional(),
+    since: z.string().datetime().optional(),
+    until: z.string().datetime().optional(),
+  })
+  .refine((data) => (data.eventIds && data.eventIds.length > 0) || data.since, {
+    message: "Either eventIds or since must be provided",
+  });
 
 // ─── parse-payment (AI intent parser) ─────────────────────────────────────────
 
@@ -253,7 +259,9 @@ const ipfsUploadSchema = z.object({
 });
 
 const ipfsFetchSchema = z.object({
-  cid: z.string({ required_error: "cid is required" }).min(1, "cid is required"),
+  cid: z
+    .string({ required_error: "cid is required" })
+    .min(1, "cid is required"),
 });
 
 const mintWithIpfsSchema = z.object({
@@ -408,49 +416,38 @@ const tokenPriceHistoryQuerySchema = z.object({
   range: z.enum(["7d", "30d", "90d"]).default("30d"),
 });
 
-// ─── push notifications ───────────────────────────────────────────────────────
+// ─── notifications ───────────────────────────────────────────────────────────
 
-/**
- * A browser PushSubscription, as produced by `PushSubscription.toJSON()`.
- *
- * The endpoint must be HTTPS: every real push service (FCM, Mozilla, WNS) uses
- * HTTPS, and accepting anything else would let a caller point deliveries at an
- * arbitrary host.
- */
-const pushSubscriptionObject = z.object({
-  endpoint: z
-    .string({ required_error: "subscription.endpoint is required" })
-    .url("subscription.endpoint must be a valid URL")
-    .startsWith("https://", "subscription.endpoint must be an HTTPS URL"),
-  expirationTime: z.union([z.number(), z.null()]).optional(),
-  keys: z.object({
-    p256dh: z
-      .string({ required_error: "subscription.keys.p256dh is required" })
-      .min(1, "subscription.keys.p256dh is required"),
-    auth: z
-      .string({ required_error: "subscription.keys.auth is required" })
-      .min(1, "subscription.keys.auth is required"),
-  }),
+const NOTIF_EVENT_TYPES = [
+  "payment_received",
+  "escrow_released",
+  "stream_depleted",
+  "multisig_executed",
+  "tip_received",
+];
+
+/** POST /api/notifications/email */
+const registerEmailSchema = z.object({
+  publicKey: z
+    .string({ required_error: "publicKey is required" })
+    .regex(/^G[A-Z2-7]{55}$/, "Invalid Stellar public key format"),
+  email: z
+    .string({ required_error: "email is required" })
+    .email("Invalid email address format"),
+  events: z
+    .array(z.enum(NOTIF_EVENT_TYPES))
+    .optional()
+    .default(NOTIF_EVENT_TYPES),
 });
 
-/**
- * POST /api/push/subscribe
- *
- * `publicKey` is optional and only cross-checked against the authenticated
- * account: the route derives the owner from the SEP-10 JWT, never from the
- * body, so a caller cannot register a device against someone else's account.
- */
-const pushSubscribeSchema = z.object({
-  publicKey: stellarAddress.optional(),
-  subscription: pushSubscriptionObject,
+/** PUT /api/notifications/email/:publicKey */
+const updateEmailSchema = z.object({
+  email: z.string().email("Invalid email address format").optional(),
+  events: z.array(z.enum(NOTIF_EVENT_TYPES)).optional(),
 });
 
-/** POST /api/push/unsubscribe */
-const pushUnsubscribeSchema = z.object({
-  publicKey: stellarAddress.optional(),
-  endpoint: z
-    .string({ required_error: "endpoint is required" })
-    .min(1, "endpoint is required"),
+const emailEventsQuerySchema = z.object({
+  events: z.array(z.enum(NOTIF_EVENT_TYPES)).optional(),
 });
 
 // ─── Exports ──────────────────────────────────────────────────────────────────
@@ -508,7 +505,8 @@ module.exports = {
   // tokens
   tokenContractIdParamSchema,
   tokenPriceHistoryQuerySchema,
-  // push notifications
-  pushSubscribeSchema,
-  pushUnsubscribeSchema,
+  // notifications
+  registerEmailSchema,
+  updateEmailSchema,
+  emailEventsQuerySchema,
 };
