@@ -45,8 +45,11 @@ const sep24Routes = require("./routes/sep24");
 const sep12Routes = require("./routes/sep12");
 const sep38Routes = require("./routes/sep38");
 const eventRoutes = require("./routes/events");
+const notificationRoutes = require("./routes/notifications");
 const featuresRoutes = require("./routes/features");
 const adminFeatureFlagsRoutes = require("./routes/adminFeatureFlags");
+const tokensRoutes = require("./routes/tokens");
+const pushRoutes = require("./routes/push");
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./swagger");
 const { startTurretsServer } = require("./turretsServer");
@@ -54,7 +57,7 @@ const eventIndexer = require("./services/eventIndexer");
 const {
   startRetryWorker,
   closeAllStreams: closeWebhookStreams,
-} = require("./services/webhookService");
+} = require("./services/webhookSubscriptionService");
 const {
   startCleanupWorker,
   stopCleanupWorker,
@@ -191,9 +194,12 @@ app.use(
 // Content-Type enforcement (#81)
 app.use(requireJsonContentType);
 
-// JSON body size limits (#81) — turrets gets larger limit for txFunction payloads.
+// JSON body size limits (#81, #353) — configurable via env vars.
+// Apply standard body parsing with env-configured limits.
+const { bodyParsing } = require("./middleware/bodyParsing");
+bodyParsing(app);
+// /api/turrets gets a larger limit for txFunction payloads.
 app.use("/api/turrets", express.json({ limit: "512kb" }));
-app.use(express.json({ limit: "100kb" }));
 
 // JSON body parsing error handler — uses standardized error codes
 app.use((err, req, res, next) => {
@@ -225,11 +231,15 @@ app.use(
       }
     },
     methods: ["GET", "POST", "DELETE"],
+    // X-Request-ID / X-Session-ID: correlation headers for structured logging (#50).
+    // traceparent / tracestate: W3C Trace Context from frontend OpenTelemetry.
     allowedHeaders: [
       "Content-Type",
       "Authorization",
       "X-Request-ID",
       "X-Session-ID",
+      "traceparent",
+      "tracestate",
     ],
     exposedHeaders: ["X-Request-ID", "X-Session-ID"],
     credentials: true,
@@ -283,11 +293,14 @@ app.use("/api/tips", tipsRoutes);
 app.use("/api/parse-payment", parsePaymentRoutes);
 app.use("/api/scheduled-transactions", scheduledTransactionRoutes);
 app.use("/api/events", eventRoutes);
+app.use("/api/notifications", notificationRoutes);
 app.use("/api/sep24", sep24Routes);
 app.use("/api/sep12", sep12Routes);
 app.use("/sep38", sep38Routes);
+app.use("/api/push", pushRoutes);
 app.use("/api/features", featuresRoutes);
 app.use("/api/admin/feature-flags", adminFeatureFlagsRoutes);
+app.use("/api/v1/tokens", tokensRoutes);
 app.use("/federation", federationRoutes);
 app.use("/metrics", metricsRoutes);
 
@@ -364,6 +377,13 @@ async function gracefulShutdown(signal, server, otelSdk) {
 
   stopCleanupWorker();
 
+  // Stop scheduled executor
+  try {
+    require("./services/scheduledExecutor").stop();
+  } catch (err) {
+    logger.error({ err }, "Error stopping scheduled executor");
+  }
+
   // Close webhook Horizon SSE streams (stops retry worker, waits for deliveries)
   try {
     await closeWebhookStreams();
@@ -426,6 +446,8 @@ if (require.main === module) {
       .catch((err) => {
         logger.error({ err }, "Failed to load active scheduled transactions");
       });
+    // Start scheduled transaction executor
+    require("./services/scheduledExecutor").start();
     require("./services/dataRetentionService").startRetentionCron();
     startCleanupWorker();
 

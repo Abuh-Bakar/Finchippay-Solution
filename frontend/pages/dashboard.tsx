@@ -18,9 +18,20 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import Head from "next/head";
 import { useTranslation } from "react-i18next";
+import {
+  isPushSupported,
+  requestPermission,
+  unsubscribeUser,
+} from "@/lib/pushNotifications";
 
 // Dynamic imports for large components to improve initial load (Lighthouse Performance)
 import Skeleton from "@/components/Skeleton";
+
+// Browser-only: reads Notification.permission and localStorage on mount.
+const PushNotificationPrompt = dynamic(
+  () => import("../components/PushNotificationPrompt"),
+  { ssr: false },
+);
 
 const PaymentLinkGenerator = dynamic(() => import("../components/PaymentLinkGenerator"), { ssr: false });
 const WalletConnect = dynamic(() => import("../components/WalletConnect"), { ssr: false });
@@ -759,27 +770,25 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
   };
 
   /**
-   * Subscribe to the Push API using the correct MDN-documented flow:
-   *  1. Register (or retrieve) the service worker.
-   *  2. Request notification permission on the user gesture.
-   *  3. Call PushManager.subscribe() with userVisibleOnly + VAPID key.
-   *  4. Send the PushSubscription endpoint to the server for future pushes.
+   * Ask for permission and register this device, via lib/pushNotifications.
+   *
+   * The flow itself (service worker registration, VAPID key resolution,
+   * PushManager.subscribe, authenticated server registration) lives in the lib
+   * so this page and PushNotificationPrompt cannot drift apart.
    *
    * Reference: https://developer.mozilla.org/en-US/docs/Web/API/Push_API
    */
   const subscribeToPush = async (): Promise<boolean> => {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    if (!isPushSupported()) {
       showToast('Push notifications are not supported in this browser.');
       return false;
     }
 
-    // Step 1 — Register the service worker (idempotent: returns existing if already registered).
-    const registration = await navigator.serviceWorker.register('/sw.js');
-
-    // Step 2 — Request notification permission. Must be called directly inside
-    // a user-gesture handler; async chains that break the gesture context will
-    // be silently rejected by some browsers.
-    const permission = await Notification.requestPermission();
+    // requestPermission() must run inside the user gesture: async work before
+    // it breaks the gesture context and some browsers reject silently.
+    const { permission, subscribed } = await requestPermission(
+      publicKey ?? undefined,
+    );
     setNotificationPermission(permission);
 
     if (permission !== 'granted') {
@@ -787,35 +796,12 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
       return false;
     }
 
-    // Step 3 — Subscribe via PushManager.
-    // userVisibleOnly: true is required by Chrome/Edge.
-    // applicationServerKey is the VAPID public key from the environment.
-    const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-    if (!vapidPublicKey) {
-      // No VAPID key configured — fall back to permission-only mode (no
-      // server-pushed messages, but in-app bubble notifications still work).
-      console.warn('NEXT_PUBLIC_VAPID_PUBLIC_KEY is not set. Server push disabled.');
-      return true;
+    if (!subscribed) {
+      // Permission is granted but the device is not registered server-side —
+      // no VAPID key, or the session is not authenticated yet. Local
+      // notifications still work, so this is a warning rather than a failure.
+      console.warn('Notifications allowed, but this device was not registered for server push.');
     }
-
-    const existingSubscription = await registration.pushManager.getSubscription();
-    const subscription =
-      existingSubscription ??
-      (await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-      }));
-
-    // Step 4 — Send the subscription to your server so it can push messages later.
-    const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? '';
-    await fetch(`${apiBase}/api/push/subscribe`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subscription, publicKey }),
-    }).catch((err) => {
-      // Non-fatal: subscription still works for same-session in-app notifications.
-      console.warn('Could not register push subscription with server:', err);
-    });
 
     return true;
   };
@@ -825,6 +811,17 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
     if (notificationEnabled) {
       localStorage.setItem('notificationOptIn', 'false');
       setNotificationEnabled(false);
+
+      // Drop the server-side subscription too, otherwise the backend keeps
+      // pushing to a device the user just switched off.
+      if (publicKey) {
+        try {
+          await unsubscribeUser(publicKey);
+        } catch (err) {
+          console.warn('Could not remove push subscription:', err);
+        }
+      }
+
       showToast('Payment notifications disabled');
       return;
     }
@@ -976,6 +973,16 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
           {t("dashboard.title")}
         </h1>
         <p className="text-slate-600 dark:text-slate-400 text-sm">{t("dashboard.subtitle")}</p>
+
+        {/* Opt-in prompt: self-hides unless a wallet is connected, the browser
+            permission is undecided, and the server can actually send pushes. */}
+        <div className="mt-4">
+          <PushNotificationPrompt
+            publicKey={publicKey}
+            onResolved={(enabled) => setNotificationEnabled(enabled)}
+          />
+        </div>
+
         <div className="mt-4">
           <button
             onClick={handleToggleNotifications}
@@ -1968,15 +1975,5 @@ function TestIcon({ className }: { className?: string }) {
   );
 }
 
-function urlBase64ToUint8Array(base64String: string) {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
-}
+// urlBase64ToUint8Array moved to lib/pushNotifications.ts, which is now the
+// only place that calls PushManager.subscribe().

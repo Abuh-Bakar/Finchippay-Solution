@@ -430,6 +430,19 @@ async function pollOnce() {
         },
         "Indexed Soroban contract events",
       );
+
+      // Push notifications for the events users care about (payment received,
+      // stream opened, escrow activity). Required lazily and wrapped so the
+      // indexer keeps its cursor moving even if notification delivery breaks.
+      try {
+        const pushNotifier = require("./pushNotifier");
+        await pushNotifier.notifyContractEvents(parsed);
+      } catch (notifyErr) {
+        logger.warn(
+          { notifyErr },
+          "Failed to dispatch push notifications for indexed events",
+        );
+      }
     }
 
     lastProcessedLedger = latestLedger;
