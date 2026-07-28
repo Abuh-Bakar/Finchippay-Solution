@@ -1322,6 +1322,24 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
         </div>
       ))}
 
+      <Link
+        href="/portfolio"
+        className="card mb-6 flex items-center justify-between gap-4 bg-gradient-to-br from-stellar-500/10 to-blue-500/5 dark:from-stellar-500/5 dark:to-blue-500/10 border-stellar-500/20 hover:border-stellar-500/40 transition-colors group"
+      >
+        <div>
+          <p className="font-semibold text-slate-900 dark:text-white">{t("portfolio.title")}</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+            {t("portfolio.totalValue")}:{" "}
+            {xlmPrice !== null && xlmBalance !== null
+              ? formatUSD(parseFloat(xlmBalance) * xlmPrice)
+              : "—"}
+          </p>
+        </div>
+        <span className="text-stellar-600 dark:text-stellar-400 group-hover:translate-x-0.5 transition-transform">
+          {t("dashboard.viewPortfolio")}
+        </span>
+      </Link>
+
       <FeatureGate flag="streaming_payments">
         <StreamingPayments publicKey={publicKey} />
       </FeatureGate>
