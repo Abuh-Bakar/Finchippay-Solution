@@ -10,6 +10,7 @@
 #   5. compose           — validate Docker Compose configurations
 #   6. e2e               — Playwright end-to-end tests
 #   7. validate          — validate environment and config files
+#   8. sbom              — generate SPDX/CycloneDX SBOMs + fail on CRITICAL/HIGH vulns
 
 name: CI
 
@@ -591,3 +592,61 @@ jobs:
           else
             echo "✅ No suspicious hardcoded secrets detected"
           fi
+
+  # ─── SBOM Generation & Supply-Chain Vulnerability Scan ──────────────────────
+  # Generates SPDX + CycloneDX SBOMs for frontend (npm), backend (npm) and the
+  # Soroban contract (cargo), uploads them as artifacts, and fails the build on
+  # CRITICAL/HIGH vulnerabilities via Grype.
+  sbom:
+    name: SBOM & Vulnerability Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Install Syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+            | sh -s -- -b /usr/local/bin v1.18.1
+
+      - name: Install Grype
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+            | sh -s -- -b /usr/local/bin v0.87.0
+
+      - name: Generate SBOMs (SPDX + CycloneDX)
+        run: |
+          mkdir -p sbom
+          syft dir:frontend                      -o spdx-json=sbom/frontend.spdx.json -o cyclonedx-json=sbom/frontend.cdx.json
+          syft dir:backend                       -o spdx-json=sbom/backend.spdx.json  -o cyclonedx-json=sbom/backend.cdx.json
+          syft dir:contracts/finchippay-contract -o spdx-json=sbom/contract.spdx.json -o cyclonedx-json=sbom/contract.cdx.json
+
+      - name: Upload SBOM artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sboms
+          path: sbom/
+          retention-days: 30
+
+      - name: Scan SBOMs (fail on CRITICAL/HIGH)
+        run: |
+          set -e
+          for sbom in frontend backend contract; do
+            echo "::group::Grype scan — $sbom"
+            grype "sbom:sbom/${sbom}.cdx.json" --fail-on high
+            echo "::endgroup::"
+          done
