@@ -34,6 +34,7 @@ cd contracts/finchippay-contract && cargo test
 | Frontend type-check | `cd frontend && npm run type-check` |
 | Frontend unit tests | `cd frontend && npm test` |
 | Contract tests | `cd contracts/finchippay-contract && cargo test` |
+| SBOM / vuln scan (optional) | `make sbom-scan` (requires [syft](https://github.com/anchore/syft) + [grype](https://github.com/anchore/grype)) |
 
 All checks must pass before a PR will be merged.
 
