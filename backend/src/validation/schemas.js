@@ -456,11 +456,58 @@ module.exports = {
   // sep12
   sep12CustomerBodySchema,
   sep12CustomerQuerySchema,
-  // admin feature flags
-  adminToggleFlagSchema,
-  // sep24 deposit/withdraw
-  sep24DepositWithdrawSchema,
-  // tokens
-  tokenContractIdParamSchema,
-  tokenPriceHistoryQuerySchema,
+
+// ─── notifications ───────────────────────────────────────────────────────────
+
+const EMAIL_EVENT_TYPES = [
+  "payment_received",
+  "escrow_released",
+  "stream_depleted",
+  "multisig_executed",
+  "tip_received",
+];
+
+/** POST /api/notifications/email */
+const registerEmailSchema = z.object({
+  publicKey: z
+    .string({ required_error: "publicKey is required" })
+    .regex(/^G[A-Z2-7]{55}$/, "Invalid Stellar public key format"),
+  email: z
+    .string({ required_error: "email is required" })
+    .email("Invalid email address format"),
+  events: z
+    .array(z.enum(EMAIL_EVENT_TYPES))
+    .optional()
+    .default(EMAIL_EVENT_TYPES),
+});
+
+/** PUT /api/notifications/email/:publicKey */
+const updateEmailSchema = z.object({
+n/** Notifications events query schema */
+const emailEventsQuerySchema = z.object({
+  events: z
+    .array(z.enum([
+      "payment_received",
+      "escrow_released",
+      "stream_depleted",
+      "multisig_executed",
+      "tip_received",
+    ]))
+    .optional(),
+});
+  email: z
+    .string()
+    .email("Invalid email address format")
+    .optional(),
+  events: z
+    .array(z.enum(EMAIL_EVENT_TYPES))
+    .optional(),
+});
+
+/** GET /api/notifications/email/:publicKey */
+// Reuses publicKeyParamSchema from the shared primitives section above
+  // notifications
+  registerEmailSchema,
+  updateEmailSchema,
+  emailEventsQuerySchema,
 };

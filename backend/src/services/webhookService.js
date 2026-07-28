@@ -38,10 +38,19 @@ const { propagation, context } = require("@opentelemetry/api");
 const { getRequestIdHeader } = require("../utils/correlationId");
 const { generateWebhookSignature } = require("../utils/webhookSignature");
 const { encryptSecret, decryptSecret } = require("../utils/encryption");
+
 const knex = require("../db/connection");
 require("dotenv").config();
 
 // Lazy-loaded to avoid circular dependency at parse time
+function getNotificationService() {
+  try {
+    return require('./notificationService');
+  } catch {
+    return null;
+  }
+}
+
 function getCache() {
   try {
     return require("./cacheService");
@@ -551,6 +560,16 @@ function startMonitoring(webhook) {
           return promise;
         });
         await Promise.allSettled(deliveries);
+
+        // Also trigger email notifications for this event
+        var ns = getNotificationService(); if (ns) ns.notifySubscribers("payment_received", {
+          amount: payment.amount,
+          asset: payment.asset_type === "native" ? "XLM" : payment.asset_code,
+          sender: payment.from,
+          recipient: payment.to,
+          timestamp: payment.created_at,
+          txHash: payment.transaction_hash,
+        }).catch(() => {});
       },
       onerror: (err) => {
         logger.error({

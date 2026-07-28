@@ -43,7 +43,9 @@
     "rate-limit-redis": "4.3.1",
     "swagger-jsdoc": "^6.3.0",
     "swagger-ui-express": "^5.0.1",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "handlebars": "^4.7.8",
+    "nodemailer": "^6.9.14"
   },
   "devDependencies": {
     "eslint": "^8.57.0",
