@@ -149,7 +149,8 @@
     "balanceTrendUpward": "Tendance du solde : à la hausse",
     "balanceTrendDownward": "Tendance du solde : à la baisse",
     "balanceLive": "En direct",
-    "balancePolling": "Mise a jour toutes les 30 s"
+    "balancePolling": "Mise a jour toutes les 30 s",
+    "viewPortfolio": "Voir le portefeuille →"
   },
   "portfolio": {
     "title": "Portefeuille",
