@@ -12,12 +12,12 @@ import {
   getActiveStreamsForRecipient,
   getCurrentLedger,
   computeStreamClaimable,
-  buildClaimStreamTransaction,
   submitTransaction,
   STELLAR_STROOPS_PER_XLM,
   shortenAddress,
   type StreamRecord,
 } from "@/lib/stellar";
+import { getClient } from "@/lib/soroban";
 import { signTransactionWithWallet } from "@/lib/wallet";
 import { useCountUp } from "@/lib/useCountUp";
 import { useToastContext } from "@/lib/ToastContext";
@@ -64,7 +64,8 @@ export default function StreamingPayments({ publicKey }: StreamingPaymentsProps)
   const handleClaim = async (streamId: number) => {
     setClaimingId(streamId);
     try {
-      const tx = await buildClaimStreamTransaction(publicKey, streamId);
+      const client = getClient();
+      const tx = await client.buildClaimStreamTx(streamId, publicKey);
       const { signedXDR, error: signError } = await signTransactionWithWallet(tx.toXDR());
       if (signError || !signedXDR) {
         throw new Error(signError || "Signing was rejected.");

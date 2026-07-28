@@ -10,19 +10,18 @@ import Head from "next/head";
 import { useState, useEffect } from "react";
 import WalletConnect from "@/components/WalletConnect";
 import { useWallet } from "@/lib/useWallet";
+import { getClient } from "@/lib/soroban";
 import {
-  buildCreateEscrowTransaction,
-  buildClaimEscrowTransaction,
-  buildCancelEscrowTransaction,
-  getEscrow,
   getCurrentLedger,
   submitTransaction,
   isValidStellarAddress,
   getXLMBalance,
+  getEscrow as getStellarEscrow,
   CONTRACT_ID,
+  NETWORK_PASSPHRASE,
   EscrowRecord,
 } from "@/lib/stellar";
-import { Horizon } from "@stellar/stellar-sdk";
+import { Horizon, Asset } from "@stellar/stellar-sdk";
 import { signTransactionWithWallet } from "@/lib/wallet";
 
 type LookupState =
@@ -45,7 +44,7 @@ export default function EscrowPage({ walletPublicKey, services }: EscrowPageProp
   const publicKey = walletPublicKey === undefined ? connectedPublicKey : walletPublicKey;
   const loadXLMBalance = services?.getXLMBalance ?? getXLMBalance;
   const loadCurrentLedger = services?.getCurrentLedger ?? getCurrentLedger;
-  const loadEscrow = services?.getEscrow ?? getEscrow;
+  const loadEscrow = services?.getEscrow ?? getStellarEscrow;
 
   // Create-escrow form state.
   const [recipient, setRecipient] = useState("");
@@ -62,6 +61,15 @@ export default function EscrowPage({ walletPublicKey, services }: EscrowPageProp
   const [lookup, setLookup] = useState<LookupState>({ kind: "idle" });
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionPending, setActionPending] = useState<null | "claim" | "cancel">(null);
+
+  // Soroban client instance (lazy singleton)
+  const getSorobanClient = () => {
+    try {
+      return getClient();
+    } catch {
+      return null;
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -108,12 +116,17 @@ export default function EscrowPage({ walletPublicKey, services }: EscrowPageProp
     setCreateError(null);
     setCreatedId(null);
     try {
-      const tx = await buildCreateEscrowTransaction({
-        fromPublicKey: publicKey,
-        toPublicKey: recipient,
+      const client = getSorobanClient();
+      if (!client) throw new Error("Soroban client not available. Check NEXT_PUBLIC_CONTRACT_ID.");
+
+      const xlmContractId = Asset.native().contractId(NETWORK_PASSPHRASE);
+      const { tx } = await client.buildCreateEscrowTx(
+        xlmContractId,
+        publicKey,
+        recipient,
         amount,
-        releaseLedger: parseInt(releaseLedger, 10),
-      });
+        parseInt(releaseLedger, 10),
+      );
       const { signedXDR, error: signError } = await signTransactionWithWallet(tx.toXDR());
       if (signError || !signedXDR) {
         throw new Error(signError || "Transaction signing was rejected.");
@@ -145,10 +158,11 @@ export default function EscrowPage({ walletPublicKey, services }: EscrowPageProp
     setLookup({ kind: "loading" });
     setActionError(null);
     try {
-      const [escrow, ledger] = await Promise.all([
-        loadEscrow(publicKey, id),
-        loadCurrentLedger(),
-      ]);
+      const client = getSorobanClient();
+      const escrow = client
+        ? await client.getEscrow(id, publicKey)
+        : await loadEscrow(publicKey, id);
+      const ledger = await loadCurrentLedger();
       if (!escrow) {
         setLookup({ kind: "missing" });
         return;
@@ -169,10 +183,12 @@ export default function EscrowPage({ walletPublicKey, services }: EscrowPageProp
     setActionPending(action);
     setActionError(null);
     try {
-      const builder = action === "claim"
-        ? buildClaimEscrowTransaction
-        : buildCancelEscrowTransaction;
-      const tx = await builder(publicKey, lookup.escrow.id);
+      const client = getSorobanClient();
+      if (!client) throw new Error("Soroban client not available.");
+
+      const tx = action === "claim"
+        ? await client.buildClaimEscrowTx(lookup.escrow.id, publicKey)
+        : await client.buildCancelEscrowTx(lookup.escrow.id, publicKey);
       const { signedXDR, error: signError } = await signTransactionWithWallet(tx.toXDR());
       if (signError || !signedXDR) {
         throw new Error(signError || "Transaction signing was rejected.");
