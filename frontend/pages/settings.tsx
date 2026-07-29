@@ -26,6 +26,7 @@ import AccountSettings from "@/components/AccountSettings";
 import NotificationPreferences from "@/components/NotificationPreferences";
 import NotificationHistory from "@/components/NotificationHistory";
 import { useWallet } from "@/lib/useWallet";
+import ThemeSettings from "@/components/ThemeSettings";
 
 interface SettingsPageProps {
   publicKey?: string | null;
@@ -387,6 +388,17 @@ export default function SettingsPage({
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Appearance / Theme Settings */}
+            <div className="bg-white dark:bg-cosmos-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
+                Appearance
+              </h2>
+              <p className="text-sm text-slate-400 dark:text-slate-400 mb-4">
+                Customise your theme, accent colours, and font size.
+              </p>
+              <ThemeSettings />
             </div>
 
             {/* Notification Preferences */}

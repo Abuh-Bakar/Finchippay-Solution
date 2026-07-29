@@ -163,7 +163,7 @@ export default function Navbar({ onTakeTour }: NavbarProps) {
   };
 
   return (
-    <nav className="sticky top-0 z-50 border-b border-[rgba(14,165,233,0.12)] bg-white/80 backdrop-blur-xl transition-colors duration-300 dark:bg-cosmos-900/80">
+    <nav className="sticky top-0 z-50 border-b border-[var(--color-accent-border)] bg-[var(--color-bg-surface)]/80 backdrop-blur-xl transition-colors duration-300">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
         <div className="flex items-center gap-4">
           <Link href="/" className="group flex items-center gap-2">
@@ -357,7 +357,7 @@ export default function Navbar({ onTakeTour }: NavbarProps) {
 
       {/* Mobile Menu Dropdown */}
       {isMobileMenuOpen && (
-        <div className="absolute left-0 right-0 top-full border-b border-[rgba(14,165,233,0.12)] bg-white p-4 shadow-lg dark:bg-cosmos-900 md:hidden">
+        <div className="absolute left-0 right-0 top-full border-b border-[var(--color-accent-border)] bg-[var(--color-bg-surface)] p-4 shadow-lg md:hidden">
           <div className="flex flex-col gap-2">
             {navLinks.map((link) => (
               <Link

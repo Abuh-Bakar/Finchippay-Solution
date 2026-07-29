@@ -38,7 +38,7 @@ export default function App({ Component, pageProps }: AppProps) {
   const [stellarURI, setStellarURI] = useState<URIParseResult | null>(null);
   const [isQuickSendOpen, setIsQuickSendOpen] = useState(false);
   useEffect(() => { initSdkAuth(); }, []);
-  useEffect(() => { const saved = localStorage.getItem("finchippay:theme") as "dark" | "light" | null; const preferred = saved ?? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); document.documentElement.classList.toggle("dark", preferred === "dark"); }, []);
+  useEffect(() => { try { const raw = localStorage.getItem("finchippay:theme"); if (raw) { const parsed = JSON.parse(raw); if (parsed.mode === "dark" || (parsed.mode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches)) { document.documentElement.classList.add("dark"); } else if (parsed.mode === "light") { document.documentElement.classList.remove("dark"); } if (parsed.accent) document.documentElement.dataset.accent = parsed.accent; if (parsed.fontSize) document.documentElement.dataset.fontSize = parsed.fontSize; } } catch {} }, []);
   useEffect(() => { const uriResult = getStellarURIFromURL(); if (uriResult) setStellarURI(uriResult); }, []);
   useEffect(() => { registerProtocolHandler(); }, []);
   return (
@@ -64,7 +64,7 @@ function AppShellInner({ Component, pageProps, stellarURI, isQuickSendOpen, setI
   const tour = useOnboardingTour();
   return (
     <MotionConfig reducedMotion="user">
-      <div className="min-h-screen bg-white bg-grid transition-colors duration-300 dark:bg-cosmos-900">
+      <div className="min-h-screen bg-[var(--color-bg-primary)] bg-grid transition-colors duration-300">
         <OfflineBanner /><Navbar onTakeTour={tour.startTour} /><OnboardingTour tour={tour} />
         <main className="pb-20 md:pb-0"><AnimatePresence mode="wait"><motion.div key={router.route} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}><Component {...pageProps} stellarURI={stellarURI} /></motion.div></AnimatePresence></main>
         <MobileBottomNav />
