@@ -47,6 +47,7 @@ const MultiSigFlow = dynamic(() => import("../components/MultiSigFlow"), {
   loading: () => <Skeleton height="h-64" />,
 });
 const OnboardingTour = dynamic(() => import("../components/OnboardingTour"), { ssr: false });
+const FeatureTour = dynamic(() => import("../components/FeatureTour"), { ssr: false });
 const BatchPaymentForm = dynamic(() => import("../components/BatchPaymentForm"), {
   ssr: false,
   loading: () => <Skeleton height="h-64" />,
@@ -101,6 +102,8 @@ import { URIParseResult, uriToPrefillData } from "@/lib/sep0007";
 import { useWallet } from "@/lib/useWallet";
 import DashboardPortfolioWidget from "@/components/DashboardPortfolioWidget";
 import { useBalanceStream } from "@/lib/useBalanceStream";
+import FeatureAnnouncement from "@/components/FeatureAnnouncement";
+import type { Step } from "react-joyride";
 
 interface DashboardProps {
   stellarURI?: URIParseResult | null;
@@ -179,6 +182,25 @@ function formatSnapshotTime(savedAt: number) {
   });
 }
 
+const BATCH_PAYMENTS_FEATURE_ID = "batch-payments-v1";
+
+const BATCH_PAYMENTS_TOUR_STEPS: Step[] = [
+  {
+    target: '[data-tour="batch-send-tab"]',
+    title: "Batch Payments",
+    content: "Switch to this tab to send XLM to multiple recipients in a single transaction.",
+    placement: "bottom",
+    disableBeacon: true,
+  },
+  {
+    target: '[data-tour="batch-payment-form"]',
+    title: "Add recipients",
+    content: "Add each recipient's address and amount, then review and sign once to send them all together.",
+    placement: "right",
+    disableBeacon: true,
+  },
+];
+
 export default function Dashboard({ stellarURI }: DashboardProps) {
   const { publicKey } = useWallet();
   const { t } = useTranslation("common");
@@ -220,6 +242,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
 
   const router = useRouter();
   const [activePaymentTab, setActivePaymentTab] = useState<"single" | "batch">("single");
+  const [showBatchFeatureTour, setShowBatchFeatureTour] = useState(false);
 
   // Build prefill object from query parameters.
   // Supports legacy ?prefillDestination= (contacts page) and
@@ -1393,6 +1416,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
               </button>
               <button
                 type="button"
+                data-tour="batch-send-tab"
                 onClick={() => setActivePaymentTab("batch")}
                 className={`rounded-3xl px-4 py-2 text-sm font-semibold transition ${
                   activePaymentTab === "batch"
@@ -1422,11 +1446,13 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
               }
             />
           ) : (
-            <BatchPaymentForm
-              publicKey={publicKey}
-              xlmBalance={xlmBalance || "0"}
-              onBatchSuccess={handlePaymentSuccess}
-            />
+            <div data-tour="batch-payment-form">
+              <BatchPaymentForm
+                publicKey={publicKey}
+                xlmBalance={xlmBalance || "0"}
+                onBatchSuccess={handlePaymentSuccess}
+              />
+            </div>
           )}
         </div>
 
@@ -1474,6 +1500,23 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
         isVisible={showOnboardingTour}
         onComplete={handleTourComplete}
         onSkip={handleTourSkip}
+      />
+      {!showOnboardingTour && !showBatchFeatureTour && (
+        <FeatureAnnouncement
+          featureId={BATCH_PAYMENTS_FEATURE_ID}
+          title="New: Batch Payments!"
+          description="Send XLM to multiple recipients at once, in a single transaction."
+          onStartTour={() => {
+            setActivePaymentTab("batch");
+            setShowBatchFeatureTour(true);
+          }}
+        />
+      )}
+      <FeatureTour
+        featureId={BATCH_PAYMENTS_FEATURE_ID}
+        steps={BATCH_PAYMENTS_TOUR_STEPS}
+        isVisible={showBatchFeatureTour}
+        onClose={() => setShowBatchFeatureTour(false)}
       />
     </StaggerContainer>
   );
