@@ -2,6 +2,7 @@
 
 const rateLimit = require("express-rate-limit");
 const { formatErrorResponse } = require("../../../shared/errorCodes");
+const logger = require("../utils/logger");
 const {
   createRateLimitHandler,
   recordRateLimitAllowed,
@@ -9,6 +10,8 @@ const {
 
 let redisClient;
 let RedisStore;
+
+const logger = require("../utils/logger");
 
 if (process.env.REDIS_URL) {
   const Redis = require("ioredis");
@@ -20,7 +23,7 @@ if (process.env.REDIS_URL) {
   });
 
   redisClient.on("error", (err) => {
-    console.error("Redis rate-limit client error:", err);
+    logger.error({ err }, "Redis rate-limit client error");
   });
 }
 
@@ -93,8 +96,22 @@ const sensitiveLimiter = createInstrumentedLimiter(
   "sensitive",
 );
 
+const authRefreshLimiter = createInstrumentedLimiter(
+  {
+    windowMs: 1 * 60 * 1000,
+    limit: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: formatErrorResponse("RATE_LIMITED_SENSITIVE"),
+    ...(redisClient ? { store: createRedisStore("authRefresh") } : {}),
+  },
+  "authRefresh",
+);
+
 module.exports = {
   createInstrumentedLimiter,
   sensitiveLimiter,
   strictLimiter,
+  authRefreshLimiter,
 };
+

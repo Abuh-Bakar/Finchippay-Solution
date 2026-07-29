@@ -3,6 +3,8 @@ name = "finchippay-contract-fuzz"
 version = "0.0.0"
 edition = "2021"
 publish = false
+publish = false
+edition = "2021"
 
 [package.metadata]
 cargo-fuzz = true
@@ -44,3 +46,51 @@ name = "fuzz_target_4_batch_send"
 path = "fuzz_targets/fuzz_target_4_batch_send.rs"
 test = false
 doc = false
+[[bin]]
+name = "open_stream"
+path = "fuzz_targets/open_stream.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "claim_stream"
+path = "fuzz_targets/claim_stream.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "create_escrow"
+path = "fuzz_targets/create_escrow.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "claim_escrow"
+path = "fuzz_targets/claim_escrow.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "batch_send"
+path = "fuzz_targets/batch_send.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "create_multisig"
+path = "fuzz_targets/create_multisig.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "approve_multisig"
+path = "fuzz_targets/approve_multisig.rs"
+test = false
+doc = false
+bench = false

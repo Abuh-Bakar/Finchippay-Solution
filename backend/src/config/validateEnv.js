@@ -5,6 +5,8 @@
 
 "use strict";
 
+const logger = require("../utils/logger");
+
 const VALID_NETWORKS = ["testnet", "mainnet"];
 
 /**
@@ -64,6 +66,13 @@ function parseAllowedOrigins(raw) {
 }
 
 function collectErrors(env) {
+  if (!env.JWT_SECRET && env.NODE_ENV === 'production') {
+    throw new Error('FATAL: JWT_SECRET must be set in production.');
+  }
+  if (env.JWT_SECRET === 'finchippay_secret_key') {
+    throw new Error('FATAL: JWT_SECRET is set to the insecure default value.');
+  }
+
   const errors = [];
 
   // Database provider validation
@@ -198,6 +207,86 @@ function collectErrors(env) {
       errors.push(`ANCHORS_CONFIG must be valid JSON: ${err.message}`);
     }
   }
+
+  // WEBHOOK_ENCRYPTION_KEY is required in production for encrypting webhook secrets at rest.
+  // SMTP configuration for email notifications
+  // SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM are validated at runtime in notificationService.js
+  if (env.NODE_ENV === "production" && !env.WEBHOOK_ENCRYPTION_KEY?.trim()) {
+  // SMTP configuration for email notifications
+  // SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM are validated at runtime in notificationService.js
+    errors.push(
+      'WEBHOOK_ENCRYPTION_KEY is required in production — generate one with: openssl rand -hex 32',
+  // SMTP configuration for email notifications
+  // SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM are validated at runtime in notificationService.js
+    );
+  }
+
+  // BODY_LIMIT_JSON is optional (default: "1mb").
+  if (env.BODY_LIMIT_JSON) {
+    const val = String(env.BODY_LIMIT_JSON).trim();
+    const match = val.match(/^(\d+)(kb|mb|gb)$/i);
+    if (!match) {
+      errors.push(
+        `BODY_LIMIT_JSON must be a valid size string (e.g. "1mb", "512kb"), got "${val}"`,
+      );
+    }
+  }
+
+  // BODY_LIMIT_URLENCODED is optional (default: "100kb").
+  if (env.BODY_LIMIT_URLENCODED) {
+    const val = String(env.BODY_LIMIT_URLENCODED).trim();
+    const match = val.match(/^(\d+)(kb|mb|gb)$/i);
+    if (!match) {
+      errors.push(
+        `BODY_LIMIT_URLENCODED must be a valid size string (e.g. "100kb", "1mb"), got "${val}"`,
+      );
+    }
+  }
+
+  // CSV_UPLOAD_MAX_SIZE is optional (default: 10485760 for 10MB).
+  if (env.CSV_UPLOAD_MAX_SIZE) {
+    const val = parseInt(env.CSV_UPLOAD_MAX_SIZE, 10);
+    if (isNaN(val) || val < 1) {
+      errors.push(
+        `CSV_UPLOAD_MAX_SIZE must be a positive integer (bytes), got "${env.CSV_UPLOAD_MAX_SIZE}"`,
+      );
+    }
+  }
+
+  // VAPID keys are optional — without them pushService degrades to a no-op and
+  // the app never offers notifications. They are validated as a set, because a
+  // half-configured pair is a silent misconfiguration: the client would be
+  // handed a public key for pushes the server cannot actually sign.
+  const vapidPublic = String(env.VAPID_PUBLIC_KEY || "").trim();
+  const vapidPrivate = String(env.VAPID_PRIVATE_KEY || "").trim();
+
+  if (vapidPublic && !vapidPrivate) {
+    errors.push(
+      "VAPID_PRIVATE_KEY is required when VAPID_PUBLIC_KEY is set (push notifications need both)",
+    );
+  }
+
+  if (vapidPrivate && !vapidPublic) {
+    errors.push(
+      "VAPID_PUBLIC_KEY is required when VAPID_PRIVATE_KEY is set (push notifications need both)",
+    );
+  }
+
+  // VAPID_SUBJECT identifies the sender to the push service; RFC 8292 requires
+  // a mailto: or https: URI.
+  if (env.VAPID_SUBJECT) {
+    const subject = String(env.VAPID_SUBJECT).trim();
+    if (
+      subject.length > 0 &&
+      !subject.startsWith("mailto:") &&
+      !subject.startsWith("https://")
+    ) {
+      errors.push(
+        `VAPID_SUBJECT must be a mailto: or https:// URL, got "${subject}"`,
+      );
+    }
+  }
+
   return errors;
 }
 
@@ -214,13 +303,12 @@ function validateEnv(env = process.env) {
     return;
   }
 
-  console.error("\nEnvironment validation failed:\n");
-  for (const message of errors) {
-    console.error(`  - ${message}`);
-  }
-  console.error(
-    "\nCopy backend/.env.example to backend/.env and set the required values.\n",
+  logger.error(
+    { errors, count: errors.length },
+    "Environment validation failed — copy backend/.env.example to backend/.env and set the required values",
   );
+  const logger = require("../utils/logger");
+  logger.fatal({ errors }, "Environment validation failed. Copy backend/.env.example to backend/.env and set the required values.");
   process.exit(1);
 }
 

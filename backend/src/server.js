@@ -24,7 +24,7 @@ require("./config/fetchInterceptor");
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
-const pinoHttp = require("pino-http");
+const requestLogger = require("./middleware/requestLogger");
 const rateLimit = require("express-rate-limit");
 const Sentry = require("@sentry/node");
 const { formatErrorResponse, ERROR_CODES } = require("../../shared/errorCodes");
@@ -32,6 +32,7 @@ const { formatErrorResponse, ERROR_CODES } = require("../../shared/errorCodes");
 const accountRoutes = require("./routes/accounts");
 const authRoutes = require("./routes/auth");
 const paymentRoutes = require("./routes/payments");
+const receiptsRoutes = require("./routes/receipts");
 const analyticsRoutes = require("./routes/analytics");
 const healthRoutes = require("./routes/health");
 const federationRoutes = require("./routes/federation");
@@ -44,8 +45,12 @@ const sep24Routes = require("./routes/sep24");
 const sep12Routes = require("./routes/sep12");
 const sep38Routes = require("./routes/sep38");
 const eventRoutes = require("./routes/events");
+const notificationRoutes = require("./routes/notifications");
 const featuresRoutes = require("./routes/features");
 const adminFeatureFlagsRoutes = require("./routes/adminFeatureFlags");
+const tokensRoutes = require("./routes/tokens");
+const pushRoutes = require("./routes/push");
+const contactRoutes = require("./routes/contacts");
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./swagger");
 const { startTurretsServer } = require("./turretsServer");
@@ -53,7 +58,11 @@ const eventIndexer = require("./services/eventIndexer");
 const {
   startRetryWorker,
   closeAllStreams: closeWebhookStreams,
-} = require("./services/webhookService");
+} = require("./services/webhookSubscriptionService");
+const {
+  startCleanupWorker,
+  stopCleanupWorker,
+} = require("./services/eventCleanupService");
 const logger = require("./utils/logger");
 const { validateEnv, parseAllowedOrigins } = require("./config/validateEnv");
 const { requireJsonContentType } = require("./middleware/bodyParsing");
@@ -65,6 +74,7 @@ const {
 } = require("./utils/correlationId");
 const { errorLogFields } = require("./utils/errorResponse");
 const { initRedis, closeRedis } = require("./services/cacheService");
+const shutdownState = require("./services/shutdownState");
 const {
   closeAll: closeBalanceStreams,
 } = require("./services/balanceStreamService");
@@ -148,54 +158,40 @@ function getFederationServerUrl(req) {
  * The backend serves no HTML pages of its own except Swagger UI at /api/docs,
  * so the policy is intentionally restrictive.
  */
-const helmetOptions = {
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", "data:"],
-      connectSrc: ["'self'"],
-      fontSrc: ["'self'"],
-      objectSrc: ["'none'"],
-      frameSrc: ["'none'"],
-    },
-  },
-};
+const securityHeaders = require("./middleware/securityHeaders");
+const corsConfig = require("./middleware/corsConfig");
 
-app.use(helmet(helmetOptions));
+app.use(securityHeaders);
+app.use(corsConfig);
 // Prometheus HTTP metrics — track duration & count for every request.
 app.use(trackHttpMetrics);
 // Correlation ID middleware — generates/adopts X-Request-ID, stores in ALS.
 app.use(correlationMiddleware);
 app.use(traceContextMiddleware);
 app.use(correlationIdMiddleware);
-// Structured JSON request logging (#269) — machine-parseable JSON logs.
-app.use(
-  pinoHttp({
-    logger,
-    genReqId: (req) => req.id || crypto.randomUUID(),
-    customProps: () => {
-      const requestId = getRequestId();
-      const correlationId = correlationIdMiddleware.getCorrelationId();
-      return { ...(requestId ? { requestId } : {}), ...(correlationId ? { correlationId } : {}) };
-    },
-  }),
-);
+// Structured JSON request logging
+app.use(requestLogger);
 
 // Content-Type enforcement (#81)
 app.use(requireJsonContentType);
 
-// JSON body size limits (#81) — turrets gets larger limit for txFunction payloads.
+// JSON body size limits (#81, #353) — configurable via env vars.
+// Apply standard body parsing with env-configured limits.
+const { bodyParsing } = require("./middleware/bodyParsing");
+bodyParsing(app);
+// /api/turrets gets a larger limit for txFunction payloads.
 app.use("/api/turrets", express.json({ limit: "512kb" }));
-app.use(express.json({ limit: "100kb" }));
 
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
     return res.status(400).json({ error: "Invalid JSON body" });
   }
   if (err.type === "entity.too.large" || err.status === 413) {
-    return res.status(413).json({ error: "Request body too large" });
+    const limit = err.limit || "unknown";
+    return res.status(413).json({
+      error: "PAYLOAD_TOO_LARGE",
+      message: `Request body exceeds the ${limit} limit.`,
+    });
   }
   next();
 });
@@ -215,7 +211,9 @@ app.use(
       }
     },
     methods: ["GET", "POST", "DELETE"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    // traceparent/tracestate: W3C Trace Context headers the frontend's
+    // OpenTelemetry instrumentation attaches to every fetch() call.
+    allowedHeaders: ["Content-Type", "Authorization", "traceparent", "tracestate"],
     credentials: true,
   }),
 );
@@ -259,6 +257,7 @@ app.use(limiter);
 app.use("/api/auth", authRoutes);
 app.use("/api/accounts", accountRoutes);
 app.use("/api/payments", paymentRoutes);
+app.use("/api/receipts", receiptsRoutes);
 app.use("/api/webhooks", webhookRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/turrets", turretsRoutes);
@@ -266,11 +265,14 @@ app.use("/api/tips", tipsRoutes);
 app.use("/api/parse-payment", parsePaymentRoutes);
 app.use("/api/scheduled-transactions", scheduledTransactionRoutes);
 app.use("/api/events", eventRoutes);
+app.use("/api/notifications", notificationRoutes);
 app.use("/api/sep24", sep24Routes);
 app.use("/api/sep12", sep12Routes);
 app.use("/sep38", sep38Routes);
+app.use("/api/push", pushRoutes);
 app.use("/api/features", featuresRoutes);
 app.use("/api/admin/feature-flags", adminFeatureFlagsRoutes);
+app.use("/api/v1/tokens", tokensRoutes);
 app.use("/federation", federationRoutes);
 app.use("/metrics", metricsRoutes);
 
@@ -334,14 +336,35 @@ app.use((err, req, res, next) => {
   res.status(status).json(fallback);
 });
 
-// ─── Graceful shutdown ────────────────────────────────────────────────        
+// ─── Graceful shutdown ────────────────────────────────────────────────
+
+// How long to wait after readiness starts failing before tearing down
+// background workers and exiting — gives Kubernetes time to observe the
+// failed readiness probe and stop routing new traffic (readinessProbe
+// periodSeconds: 10 in kubernetes/backend/deployment.yaml).
+const SHUTDOWN_DRAIN_MS = parseInt(process.env.SHUTDOWN_DRAIN_MS, 10) || 10_000;
 
 async function gracefulShutdown(signal, server, otelSdk) {
   logger.info({ signal }, "Received shutdown signal — draining…");
 
+  // Fail readiness immediately so /api/health/ready starts returning 503
+  // before any in-flight work is torn down.
+  shutdownState.markShuttingDown();
+
   server.close((err) => {
     if (err) logger.error({ err }, "Error closing HTTP server");
   });
+
+  // Give Kubernetes time to observe the failed readiness probe and drain
+  // in-flight requests before workers are stopped and the process exits.
+  await new Promise((resolve) => setTimeout(resolve, SHUTDOWN_DRAIN_MS));
+
+  // 1. Stop scheduled executor
+  try {
+    require("./services/scheduledExecutor").stop();
+  } catch (err) {
+    logger.error({ err }, "Error stopping scheduled executor");
+  }
 
   // 2. Close webhook Horizon SSE streams (stops retry worker, waits for deliveries)
   try {
@@ -411,9 +434,15 @@ if (require.main === module) {
       .catch((err) => {
         logger.error({ err }, "Failed to load active scheduled transactions");
       });
+    // Start scheduled transaction executor
+    require("./services/scheduledExecutor").start();
     require("./services/dataRetentionService").startRetentionCron();
     const server = app.listen(PORT, () => {
-      console.log(`
+      logger.info(
+        { port: PORT, network: process.env.STELLAR_NETWORK || "testnet" },
+        "Finchippay Solution API server started",
+      );
+      logger.info(`
  ✨ Finchippay Solution API
  🚀 Server running at http://localhost:${PORT}
  🌐 Network: ${process.env.STELLAR_NETWORK || "testnet"}
