@@ -82,9 +82,9 @@ pub enum ContractError {
     /// The recipient's escrow index already holds `MAX_USER_ESCROWS` entries.
     IndexFull = 18,
     /// The emergency withdrawal has not yet reached its activation ledger.
-    EmergencyWithdrawalNotReady = 18,
+    EmergencyWithdrawalNotReady = 19,
     /// The caller is not an authorised admin signer for this withdrawal.
-    NotAdminSigner = 19,
+    NotAdminSigner = 20,
 }
 
 // ─── Shared data types ────────────────────────────────────────────────────────
@@ -189,6 +189,8 @@ pub struct Stream {
     pub start_ledger: u32,
     /// True once the payer has closed the stream.
     pub closed: bool,
+    pub paused_at_ledger: u32,
+    pub total_paused_duration: u32,
 }
 
 /// Pure arithmetic core of the streaming payment formula, factored out of
@@ -198,11 +200,26 @@ pub struct Stream {
 /// Does not account for `stream.closed` — callers that care about closed
 /// streams (i.e. the contract itself) check that separately.
 pub fn claimable_at(stream: &Stream, current_ledger: u32) -> i128 {
-    let elapsed = current_ledger.saturating_sub(stream.start_ledger) as i128;
+    if current_ledger <= stream.start_ledger || stream.closed {
+        return 0;
+    }
+
+    let active_paused_duration = if stream.paused_at_ledger > 0 {
+        current_ledger.saturating_sub(stream.paused_at_ledger)
+    } else {
+        0
+    };
+
+    let effective_elapsed = current_ledger
+        .saturating_sub(stream.start_ledger)
+        .saturating_sub(stream.total_paused_duration)
+        .saturating_sub(active_paused_duration);
+
     let total_streamed = stream
         .rate_per_ledger
-        .checked_mul(elapsed)
+        .checked_mul(effective_elapsed as i128)
         .expect("overflow");
+
     let capped = total_streamed.min(stream.deposited);
     (capped - stream.claimed).max(0)
 }
@@ -348,7 +365,7 @@ const MAX_ADMIN_SIGNERS: u32 = 20;
 /// or any persistent struct field layout changes. The admin must call
 /// `validate_storage_compatibility` before upgrading to ensure the new WASM
 /// declares a layout version >= this value, preventing bricked storage.
-const STORAGE_LAYOUT_VERSION: u32 = 1;
+const STORAGE_LAYOUT_VERSION: u32 = 2;
 
 // ─── Storage key enum ─────────────────────────────────────────────────────────
 
@@ -1906,6 +1923,8 @@ impl FinchippayContract {
             claimed: 0,
             start_ledger: env.ledger().sequence(),
             closed: false,
+            paused_at_ledger: 0,
+            total_paused_duration: 0,
         };
         increase_locked_balance(&env, &stream.token, deposit);
         env.storage()
