@@ -50,6 +50,7 @@ const featuresRoutes = require("./routes/features");
 const adminFeatureFlagsRoutes = require("./routes/adminFeatureFlags");
 const tokensRoutes = require("./routes/tokens");
 const pushRoutes = require("./routes/push");
+const contactRoutes = require("./routes/contacts");
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./swagger");
 const { startTurretsServer } = require("./turretsServer");
