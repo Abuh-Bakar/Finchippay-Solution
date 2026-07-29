@@ -56,6 +56,7 @@ import clsx from "clsx";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useToastContext } from "@/lib/ToastContext";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 
 interface SendPaymentFormProps {
   publicKey: string;
@@ -160,6 +161,10 @@ function SendPaymentForm({
   const [isScannerSupported, setIsScannerSupported] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scannerError, setScannerError] = useState<string | null>(null);
+  const scannerPanelRef = useFocusTrap<HTMLDivElement>({
+    active: isScannerOpen,
+    onEscape: () => closeScanner(),
+  });
   const [destAccountWarning, setDestAccountWarning] = useState<string | null>(null);
   const [isCheckingDest, setIsCheckingDest] = useState(false);
   const [selectedFeeStroops, setSelectedFeeStroops] = useState<number>(100);
@@ -1192,7 +1197,7 @@ function SendPaymentForm({
 
       {isScannerOpen && (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 p-4" role="dialog" aria-modal="true" aria-label="QR code scanner">
-          <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 shadow-2xl overflow-hidden">
+          <div ref={scannerPanelRef} tabIndex={-1} className="w-full max-w-sm rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 shadow-2xl overflow-hidden outline-none">
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-white/5">
               <h3 className="font-display text-sm font-semibold text-slate-900 dark:text-white">Scan QR Code</h3>
               <button onClick={closeScanner} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors p-1 rounded-lg hover:bg-slate-50 dark:hover:bg-white/5" aria-label="Close scanner">
@@ -1243,11 +1248,12 @@ interface SendConfirmationModalProps {
 }
 
 function SendConfirmationModal({ isOpen, destination, amount, asset, memo, estimatedFee, isTipOnChain, onCancel, onConfirm, t }: SendConfirmationModalProps) {
+  const panelRef = useFocusTrap<HTMLDivElement>({ active: isOpen, onEscape: onCancel });
   if (!isOpen) return null;
   const shortened = shortenAddress(destination, 8);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="confirm-payment-title">
-      <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 p-6 border border-slate-200 dark:border-white/10 shadow-2xl">
+      <div ref={panelRef} tabIndex={-1} className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 p-6 border border-slate-200 dark:border-white/10 shadow-2xl outline-none">
         <h3 id="confirm-payment-title" className="text-xl font-bold text-slate-900 dark:text-white mb-4">{t("sendPayment.confirmPayment")}</h3>
         <div className="space-y-4">
           <div>
