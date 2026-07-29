@@ -82,9 +82,18 @@ pub enum ContractError {
     /// The recipient's escrow index already holds `MAX_USER_ESCROWS` entries.
     IndexFull = 18,
     /// The emergency withdrawal has not yet reached its activation ledger.
-    EmergencyWithdrawalNotReady = 18,
+    EmergencyWithdrawalNotReady = 24,
     /// The caller is not an authorised admin signer for this withdrawal.
     NotAdminSigner = 19,
+    /// The supplied swap `path` is malformed: fewer than 2 addresses, or its
+    /// first/last entries don't match `token_in`/`token_out`.
+    InvalidPath = 20,
+    /// The swap would return less than the caller's `min_amount_out`.
+    SlippageExceeded = 21,
+    /// The input required to satisfy an exact-output swap exceeds `max_amount_in`.
+    ExcessiveAmountIn = 22,
+    /// `new_fee_bps` exceeds `MAX_SWAP_FEE_BPS`.
+    InvalidFeeBps = 23,
 }
 
 // ─── Shared data types ────────────────────────────────────────────────────────
@@ -349,6 +358,12 @@ const MAX_ADMIN_SIGNERS: u32 = 20;
 /// `validate_storage_compatibility` before upgrading to ensure the new WASM
 /// declares a layout version >= this value, preventing bricked storage.
 const STORAGE_LAYOUT_VERSION: u32 = 1;
+/// Default protocol swap fee: 30 basis points (0.3%), applied to `amount_in`.
+const DEFAULT_SWAP_FEE_BPS: u32 = 30;
+/// Maximum swap fee an admin may configure: 1000 basis points (10%).
+const MAX_SWAP_FEE_BPS: u32 = 1000;
+/// Denominator for basis-point fee math (10_000 bps = 100%).
+const BPS_DENOMINATOR: i128 = 10_000;
 
 // ─── Storage key enum ─────────────────────────────────────────────────────────
 
@@ -395,6 +410,11 @@ pub enum DataKey {
     AdminSigners,
     /// Number of admin approvals required for emergency withdrawal execution.
     AdminSignersThreshold,
+    // Swap / DEX
+    /// Address that receives protocol swap fees. Defaults to the admin if unset.
+    FeeCollector,
+    /// Swap fee in basis points (1 bp = 0.01%). Defaults to `DEFAULT_SWAP_FEE_BPS`.
+    SwapFee,
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -549,6 +569,74 @@ fn get_admin_signers_threshold(env: &Env) -> u32 {
         .expect("admin signers threshold not configured");
     bump(env, &key);
     threshold
+}
+
+// ─── Swap helpers ─────────────────────────────────────────────────────────────
+
+/// Current swap fee in basis points. Falls back to `DEFAULT_SWAP_FEE_BPS` if
+/// the admin has never called `set_swap_fee`.
+fn get_swap_fee_bps(env: &Env) -> u32 {
+    let key = DataKey::SwapFee;
+    if env.storage().persistent().has(&key) {
+        let fee: u32 = env.storage().persistent().get(&key).unwrap();
+        bump(env, &key);
+        fee
+    } else {
+        DEFAULT_SWAP_FEE_BPS
+    }
+}
+
+/// Current fee-collector address. Falls back to the contract admin if the
+/// admin has never called `set_fee_collector`.
+fn get_fee_collector_address(env: &Env) -> Address {
+    let key = DataKey::FeeCollector;
+    if env.storage().persistent().has(&key) {
+        let collector: Address = env.storage().persistent().get(&key).unwrap();
+        bump(env, &key);
+        collector
+    } else {
+        get_admin(env)
+    }
+}
+
+/// Validate a swap `path`: it must have at least 2 addresses, and its first
+/// and last entries must equal `token_in`/`token_out` respectively.
+fn validate_swap_path(
+    path: &Vec<Address>,
+    token_in: &Address,
+    token_out: &Address,
+) -> Result<(), ContractError> {
+    if path.len() < 2 {
+        return Err(ContractError::InvalidPath);
+    }
+    if &path.get(0).unwrap() != token_in {
+        return Err(ContractError::InvalidPath);
+    }
+    if &path.get(path.len() - 1).unwrap() != token_out {
+        return Err(ContractError::InvalidPath);
+    }
+    Ok(())
+}
+
+/// Basis-point fee on `amount_in`, and the remainder to actually swap.
+/// Returns `(fee, amount_to_swap)`.
+fn compute_swap_fee(amount_in: i128, fee_bps: u32) -> (i128, i128) {
+    let fee = amount_in
+        .checked_mul(fee_bps as i128)
+        .expect("overflow")
+        .checked_div(BPS_DENOMINATOR)
+        .expect("overflow");
+    let amount_to_swap = amount_in.checked_sub(fee).expect("underflow");
+    (fee, amount_to_swap)
+}
+
+/// Inverse of `compute_swap_fee`: the minimum `amount_in` whose post-fee
+/// remainder is at least `amount_out` (ceiling division so the caller never
+/// under-pays by a rounding error).
+fn compute_required_amount_in(amount_out: i128, fee_bps: u32) -> i128 {
+    let denom = BPS_DENOMINATOR - fee_bps as i128;
+    let numerator = amount_out.checked_mul(BPS_DENOMINATOR).expect("overflow");
+    (numerator + denom - 1) / denom
 }
 
 // ─── Invariant checking ─────────────────────────────────────────────────────
@@ -3035,6 +3123,209 @@ impl FinchippayContract {
             claimable
         }
     }
+
+    // ─── Swap / DEX ─────────────────────────────────────────────────────────
+
+    /// Admin: designate the address that receives protocol swap fees.
+    /// Defaults to the admin address if never called.
+    pub fn set_fee_collector(
+        env: Env,
+        admin: Address,
+        collector: Address,
+    ) -> Result<(), ContractError> {
+        admin.require_auth();
+        if admin != get_admin(&env) {
+            return Err(ContractError::Unauthorized);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::FeeCollector, &collector);
+        bump(&env, &DataKey::FeeCollector);
+        env.events()
+            .publish((Symbol::new(&env, "fee_collector_set"),), collector);
+        Ok(())
+    }
+
+    /// Return the current fee-collector address (admin if unset).
+    pub fn get_fee_collector(env: Env) -> Address {
+        get_fee_collector_address(&env)
+    }
+
+    /// Admin: update the swap fee, in basis points. Must be within
+    /// `[0, MAX_SWAP_FEE_BPS]` (0%–10%).
+    pub fn set_swap_fee(env: Env, admin: Address, new_fee_bps: u32) -> Result<(), ContractError> {
+        admin.require_auth();
+        if admin != get_admin(&env) {
+            return Err(ContractError::Unauthorized);
+        }
+        if new_fee_bps > MAX_SWAP_FEE_BPS {
+            return Err(ContractError::InvalidFeeBps);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::SwapFee, &new_fee_bps);
+        bump(&env, &DataKey::SwapFee);
+        env.events()
+            .publish((Symbol::new(&env, "swap_fee_set"),), new_fee_bps);
+        Ok(())
+    }
+
+    /// Return the current swap fee in basis points (30 = 0.3% by default).
+    pub fn get_swap_fee(env: Env) -> u32 {
+        get_swap_fee_bps(&env)
+    }
+
+    /// Swap an exact `amount_in` of `token_in` for at least `min_amount_out`
+    /// of `token_out`, protecting the caller from slippage.
+    ///
+    /// `path` must start with `token_in` and end with `token_out`; a 0.3%
+    /// (or admin-configured) protocol fee is deducted from `amount_in` and
+    /// sent to the fee collector before the swap executes.
+    ///
+    /// # Pricing model
+    /// This contract does not (yet) source live prices from an on-chain AMM
+    /// or the classic Stellar DEX order books — Soroban contracts have no
+    /// host function to invoke `path_payment_strict_send`/`strict_receive`,
+    /// and building an AMM is explicitly out of scope for this change (see
+    /// issue #9 / #479). The post-fee remainder is settled 1:1 against the
+    /// contract's own `token_out` reserves, which must be funded ahead of
+    /// time (e.g. by the admin transferring `token_out` to the contract
+    /// address). Intermediate `path` hops are validated for shape but are
+    /// not separately transferred, since the contract holds no inventory of
+    /// intermediate tokens. Real price discovery is tracked as follow-up
+    /// work once a router/AMM contract is wired in.
+    pub fn swap_exact_tokens_for_tokens(
+        env: Env,
+        caller: Address,
+        token_in: Address,
+        token_out: Address,
+        amount_in: i128,
+        min_amount_out: i128,
+        path: Vec<Address>,
+    ) -> Result<i128, ContractError> {
+        require_initialized(&env);
+        require_not_paused(&env);
+        caller.require_auth();
+
+        if amount_in <= 0 {
+            return Err(ContractError::NonPositiveAmount);
+        }
+        if min_amount_out < 0 {
+            return Err(ContractError::NonPositiveAmount);
+        }
+        if token_in == token_out {
+            return Err(ContractError::InvalidPath);
+        }
+        validate_swap_path(&path, &token_in, &token_out)?;
+
+        let fee_bps = get_swap_fee_bps(&env);
+        let (fee, amount_to_swap) = compute_swap_fee(amount_in, fee_bps);
+        let amount_out = amount_to_swap;
+
+        if amount_out < min_amount_out {
+            return Err(ContractError::SlippageExceeded);
+        }
+
+        let token_in_client = get_token_client(&env, &token_in);
+        if fee > 0 {
+            let collector = get_fee_collector_address(&env);
+            require_transfer_succeeded(&env, &token_in_client, &caller, &collector, &fee);
+        }
+        let contract_address = env.current_contract_address();
+        require_transfer_succeeded(
+            &env,
+            &token_in_client,
+            &caller,
+            &contract_address,
+            &amount_to_swap,
+        );
+
+        let token_out_client = get_token_client(&env, &token_out);
+        contract_transfer_out(&env, &token_out_client, &caller, &amount_out);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "swap"),
+                caller.clone(),
+                token_in.clone(),
+                token_out.clone(),
+            ),
+            (amount_in, amount_out, fee),
+        );
+
+        Ok(amount_out)
+    }
+
+    /// Swap up to `max_amount_in` of `token_in` for an exact `amount_out` of
+    /// `token_out`. Reverts with `ExcessiveAmountIn` if the fee-inclusive
+    /// input required would exceed `max_amount_in`. See
+    /// `swap_exact_tokens_for_tokens` for the pricing-model caveat.
+    pub fn swap_tokens_for_exact_tokens(
+        env: Env,
+        caller: Address,
+        token_in: Address,
+        token_out: Address,
+        amount_out: i128,
+        max_amount_in: i128,
+        path: Vec<Address>,
+    ) -> Result<i128, ContractError> {
+        require_initialized(&env);
+        require_not_paused(&env);
+        caller.require_auth();
+
+        if amount_out <= 0 {
+            return Err(ContractError::NonPositiveAmount);
+        }
+        if max_amount_in <= 0 {
+            return Err(ContractError::NonPositiveAmount);
+        }
+        if token_in == token_out {
+            return Err(ContractError::InvalidPath);
+        }
+        validate_swap_path(&path, &token_in, &token_out)?;
+
+        let fee_bps = get_swap_fee_bps(&env);
+        let amount_in = compute_required_amount_in(amount_out, fee_bps);
+
+        if amount_in > max_amount_in {
+            return Err(ContractError::ExcessiveAmountIn);
+        }
+
+        let (fee, amount_to_swap) = compute_swap_fee(amount_in, fee_bps);
+        // Ceiling division in compute_required_amount_in can leave a few
+        // extra units in amount_to_swap versus amount_out; that dust stays
+        // in the contract's reserves rather than shorting the caller.
+        debug_assert!(amount_to_swap >= amount_out);
+
+        let token_in_client = get_token_client(&env, &token_in);
+        if fee > 0 {
+            let collector = get_fee_collector_address(&env);
+            require_transfer_succeeded(&env, &token_in_client, &caller, &collector, &fee);
+        }
+        let contract_address = env.current_contract_address();
+        require_transfer_succeeded(
+            &env,
+            &token_in_client,
+            &caller,
+            &contract_address,
+            &amount_to_swap,
+        );
+
+        let token_out_client = get_token_client(&env, &token_out);
+        contract_transfer_out(&env, &token_out_client, &caller, &amount_out);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "swap"),
+                caller.clone(),
+                token_in.clone(),
+                token_out.clone(),
+            ),
+            (amount_in, amount_out, fee),
+        );
+
+        Ok(amount_in)
+    }
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -4468,8 +4759,8 @@ mod tests {
         amounts.push_back(300i128);
         amounts.push_back(200i128);
         let mut memos = soroban_sdk::Vec::new(&env);
-        memos.push_back(Symbol::new(&env, ""));
-        memos.push_back(Symbol::new(&env, ""));
+        memos.push_back(Symbol::new(&env, "m1"));
+        memos.push_back(Symbol::new(&env, "m2"));
         client.batch_send(&token_id, &from, &recipients, &amounts, &memos);
 
         let events = env.events().all().filter_by_contract(&contract_id);
@@ -5169,6 +5460,295 @@ mod tests {
 
         let dummy_hash = BytesN::from_array(&env, &[1u8; 32]);
         client.upgrade(&admin, &dummy_hash, &0);
+    }
+
+    // ── Swap / DEX ───────────────────────────────────────────────────────────
+    //
+    // `token_xlm` and `token_usdc` below stand in for wrapped XLM and USDC SAC
+    // tokens respectively (the contract logic is asset-agnostic). Contract
+    // swap reserves are funded directly via `create_token`, mirroring how an
+    // admin would pre-fund the contract in production ahead of real AMM/DEX
+    // routing (see the pricing-model note on `swap_exact_tokens_for_tokens`).
+
+    #[test]
+    fn test_swap_exact_xlm_to_usdc() {
+        let env = Env::default();
+        let (id, client) = deploy(&env);
+        let admin = client.get_admin();
+        let caller = Address::generate(&env);
+        env.mock_all_auths();
+
+        let token_xlm = create_token(&env, &admin, &caller, 1_000_000);
+        let token_usdc = create_token(&env, &admin, &id, 1_000_000);
+        let path = vec![&env, token_xlm.clone(), token_usdc.clone()];
+
+        let amount_out = client.swap_exact_tokens_for_tokens(
+            &caller,
+            &token_xlm,
+            &token_usdc,
+            &100_000,
+            &99_000,
+            &path,
+        );
+
+        // fee = 100_000 * 30 / 10_000 = 300; amount_out = 100_000 - 300 = 99_700
+        assert_eq!(amount_out, 99_700);
+
+        let xlm_client = token::Client::new(&env, &token_xlm);
+        let usdc_client = token::Client::new(&env, &token_usdc);
+        assert_eq!(xlm_client.balance(&caller), 1_000_000 - 100_000);
+        assert_eq!(usdc_client.balance(&caller), 99_700);
+        assert_eq!(xlm_client.balance(&admin), 300); // default fee collector = admin
+    }
+
+    #[test]
+    fn test_swap_exact_usdc_to_xlm() {
+        let env = Env::default();
+        let (id, client) = deploy(&env);
+        let admin = client.get_admin();
+        let caller = Address::generate(&env);
+        env.mock_all_auths();
+
+        let token_usdc = create_token(&env, &admin, &caller, 500_000);
+        let token_xlm = create_token(&env, &admin, &id, 500_000);
+        let path = vec![&env, token_usdc.clone(), token_xlm.clone()];
+
+        let amount_out = client.swap_exact_tokens_for_tokens(
+            &caller,
+            &token_usdc,
+            &token_xlm,
+            &50_000,
+            &49_800,
+            &path,
+        );
+
+        // fee = 50_000 * 30 / 10_000 = 150; amount_out = 49_850
+        assert_eq!(amount_out, 49_850);
+        let xlm_client = token::Client::new(&env, &token_xlm);
+        assert_eq!(xlm_client.balance(&caller), 49_850);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_swap_insufficient_balance_fails() {
+        let env = Env::default();
+        let (id, client) = deploy(&env);
+        let admin = client.get_admin();
+        let caller = Address::generate(&env);
+        env.mock_all_auths();
+
+        // Caller only holds 100 units of token_in but tries to swap 1_000.
+        let token_in = create_token(&env, &admin, &caller, 100);
+        let token_out = create_token(&env, &admin, &id, 1_000_000);
+        let path = vec![&env, token_in.clone(), token_out.clone()];
+
+        client.swap_exact_tokens_for_tokens(&caller, &token_in, &token_out, &1_000, &0, &path);
+    }
+
+    #[test]
+    fn test_swap_fee_calculation_matches_bps() {
+        let env = Env::default();
+        let (id, client) = deploy(&env);
+        let admin = client.get_admin();
+        let caller = Address::generate(&env);
+        env.mock_all_auths();
+
+        let token_in = create_token(&env, &admin, &caller, 10_000_000);
+        let token_out = create_token(&env, &admin, &id, 10_000_000);
+        let path = vec![&env, token_in.clone(), token_out.clone()];
+
+        let amount_out =
+            client.swap_exact_tokens_for_tokens(&caller, &token_in, &token_out, &1_000_000, &0, &path);
+
+        // 30 bps of 1_000_000 = 3_000
+        let in_client = token::Client::new(&env, &token_in);
+        assert_eq!(amount_out, 997_000);
+        assert_eq!(in_client.balance(&admin), 3_000);
+    }
+
+    #[test]
+    fn test_admin_can_update_swap_fee() {
+        let env = Env::default();
+        let (id, client) = deploy(&env);
+        let admin = client.get_admin();
+        let caller = Address::generate(&env);
+        env.mock_all_auths();
+
+        assert_eq!(client.get_swap_fee(), 30);
+        client.set_swap_fee(&admin, &100); // 1%
+        assert_eq!(client.get_swap_fee(), 100);
+
+        let token_in = create_token(&env, &admin, &caller, 1_000_000);
+        let token_out = create_token(&env, &admin, &id, 1_000_000);
+        let path = vec![&env, token_in.clone(), token_out.clone()];
+
+        let amount_out =
+            client.swap_exact_tokens_for_tokens(&caller, &token_in, &token_out, &100_000, &0, &path);
+        // fee = 100_000 * 100 / 10_000 = 1_000; amount_out = 99_000
+        assert_eq!(amount_out, 99_000);
+    }
+
+    #[test]
+    fn test_set_swap_fee_out_of_bounds_rejected() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        env.mock_all_auths();
+
+        let result = client.try_set_swap_fee(&admin, &1_001);
+        assert_eq!(result.unwrap_err().unwrap(), ContractError::InvalidFeeBps);
+        assert_eq!(client.get_swap_fee(), 30); // unchanged
+    }
+
+    #[test]
+    fn test_set_swap_fee_unauthorized_rejected() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let not_admin = Address::generate(&env);
+        env.mock_all_auths();
+
+        let result = client.try_set_swap_fee(&not_admin, &50);
+        assert_eq!(result.unwrap_err().unwrap(), ContractError::Unauthorized);
+    }
+
+    #[test]
+    fn test_swap_five_hop_path() {
+        let env = Env::default();
+        let (id, client) = deploy(&env);
+        let admin = client.get_admin();
+        let caller = Address::generate(&env);
+        env.mock_all_auths();
+
+        let token_in = create_token(&env, &admin, &caller, 1_000_000);
+        let token_out = create_token(&env, &admin, &id, 1_000_000);
+        // 6 addresses => 5 hops: token_in -> 4 intermediates -> token_out.
+        let hop1 = Address::generate(&env);
+        let hop2 = Address::generate(&env);
+        let hop3 = Address::generate(&env);
+        let hop4 = Address::generate(&env);
+        let path = vec![
+            &env,
+            token_in.clone(),
+            hop1,
+            hop2,
+            hop3,
+            hop4,
+            token_out.clone(),
+        ];
+        assert_eq!(path.len(), 6);
+
+        let amount_out =
+            client.swap_exact_tokens_for_tokens(&caller, &token_in, &token_out, &200_000, &199_000, &path);
+        assert_eq!(amount_out, 199_400); // 200_000 - 30bps
+    }
+
+    #[test]
+    fn test_swap_invalid_path_rejected() {
+        let env = Env::default();
+        let (id, client) = deploy(&env);
+        let admin = client.get_admin();
+        let caller = Address::generate(&env);
+        env.mock_all_auths();
+
+        let token_in = create_token(&env, &admin, &caller, 1_000_000);
+        let token_out = create_token(&env, &admin, &id, 1_000_000);
+        // Path missing token_out at the end.
+        let bad_path = vec![&env, token_in.clone(), token_in.clone()];
+
+        let result =
+            client.try_swap_exact_tokens_for_tokens(&caller, &token_in, &token_out, &1_000, &0, &bad_path);
+        assert_eq!(result.unwrap_err().unwrap(), ContractError::InvalidPath);
+    }
+
+    #[test]
+    fn test_swap_slippage_protection_rejects_low_min_out() {
+        let env = Env::default();
+        let (id, client) = deploy(&env);
+        let admin = client.get_admin();
+        let caller = Address::generate(&env);
+        env.mock_all_auths();
+
+        let token_in = create_token(&env, &admin, &caller, 1_000_000);
+        let token_out = create_token(&env, &admin, &id, 1_000_000);
+        let path = vec![&env, token_in.clone(), token_out.clone()];
+
+        // Demand more than is achievable after the fee is deducted.
+        let result = client.try_swap_exact_tokens_for_tokens(
+            &caller,
+            &token_in,
+            &token_out,
+            &100_000,
+            &100_000,
+            &path,
+        );
+        assert_eq!(result.unwrap_err().unwrap(), ContractError::SlippageExceeded);
+    }
+
+    #[test]
+    fn test_swap_tokens_for_exact_tokens_charges_correct_input() {
+        let env = Env::default();
+        let (id, client) = deploy(&env);
+        let admin = client.get_admin();
+        let caller = Address::generate(&env);
+        env.mock_all_auths();
+
+        let token_in = create_token(&env, &admin, &caller, 1_000_000);
+        let token_out = create_token(&env, &admin, &id, 1_000_000);
+        let path = vec![&env, token_in.clone(), token_out.clone()];
+
+        let amount_out_wanted = 99_700;
+        let amount_in = client.swap_tokens_for_exact_tokens(
+            &caller,
+            &token_in,
+            &token_out,
+            &amount_out_wanted,
+            &101_000,
+            &path,
+        );
+
+        // required amount_in = ceil(99_700 * 10_000 / 9_970) = 100_000
+        assert_eq!(amount_in, 100_000);
+        let out_client = token::Client::new(&env, &token_out);
+        assert_eq!(out_client.balance(&caller), amount_out_wanted);
+    }
+
+    #[test]
+    fn test_swap_tokens_for_exact_tokens_excessive_input_rejected() {
+        let env = Env::default();
+        let (id, client) = deploy(&env);
+        let admin = client.get_admin();
+        let caller = Address::generate(&env);
+        env.mock_all_auths();
+
+        let token_in = create_token(&env, &admin, &caller, 1_000_000);
+        let token_out = create_token(&env, &admin, &id, 1_000_000);
+        let path = vec![&env, token_in.clone(), token_out.clone()];
+
+        let result = client.try_swap_tokens_for_exact_tokens(
+            &caller,
+            &token_in,
+            &token_out,
+            &99_700,
+            &50_000, // far too small a cap
+            &path,
+        );
+        assert_eq!(
+            result.unwrap_err().unwrap(),
+            ContractError::ExcessiveAmountIn
+        );
+    }
+
+    #[test]
+    fn test_fee_collector_defaults_to_admin_then_settable() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let collector = Address::generate(&env);
+        env.mock_all_auths();
+
+        assert_eq!(client.get_fee_collector(), admin);
+        client.set_fee_collector(&admin, &collector);
+        assert_eq!(client.get_fee_collector(), collector);
     }
 }
 
