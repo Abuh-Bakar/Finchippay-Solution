@@ -23,7 +23,6 @@ import {
   clearJwtToken as clearAuthToken,
 } from "./auth";
 import { sdk } from "./sdk-instance";
-import { clearAddressBook } from "./addressBook";
 
 // ─── SEP-0010 helpers ────────────────────────────────────────────────────────
 
@@ -270,7 +269,6 @@ export function disconnectWallet(): void {
 
   setJwtToken(null);
   clearAuthToken();
-  clearAddressBook();
 }
 
 /**
