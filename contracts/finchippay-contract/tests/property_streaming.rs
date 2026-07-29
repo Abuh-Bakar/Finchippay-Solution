@@ -111,6 +111,8 @@ fn synthetic_stream(payer: &Address, recipient: &Address, token: &Address) -> St
         claimed: 0,
         start_ledger: 0,
         closed: false,
+        paused_at_ledger: 0,
+        total_paused_duration: 0,
     }
 }
 
