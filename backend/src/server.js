@@ -157,22 +157,11 @@ function getFederationServerUrl(req) {
  * The backend serves no HTML pages of its own except Swagger UI at /api/docs,
  * so the policy is intentionally restrictive.
  */
-const helmetOptions = {
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", "data:"],
-      connectSrc: ["'self'"],
-      fontSrc: ["'self'"],
-      objectSrc: ["'none'"],
-      frameSrc: ["'none'"],
-    },
-  },
-};
+const securityHeaders = require("./middleware/securityHeaders");
+const corsConfig = require("./middleware/corsConfig");
 
-app.use(helmet(helmetOptions));
+app.use(securityHeaders);
+app.use(corsConfig);
 // Prometheus HTTP metrics — track duration & count for every request.
 app.use(trackHttpMetrics);
 // Correlation ID middleware — generates/adopts X-Request-ID, stores in ALS.
