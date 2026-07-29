@@ -452,6 +452,17 @@ function stop() {
   }
 }
 
+/**
+ * Whether the indexer has completed startup — either its polling interval is
+ * active, or it intentionally never started because CONTRACT_ID is unset.
+ * Used by the startup probe so deployments without a configured contract
+ * aren't stuck waiting for an indexer that will never run.
+ * @returns {boolean}
+ */
+function isRunning() {
+  return !!pollTimer || !CONTRACT_ID;
+}
+
 // ─── Query helpers (used by eventController) ─────────────────────────────────
 
 /**
@@ -652,6 +663,7 @@ function isAvailable() {
 module.exports = {
   start,
   stop,
+  isRunning,
   queryEventsByPublicKey,
   queryEventsByType,
   getEventStats,

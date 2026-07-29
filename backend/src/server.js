@@ -74,6 +74,7 @@ const {
 } = require("./utils/correlationId");
 const { errorLogFields } = require("./utils/errorResponse");
 const { initRedis, closeRedis } = require("./services/cacheService");
+const shutdownState = require("./services/shutdownState");
 const {
   closeAll: closeBalanceStreams,
 } = require("./services/balanceStreamService");
@@ -348,12 +349,26 @@ app.use((err, req, res, next) => {
 
 // ─── Graceful shutdown ────────────────────────────────────────────────
 
+// How long to wait after readiness starts failing before tearing down
+// background workers and exiting — gives Kubernetes time to observe the
+// failed readiness probe and stop routing new traffic (readinessProbe
+// periodSeconds: 10 in kubernetes/backend/deployment.yaml).
+const SHUTDOWN_DRAIN_MS = parseInt(process.env.SHUTDOWN_DRAIN_MS, 10) || 10_000;
+
 async function gracefulShutdown(signal, server, otelSdk) {
   logger.info({ signal }, "Received shutdown signal — draining…");
+
+  // Fail readiness immediately so /api/health/ready starts returning 503
+  // before any in-flight work is torn down.
+  shutdownState.markShuttingDown();
 
   server.close((err) => {
     if (err) logger.error({ err }, "Error closing HTTP server");
   });
+
+  // Give Kubernetes time to observe the failed readiness probe and drain
+  // in-flight requests before workers are stopped and the process exits.
+  await new Promise((resolve) => setTimeout(resolve, SHUTDOWN_DRAIN_MS));
 
   // 1. Stop scheduled executor
   try {
