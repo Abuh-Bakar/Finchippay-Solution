@@ -349,6 +349,7 @@ app.use((err, req, res, next) => {
 // ─── Graceful shutdown ────────────────────────────────────────────────
 
 async function gracefulShutdown(signal, server, otelSdk) {
+  markShuttingDown();
   logger.info({ signal }, "Received shutdown signal — draining…");
 
   server.close((err) => {
@@ -434,6 +435,7 @@ if (require.main === module) {
     require("./services/scheduledExecutor").start();
     require("./services/dataRetentionService").startRetentionCron();
     const server = app.listen(PORT, () => {
+      markStartupComplete();
       logger.info(`
  ✨ Finchippay Solution API
  🚀 Server running at http://localhost:${PORT}
