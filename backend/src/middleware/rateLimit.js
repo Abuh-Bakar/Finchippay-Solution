@@ -96,8 +96,22 @@ const sensitiveLimiter = createInstrumentedLimiter(
   "sensitive",
 );
 
+const authRefreshLimiter = createInstrumentedLimiter(
+  {
+    windowMs: 1 * 60 * 1000,
+    limit: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: formatErrorResponse("RATE_LIMITED_SENSITIVE"),
+    ...(redisClient ? { store: createRedisStore("authRefresh") } : {}),
+  },
+  "authRefresh",
+);
+
 module.exports = {
   createInstrumentedLimiter,
   sensitiveLimiter,
   strictLimiter,
+  authRefreshLimiter,
 };
+
