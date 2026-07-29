@@ -99,6 +99,7 @@ import { useToastContext } from "@/lib/ToastContext";
 import { getJwtToken } from "@/lib/auth";
 import { URIParseResult, uriToPrefillData } from "@/lib/sep0007";
 import { useWallet } from "@/lib/useWallet";
+import DashboardPortfolioWidget from "@/components/DashboardPortfolioWidget";
 import { useBalanceStream } from "@/lib/useBalanceStream";
 
 interface DashboardProps {
@@ -1222,6 +1223,10 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
           </div>
         )}
       </div>
+
+      {/* Portfolio dashboard widget (#482): total value, 24h change, P&L,
+          asset allocation, and historical value chart. */}
+      <DashboardPortfolioWidget publicKey={publicKey} />
 
       {/* Reserve warning (#164). Amber when balance is within 2 XLM of the
           minimum reserve, red when at or below it. Suppressed when the
