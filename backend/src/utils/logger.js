@@ -18,7 +18,7 @@ function redactStellarKeys(obj) {
       if (STELLAR_SECRET_KEY_PATTERN.test(str)) {
         return JSON.parse(str.replace(STELLAR_SECRET_KEY_PATTERN, REDACTED_STELLAR));
       }
-    } catch {}
+    } catch { /* ignore */ }
   }
   return obj;
 }

@@ -17,7 +17,6 @@ const {
   registerEmailSchema,
   updateEmailSchema,
   publicKeyParamSchema,
-  emailEventsQuerySchema,
 } = require("../validation/schemas");
 
 /**

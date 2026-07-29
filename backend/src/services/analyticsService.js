@@ -202,7 +202,7 @@ async function getTotalReceiptCount() {
     }
 
     try {
-      const { Server } = require("@stellar/soroban-sdk");
+      const { Server, Contract, TransactionBuilder, Account } = require("@stellar/soroban-sdk");
 
       const server = new Server(process.env.SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org");
       const contract = new Contract(contractAddress);
