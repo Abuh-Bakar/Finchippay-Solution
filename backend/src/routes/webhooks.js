@@ -7,14 +7,14 @@
 
 const express = require("express");
 const router = express.Router();
-const webhookService = require("../services/webhookService");
+const webhookService = require("../services/webhookSubscriptionService");
 const {
   formatErrorResponse,
   ERROR_CODES,
 } = require("../../../shared/errorCodes");
 const { validate } = require("../validation/middleware");
+const { registerWebhookSchema } = require("../validation/webhookSchemas");
 const {
-  registerWebhookSchema,
   publicKeyParamSchema,
   idParamSchema,
   getEventsQuerySchema,
@@ -25,15 +25,16 @@ const {
  * POST /api/webhooks
  * Register a webhook for a Stellar account.
  *
- * Body: { publicKey: "G...", url: "https://...", secret: "whsec_..." }
+ * Body: { publicKey: "G...", url: "https://...", secret: "whsec_...", topics?: string[] }
  */
 router.post("/", validate(registerWebhookSchema), async (req, res, next) => {
   try {
-    const { publicKey, url, secret } = req.validated;
+    const { publicKey, url, secret, topics } = req.validated;
     const webhook = await webhookService.registerWebhook(
       publicKey,
       url,
       secret,
+      topics,
     );
     return res.status(201).json({ success: true, webhook });
   } catch (err) {
@@ -147,6 +148,53 @@ router.post(
       const { publicKey } = req.validated;
       const result = await webhookService.retryDeadDeliveries(publicKey);
       return res.json({ success: true, ...result });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * GET /api/webhooks/:publicKey/deliveries
+ * Paginated delivery history, optionally filtered by status.
+ */
+router.get(
+  "/:publicKey/deliveries",
+  validate(publicKeyParamSchema, "params"),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validated;
+      const { status, page, limit } = req.query;
+      const result = await webhookService.getDeliveries(publicKey, {
+        status,
+        page: page ? parseInt(page, 10) : 1,
+        limit: limit ? parseInt(limit, 10) : 20,
+      });
+      return res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * GET /api/webhooks/:publicKey/deliveries/:id
+ * Single delivery detail with retry timeline (attempts, last status, error).
+ */
+router.get(
+  "/:publicKey/deliveries/:id",
+  validate(publicKeyParamSchema, "params"),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validated;
+      const { id } = req.params;
+      const delivery = await webhookService.getDeliveryById(publicKey, id);
+      if (!delivery) {
+        return res.status(ERROR_CODES.RES_NOT_FOUND.httpStatus).json(
+          formatErrorResponse("RES_NOT_FOUND", { resourceType: "delivery", id }),
+        );
+      }
+      return res.json({ delivery });
     } catch (err) {
       next(err);
     }

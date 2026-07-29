@@ -5,7 +5,7 @@
 
 import { PaymentRecord } from "@/lib/stellar";
 import { formatDistanceToNow, format } from "date-fns";
-import { formatCurrency, formatNumber, formatDate, formatRelativeTime } from './intlFormat';
+import { formatCurrency, formatNumber, formatRelativeTime } from './intlFormat';
 
 interface AssetFormatRule {
   minimumFractionDigits: number;

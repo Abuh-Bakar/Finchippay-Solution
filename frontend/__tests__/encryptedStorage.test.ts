@@ -125,6 +125,25 @@ describe("encrypted address book storage", () => {
     expect(loadAddressBookContacts()[0].nickname).toBe("Alice");
   });
 
+  it("empties without locking on clear(), so later saves still persist", async () => {
+    const key = await keyFor(PUBLIC_KEY_A);
+    await unlockAddressBook(key, PUBLIC_KEY_A);
+    saveAddressBookContacts([contact]);
+    await waitForEnvelope();
+
+    clearAddressBook();
+    expect(loadAddressBookContacts()).toEqual([]);
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
+
+    // clear() is a data operation, not a session one: the session key survives,
+    // so a subsequent save is still written as ciphertext (no unlock needed).
+    saveAddressBookContacts([contact]);
+    const envelope = await waitForEnvelope();
+    expect(envelope.owner).toBe(PUBLIC_KEY_A);
+    expect(envelope.data).not.toContain("Alice");
+    expect(loadAddressBookContacts()).toHaveLength(1);
+  });
+
   it("flags stored data as needing re-encryption after a wallet switch", async () => {
     const keyA = await keyFor(PUBLIC_KEY_A);
     await unlockAddressBook(keyA, PUBLIC_KEY_A);

@@ -39,6 +39,9 @@ jest.mock("@/lib/addressBook", () => ({
   lockAddressBook: jest.fn(),
   unlockAddressBook: jest.fn(),
   reEncryptAddressBook: jest.fn(),
+  lockFederationCache: jest.fn(),
+  unlockFederationCache: jest.fn(),
+  reEncryptFederationCache: jest.fn(),
 }));
 
 // Mock fetch

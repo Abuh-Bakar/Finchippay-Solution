@@ -27,6 +27,9 @@ import {
   lockAddressBook,
   unlockAddressBook,
   reEncryptAddressBook,
+  lockFederationCache,
+  unlockFederationCache,
+  reEncryptFederationCache,
 } from "./addressBook";
 import {
   unlockPaymentTemplates,
@@ -277,6 +280,7 @@ export async function initEncryptionSession(publicKey: string): Promise<void> {
     await Promise.all([
       unlockAddressBook(key, publicKey),
       unlockPaymentTemplates(key, publicKey),
+      unlockFederationCache(key, publicKey),
     ]);
   } catch (err) {
     console.error("Failed to initialise encryption session:", err);
@@ -294,6 +298,7 @@ export async function reEncryptLocalData(): Promise<void> {
   await Promise.all([
     reEncryptAddressBook(key, owner),
     reEncryptPaymentTemplates(key, owner),
+    reEncryptFederationCache(key, owner),
   ]);
 }
 
@@ -327,6 +332,7 @@ export function disconnectWallet(): void {
   // Lock (don't wipe) the encrypted stores: forget the in-memory key and
   // decrypted cache but keep the ciphertext so it survives reconnect.
   lockAddressBook();
+  lockFederationCache();
   clearSessionKey();
   lockPaymentTemplates();
 }

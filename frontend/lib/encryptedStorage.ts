@@ -202,10 +202,13 @@ export function createEncryptedStore<T>(options: EncryptedStoreOptions<T>): Encr
     emit();
   }
 
+  /**
+   * Empty the collection. This is a data operation, not a session one: the
+   * session key/owner are retained so subsequent saves still persist. Forgetting
+   * the key is `lock()`'s job (see `disconnectWallet`).
+   */
   function clear() {
-    cache = null;
-    currentKey = null;
-    currentOwner = null;
+    cache = [];
     if (typeof window !== "undefined") {
       try {
         window.localStorage.removeItem(storageKey);

@@ -8,7 +8,6 @@ import Head from "next/head";
 import Link from "next/link";
 import { useTranslation } from "react-i18next";
 import { getNetworkConfig, setNetworkConfig, NetworkConfig } from "@/lib/stellar";
-import { signTransactionWithWallet } from "@/lib/wallet";
 import { disconnectWallet, signTransactionWithWallet } from "@/lib/wallet";
 import { clearAddressBook, loadAddressBookContacts } from "@/lib/addressBook";
 import {
@@ -20,9 +19,12 @@ import {
   TurretsDeployment,
 } from "@/lib/turrets";
 import { shortenAddress } from "@/lib/stellar";
+import { resetTour } from '@/lib/onboardingState';
 import { SUPPORTED_LANGUAGES, getCurrentLanguage, setLanguage, type SupportedLanguage } from "@/lib/i18n";
 import KyCForm from "@/components/KyCForm";
 import AccountSettings from "@/components/AccountSettings";
+import NotificationPreferences from "@/components/NotificationPreferences";
+import NotificationHistory from "@/components/NotificationHistory";
 import { useWallet } from "@/lib/useWallet";
 
 interface SettingsPageProps {
@@ -384,6 +386,23 @@ export default function SettingsPage({
                     {lang.nativeName}
                   </button>
                 ))}
+              </div>
+            </div>
+
+            {/* Notification Preferences */}
+            <div className="bg-white dark:bg-cosmos-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2 mb-4">
+                <svg className="w-5 h-5 text-stellar-700 dark:text-stellar-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                </svg>
+                Notifications
+              </h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
+                Configure which events trigger notifications and choose your delivery channels.
+              </p>
+              <NotificationPreferences publicKey={publicKey} />
+              <div className="mt-8 pt-6 border-t border-slate-200 dark:border-slate-700">
+                <NotificationHistory publicKey={publicKey} />
               </div>
             </div>
 
@@ -826,7 +845,13 @@ export default function SettingsPage({
             </div>
           </div>
         
-          {/* ── Stellar Name Service ── */}
+          {/* ──             <div className="bg-white dark:bg-cosmos-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">Onboarding Tour</h2>
+              <p className="text-sm text-slate-400 dark:text-slate-400 mb-4">Replay the onboarding tour to refamiliarize yourself with the app.</p>
+              <button onClick={() => { resetTour(); window.location.href = '/dashboard'; }} className="px-4 py-2 bg-stellar-500 hover:bg-stellar-600 text-white font-medium rounded-lg transition-colors text-sm">Replay Onboarding Tour</button>
+            </div>
+
+            {/*  ── */}
           <div className="card">
             <h2 className="text-lg font-semibold mb-2">Your Stellar Name</h2>
             <p className="text-sm text-gray-500 mb-4">
