@@ -64,8 +64,9 @@ function getCache() {
 const HORIZON_URL = process.env.HORIZON_URL || "https://horizon-testnet.stellar.org";
 const server = new Horizon.Server(HORIZON_URL);
 
-const MAX_RETRIES = 5;
-const RETRY_INTERVALS = [1000, 5000, 25000, 125000, 625000];
+const MAX_RETRIES = parseInt(process.env.WEBHOOK_MAX_RETRIES, 10) || 6;
+// Exponential backoff schedule in seconds: 1min, 5min, 15min, 1h, 6h, 24h.
+const RETRY_INTERVALS_SECONDS = [60, 300, 900, 3600, 21600, 86400];
 const RETRY_WORKER_INTERVAL = 30000;
 
 /**
@@ -400,29 +401,47 @@ async function deliverWebhook(webhook, payload, eventType = "payment.received") 
       logger.info({ type: "webhook_delivered", id: webhook.id, url: webhook.url, deliveryId });
       span.setStatus({ code: 1 });
     } else {
-      await handleDeliveryFailure(deliveryId, webhook, result.error);
+      await handleDeliveryFailure(deliveryId, webhook, result.error, payload);
     }
   } catch (err) {
-    await handleDeliveryFailure(deliveryId, webhook, err.message);
+    await handleDeliveryFailure(deliveryId, webhook, err.message, payload);
   } finally {
     span.end();
   }
 }
 
+async function writeToDeadLetterQueue(deliveryId, webhook, payload, errorMsg, retryTimestamps) {
+  try {
+    await knex("dead_letter_queue").insert({
+      id: crypto.randomUUID(),
+      delivery_id: deliveryId,
+      webhook_id: webhook.id,
+      payload: typeof payload === "string" ? payload : JSON.stringify(payload),
+      retry_timestamps: JSON.stringify(retryTimestamps),
+      final_error: errorMsg,
+      created_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    logger.error({ type: "webhook_dlq_insert_error", id: deliveryId, error: err.message });
+  }
+}
+
 /**
  * Handle a failed delivery by incrementing attempts and scheduling retry.
- * After MAX_RETRIES failures, marks the delivery as 'dead'.
+ * After MAX_RETRIES failures, marks the delivery as 'dead' and writes to DLQ.
  */
-async function handleDeliveryFailure(deliveryId, webhook, errorMsg) {
+async function handleDeliveryFailure(deliveryId, webhook, errorMsg, payload) {
   const currentAttempt = (webhook.attempts || 0) + 1;
-  const nextRetryMs = RETRY_INTERVALS[Math.min(currentAttempt - 1, RETRY_INTERVALS.length - 1)];
-  const nextRetryAt = new Date(Date.now() + nextRetryMs).toISOString();
+  const nextRetrySeconds = RETRY_INTERVALS_SECONDS[Math.min(currentAttempt - 1, RETRY_INTERVALS_SECONDS.length - 1)];
+  const nextRetryAt = new Date(Date.now() + nextRetrySeconds * 1000).toISOString();
   const isDead = currentAttempt >= MAX_RETRIES;
+  const now = new Date().toISOString();
 
   try {
     await knex("webhook_deliveries").where("id", deliveryId).update({
       attempts: currentAttempt,
-      last_attempt_at: new Date().toISOString(),
+      retry_attempts: currentAttempt,
+      last_attempt_at: now,
       last_error: errorMsg,
       next_retry_at: isDead ? null : nextRetryAt,
       status: isDead ? "dead" : "pending",
@@ -438,6 +457,12 @@ async function handleDeliveryFailure(deliveryId, webhook, errorMsg) {
   webhook.attempts = currentAttempt;
 
   if (isDead) {
+    let retryTimestamps = [];
+    try {
+      const row = await knex("webhook_deliveries").where("id", deliveryId).first();
+      retryTimestamps = row ? [{ attempt: currentAttempt, at: now, error: errorMsg }] : [];
+    } catch { /* best effort */ }
+    await writeToDeadLetterQueue(deliveryId, webhook, payload, errorMsg, retryTimestamps);
     logger.error({
       type: "webhook_delivery_dead",
       id: webhook.id,
@@ -475,8 +500,13 @@ async function processRetryQueue() {
           "<=",
           new Date().toISOString(),
         );
-      });
-
+      })
+      .orderBy([
+        { column: "delivery_priority", order: "desc" },
+        { column: "attempts", order: "asc" },
+        { column: "next_retry_at", order: "asc" },
+      ])
+      .limit(50);
     for (const delivery of pending) {
       const webhook = await getWebhookById(delivery.webhook_id);
       if (!webhook) continue;
@@ -485,10 +515,9 @@ async function processRetryQueue() {
       try {
         payload = JSON.parse(delivery.payload);
       } catch {
-        await handleDeliveryFailure(delivery.id, webhook, "Invalid payload");
+        await handleDeliveryFailure(delivery.id, webhook, "Invalid payload", delivery.payload);
         continue;
       }
-
       const span = tracer.startSpan("webhook.retry");
       span.setAttributes({
         "webhook.id": webhook.id,
@@ -515,10 +544,10 @@ async function processRetryQueue() {
           });
           span.setStatus({ code: 1 });
         } else {
-          await handleDeliveryFailure(delivery.id, webhook, result.error);
+          await handleDeliveryFailure(delivery.id, webhook, result.error, payload);
         }
       } catch (err) {
-        await handleDeliveryFailure(delivery.id, webhook, err.message);
+        await handleDeliveryFailure(delivery.id, webhook, err.message, payload);
       } finally {
         span.end();
       }
@@ -738,6 +767,41 @@ async function getEventStats(publicKey) {
     .count("e.id as count");
 }
 
+// ─── Delivery Status Query API ────────────────────────────────────────────────
+
+async function getDeliveries(publicKey, { status, page = 1, limit = 20 } = {}) {
+  const offset = (Math.max(1, page) - 1) * limit;
+  const base = knex("webhook_deliveries as d")
+    .join("webhooks as w", "d.webhook_id", "w.id")
+    .where("w.public_key", publicKey);
+  if (status) base.andWhere("d.status", status);
+
+  const [rows, [{ count }]] = await Promise.all([
+    base
+      .clone()
+      .orderBy([
+        { column: "d.delivery_priority", order: "desc" },
+        { column: "d.created_at", order: "desc" },
+      ])
+      .limit(limit)
+      .offset(offset)
+      .select("d.*"),
+    base.clone().count("d.id as count"),
+  ]);
+
+  return { deliveries: rows, total: parseInt(count, 10), page: Number(page), limit: Number(limit) };
+}
+
+async function getDeliveryById(publicKey, id) {
+  const delivery = await knex("webhook_deliveries as d")
+    .join("webhooks as w", "d.webhook_id", "w.id")
+    .where("w.public_key", publicKey)
+    .andWhere("d.id", id)
+    .select("d.*")
+    .first();
+  return delivery || null;
+}
+
 module.exports = {
   registerWebhook,
   getWebhooksByPublicKey,
@@ -753,4 +817,9 @@ module.exports = {
   getEvents,
   replayEvents,
   getEventStats,
+  processRetryQueue,
+  getDeliveries,
+  getDeliveryById,
+  MAX_RETRIES,
+  RETRY_INTERVALS_SECONDS,
 };

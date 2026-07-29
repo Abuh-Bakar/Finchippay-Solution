@@ -26,6 +26,8 @@ import {
 
 // Dynamic imports for large components to improve initial load (Lighthouse Performance)
 import Skeleton from "@/components/Skeleton";
+import AnimatedCounter from "@/components/AnimatedCounter";
+import { FadeIn, StaggerContainer } from "@/components/FadeIn";
 
 // Browser-only: reads Notification.permission and localStorage on mount.
 const PushNotificationPrompt = dynamic(
@@ -956,7 +958,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 animate-fade-in cursor-default select-none">
+    <StaggerContainer className="max-w-6xl mx-auto px-4 sm:px-6 py-10 cursor-default select-none">
       <Head>
         <title>Dashboard | Finchippay-Solution</title>
         <meta name="description" content="Manage your Stellar account, view balances, send payments, and monitor streaming, escrow, and multi-sig activity. Real-time dashboard with analytics and wallet summary." />
@@ -1013,26 +1015,32 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
         </div>
       </div>
 
-      <PaymentStatsWidget
+      <FadeIn>
+        <PaymentStatsWidget
         stats={paymentStats}
         loading={paymentStatsLoading}
         error={paymentStatsError}
         onRetry={fetchPaymentStats}
         t={t}
       />
+      </FadeIn>
 
-      <ContractEventStatsWidget
+      <FadeIn>
+        <ContractEventStatsWidget
         count={contractEventCount}
         loading={contractEventCountLoading}
         t={t}
       />
+      </FadeIn>
 
-      <MonthlySpendingChart 
+      <FadeIn>
+        <MonthlySpendingChart
         data={spendingData} 
         loading={spendingLoading}
         onBarClick={setSelectedMonth}
         t={t}
       />
+      </FadeIn>
 
       {selectedMonth && (
         <div className="mb-8 p-4 rounded-xl bg-stellar-500/5 border border-stellar-500/10 flex items-center justify-between animate-fade-in">
@@ -1135,10 +1143,11 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
             ) : xlmBalance !== null ? (
               <div>
                 <div className={`font-display text-3xl font-bold text-slate-900 dark:text-white ${balanceFlash ? "balance-flash" : ""}`}>
-                  {parseFloat(xlmBalance).toLocaleString("en-US", {
-                    maximumFractionDigits: 4,
-                  })}
-                  <span className="text-stellar-700 dark:text-stellar-400 text-xl ml-2">XLM</span>
+                  <AnimatedCounter
+                    value={parseFloat(xlmBalance) || 0}
+                    decimals={4}
+                    suffix={<span className="text-stellar-700 dark:text-stellar-400 text-xl ml-2">XLM</span>}
+                  />
                 </div>
                 {xlmPrice !== null && (
                   <p className="text-sm text-slate-600 dark:text-slate-400 mt-0.5">
@@ -1313,6 +1322,24 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
         </div>
       ))}
 
+      <Link
+        href="/portfolio"
+        className="card mb-6 flex items-center justify-between gap-4 bg-gradient-to-br from-stellar-500/10 to-blue-500/5 dark:from-stellar-500/5 dark:to-blue-500/10 border-stellar-500/20 hover:border-stellar-500/40 transition-colors group"
+      >
+        <div>
+          <p className="font-semibold text-slate-900 dark:text-white">{t("portfolio.title")}</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+            {t("portfolio.totalValue")}:{" "}
+            {xlmPrice !== null && xlmBalance !== null
+              ? formatUSD(parseFloat(xlmBalance) * xlmPrice)
+              : "—"}
+          </p>
+        </div>
+        <span className="text-stellar-600 dark:text-stellar-400 group-hover:translate-x-0.5 transition-transform">
+          {t("dashboard.viewPortfolio")}
+        </span>
+      </Link>
+
       <FeatureGate flag="streaming_payments">
         <StreamingPayments publicKey={publicKey} />
       </FeatureGate>
@@ -1443,7 +1470,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
         onComplete={handleTourComplete}
         onSkip={handleTourSkip}
       />
-    </div>
+    </StaggerContainer>
   );
 }
 

@@ -51,6 +51,7 @@ const featuresRoutes = require("./routes/features");
 const adminFeatureFlagsRoutes = require("./routes/adminFeatureFlags");
 const tokensRoutes = require("./routes/tokens");
 const pushRoutes = require("./routes/push");
+const contactRoutes = require("./routes/contacts");
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./swagger");
 const { startTurretsServer } = require("./turretsServer");
@@ -432,6 +433,10 @@ if (require.main === module) {
     require("./services/scheduledExecutor").start();
     require("./services/dataRetentionService").startRetentionCron();
     const server = app.listen(PORT, async () => {
+      logger.info(
+        { port: PORT, network: process.env.STELLAR_NETWORK || "testnet" },
+        "Finchippay Solution API server started",
+      );
       logger.info(`
  ✨ Finchippay Solution API
  🚀 Server running at http://localhost:${PORT}

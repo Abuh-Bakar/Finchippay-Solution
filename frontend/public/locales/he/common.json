@@ -18,7 +18,8 @@
   },
   "dashboard": {
     "title": "לוּחַ מַחווָנִים",
-    "connectPrompt": "חבר את הארנק כדי להתחיל"
+    "connectPrompt": "חבר את הארנק כדי להתחיל",
+    "viewPortfolio": "צפה בתיק →"
   },
   "portfolio": {
     "title": "תיק השקעות",

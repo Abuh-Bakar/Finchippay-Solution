@@ -18,7 +18,8 @@
   },
   "dashboard": {
     "title": "لوحة القيادة",
-    "connectPrompt": "قم بتوصيل محفظتك للبدء"
+    "connectPrompt": "قم بتوصيل محفظتك للبدء",
+    "viewPortfolio": "عرض المحفظة →"
   },
   "portfolio": {
     "title": "المحفظة",

@@ -149,7 +149,8 @@
     "balanceTrendUpward": "Balance trend: upward",
     "balanceTrendDownward": "Balance trend: downward",
     "balanceLive": "Live",
-    "balancePolling": "Updating every 30s"
+    "balancePolling": "Updating every 30s",
+    "viewPortfolio": "View Portfolio →"
   },
   "portfolio": {
     "title": "Portfolio",

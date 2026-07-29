@@ -56,7 +56,27 @@ jobs:
             type=ref,event=tag
             type=sha,prefix=sha-
 
-      - name: Build and push backend image
+      # ── Backend: build locally → scan → push ──────────────────────────────
+      - name: Build backend image (local, no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: backend/Dockerfile.prod
+          push: false
+          load: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+
+      - name: Scan backend image (fail on CRITICAL/HIGH)
+        uses: aquasecurity/trivy-action@v0.28.0
+        with:
+          image-ref: ${{ env.BACKEND_IMAGE }}:sha-${{ github.sha }}
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+          ignore-unfixed: true
+
+      - name: Push backend image
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -65,7 +85,27 @@ jobs:
           tags: ${{ steps.meta-backend.outputs.tags }}
           labels: ${{ steps.meta-backend.outputs.labels }}
 
-      - name: Build and push frontend image
+      # ── Frontend: build locally → scan → push ─────────────────────────────
+      - name: Build frontend image (local, no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: frontend
+          file: frontend/Dockerfile.prod
+          push: false
+          load: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+
+      - name: Scan frontend image (fail on CRITICAL/HIGH)
+        uses: aquasecurity/trivy-action@v0.28.0
+        with:
+          image-ref: ${{ env.FRONTEND_IMAGE }}:sha-${{ github.sha }}
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+          ignore-unfixed: true
+
+      - name: Push frontend image
         uses: docker/build-push-action@v5
         with:
           context: frontend
@@ -73,3 +113,23 @@ jobs:
           push: true
           tags: ${{ steps.meta-frontend.outputs.tags }}
           labels: ${{ steps.meta-frontend.outputs.labels }}
+
+      # ── Image SBOMs (SPDX) uploaded as build artifacts ────────────────────
+      - name: Install Syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+            | sh -s -- -b /usr/local/bin v1.18.1
+
+      - name: Generate image SBOMs
+        run: |
+          mkdir -p sbom
+          syft "${BACKEND_IMAGE}:sha-${{ github.sha }}"  -o spdx-json=sbom/backend-image.spdx.json
+          syft "${FRONTEND_IMAGE}:sha-${{ github.sha }}" -o spdx-json=sbom/frontend-image.spdx.json
+
+      - name: Upload image SBOMs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-sboms
+          path: sbom/
+          retention-days: 30
