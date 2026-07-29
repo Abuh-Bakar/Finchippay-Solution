@@ -84,6 +84,11 @@ const correlationIdMiddleware = require("./middleware/correlationId");
 const { setCorrelationIdProvider } = require("../../shared/errorCodes");
 setCorrelationIdProvider(correlationIdMiddleware.getCorrelationId);
 
+const { ApolloServer } = require("apollo-server-express");
+const { ApolloServerPluginLandingPageGraphQLPlayground } = require("apollo-server-core");
+const typeDefs = require("./graphql/schema");
+const resolvers = require("./graphql/resolvers");
+
 const app = express();
 const PORT = process.env.PORT || 4000;
 
@@ -437,6 +442,40 @@ if (require.main === module) {
     // Start scheduled transaction executor
     require("./services/scheduledExecutor").start();
     require("./services/dataRetentionService").startRetentionCron();
+
+    const apolloServer = new ApolloServer({
+      typeDefs,
+      resolvers,
+      context: ({ req }) => {
+        let user = null;
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith("Bearer ")) {
+          try {
+            const token = authHeader.split(" ")[1];
+            const jwt = require("jsonwebtoken");
+            const decoded = jwt.verify(
+              token,
+              process.env.JWT_SECRET || "finchippay_secret_key",
+            );
+            if (decoded.publicKey && /^G[A-Z0-9]{55}$/.test(decoded.publicKey)) {
+              user = decoded;
+            }
+          } catch {
+            // invalid token — context.user stays null
+          }
+        }
+        return { user };
+      },
+      introspection: process.env.NODE_ENV !== "production",
+      plugins:
+        process.env.NODE_ENV !== "production"
+          ? [ApolloServerPluginLandingPageGraphQLPlayground()]
+          : [],
+    });
+
+    await apolloServer.start();
+    apolloServer.applyMiddleware({ app, path: "/api/graphql" });
+
     const server = app.listen(PORT, () => {
       logger.info(
         { port: PORT, network: process.env.STELLAR_NETWORK || "testnet" },
