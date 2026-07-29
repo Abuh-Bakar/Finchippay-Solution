@@ -82,9 +82,9 @@ pub enum ContractError {
     /// The recipient's escrow index already holds `MAX_USER_ESCROWS` entries.
     IndexFull = 18,
     /// The emergency withdrawal has not yet reached its activation ledger.
-    EmergencyWithdrawalNotReady = 18,
+    EmergencyWithdrawalNotReady = 19,
     /// The caller is not an authorised admin signer for this withdrawal.
-    NotAdminSigner = 19,
+    NotAdminSigner = 20,
 }
 
 // ─── Shared data types ────────────────────────────────────────────────────────
@@ -152,6 +152,14 @@ pub struct Escrow {
     pub status: EscrowStatus,
     /// Optional memo attached to the escrow for off-chain context.
     pub memo: Symbol,
+    /// Designated arbitrator for dispute resolution (None → not disputable).
+    pub arbitrator: Option<Address>,
+    /// Whether a dispute has been raised on this escrow.
+    pub disputed: bool,
+    /// Who raised the dispute (from or to). Only set when disputed = true.
+    pub dispute_raised_by: Option<Address>,
+    /// Ledger at which the dispute was raised.
+    pub dispute_raised_at: u32,
 }
 
 /// Maximum number of escrows tracked per recipient index (prevents state bloat).
@@ -376,6 +384,10 @@ pub enum DataKey {
     EscrowRecipient(u32),
     /// Index of escrows associated with a recipient address.
     EscrowByRecipient(Address),
+    // Arbitrators (dispute resolution)
+    ArbitratorCount,
+    /// Registered arbitrators for disputable escrows.
+    Arbitrators,
     // Streaming
     StreamCount,
     Stream(u32),
@@ -1598,6 +1610,10 @@ impl FinchippayContract {
             release_ledger,
             status: EscrowStatus::Pending,
             memo,
+            arbitrator: Option::None,
+            disputed: false,
+            dispute_raised_by: Option::None,
+            dispute_raised_at: 0,
         };
 
         env.storage()
@@ -1850,6 +1866,274 @@ impl FinchippayContract {
     /// binding for dashboard and analytics consumers.
     pub fn escrow_count(env: Env) -> u32 {
         Self::get_escrow_count(env)
+    }
+
+    // ─── Dispute resolution ──────────────────────────────────────────────────
+
+    /// Admin: add an arbitrator to the global arbitrator list.
+    pub fn add_arbitrator(env: Env, admin: Address, arbitrator: Address) {
+        admin.require_auth();
+        let stored = get_admin(&env);
+        if admin != stored {
+            panic!("Unauthorized");
+        }
+
+        let mut arbitrators: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Arbitrators)
+            .unwrap_or(Vec::new(&env));
+
+        if arbitrators.contains(&arbitrator) {
+            panic!("Arbitrator already registered");
+        }
+
+        arbitrators.push_back(arbitrator.clone());
+        env.storage()
+            .persistent()
+            .set(&DataKey::Arbitrators, &arbitrators);
+        bump(&env, &DataKey::Arbitrators);
+
+        let count: u32 = arbitrators.len();
+        env.storage()
+            .persistent()
+            .set(&DataKey::ArbitratorCount, &count);
+        bump(&env, &DataKey::ArbitratorCount);
+
+        env.events()
+            .publish((Symbol::new(&env, "arbitrator_added"),), arbitrator);
+    }
+
+    /// Admin: remove an arbitrator from the global arbitrator list.
+    pub fn remove_arbitrator(env: Env, admin: Address, arbitrator: Address) {
+        admin.require_auth();
+        let stored = get_admin(&env);
+        if admin != stored {
+            panic!("Unauthorized");
+        }
+
+        let arbitrators: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Arbitrators)
+            .unwrap_or_else(|| panic!("No arbitrators registered"));
+
+        if !arbitrators.contains(&arbitrator) {
+            panic!("Arbitrator not found");
+        }
+
+        let mut new_list = Vec::new(&env);
+        for arb in arbitrators.iter() {
+            if arb != arbitrator {
+                new_list.push_back(arb);
+            }
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Arbitrators, &new_list);
+        bump(&env, &DataKey::Arbitrators);
+
+        let count: u32 = new_list.len();
+        env.storage()
+            .persistent()
+            .set(&DataKey::ArbitratorCount, &count);
+        bump(&env, &DataKey::ArbitratorCount);
+
+        env.events()
+            .publish((Symbol::new(&env, "arbitrator_removed"),), arbitrator);
+    }
+
+    /// Create a disputable escrow with a designated arbitrator.
+    /// Same as create_escrow but allows dispute resolution.
+    pub fn create_disputable_escrow(
+        env: Env,
+        token_address: Address,
+        from: Address,
+        to: Address,
+        amount: i128,
+        release_ledger: u32,
+        arbitrator: Address,
+    ) -> Result<u32, ContractError> {
+        require_initialized(&env);
+        require_not_paused(&env);
+        from.require_auth();
+        if from == to {
+            panic!("cannot create escrow to yourself");
+        }
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
+        let current_ledger = env.ledger().sequence();
+        if release_ledger <= current_ledger {
+            panic!("release_ledger must be in the future");
+        }
+
+        // Validate arbitrator is registered
+        let arbitrators: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Arbitrators)
+            .unwrap_or_else(|| panic!("No arbitrators registered"));
+        if !arbitrators.contains(&arbitrator) {
+            panic!("Arbitrator is not registered");
+        }
+
+        let rkey = DataKey::EscrowByRecipient(to.clone());
+        let mut r_escrows: Vec<Escrow> = env
+            .storage()
+            .persistent()
+            .get(&rkey)
+            .unwrap_or(Vec::new(&env));
+        if r_escrows.len() >= MAX_USER_ESCROWS {
+            return Err(ContractError::IndexFull);
+        }
+
+        let token = get_token_client(&env, &token_address);
+        let contract_address = env.current_contract_address();
+        require_transfer_succeeded(&env, &token, &from, &contract_address, &amount);
+        increase_locked_balance(&env, &token_address, amount);
+
+        let next_id: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::EscrowCount)
+            .unwrap_or(0);
+        let escrow = Escrow {
+            id: next_id,
+            from: from.clone(),
+            to: to.clone(),
+            token: token_address,
+            amount,
+            release_ledger,
+            status: EscrowStatus::Pending,
+            memo: Symbol::new(&env, ""),
+            arbitrator: Some(arbitrator.clone()),
+            disputed: false,
+            dispute_raised_by: Option::None,
+            dispute_raised_at: 0,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::EscrowRecipient(next_id), &to);
+        bump(&env, &DataKey::EscrowRecipient(next_id));
+        env.storage()
+            .persistent()
+            .set(&DataKey::EscrowCount, &(next_id + 1));
+        bump(&env, &DataKey::EscrowCount);
+
+        env.events().publish(
+            (Symbol::new(&env, "disputable_escrow_created"),),
+            (next_id, arbitrator),
+        );
+
+        Ok(next_id)
+    }
+
+    /// Raise a dispute on a disputable escrow. Only the sender or recipient
+    /// can raise a dispute.
+    pub fn raise_dispute(env: Env, escrow_id: u32, by: Address) {
+        by.require_auth();
+
+        let mut escrow: Escrow = env
+            .storage()
+            .persistent()
+            .get(&DataKey::EscrowRecipient(escrow_id))
+            .unwrap_or_else(|| panic!("Escrow not found"));
+
+        if escrow.arbitrator.is_none() {
+            panic!("Escrow is not disputable");
+        }
+        if escrow.status != EscrowStatus::Pending {
+            panic!("Escrow must be in pending status to dispute");
+        }
+        if escrow.disputed {
+            panic!("Escrow is already disputed");
+        }
+        if by != escrow.from && by != escrow.to {
+            panic!("Only escrow participants can raise a dispute");
+        }
+
+        let current_ledger = env.ledger().sequence();
+        escrow.disputed = true;
+        escrow.dispute_raised_by = Some(by.clone());
+        escrow.dispute_raised_at = current_ledger;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::EscrowRecipient(escrow_id), &escrow);
+        bump(&env, &DataKey::EscrowRecipient(escrow_id));
+
+        env.events()
+            .publish((Symbol::new(&env, "dispute_raised"),), (escrow_id, by));
+    }
+
+    /// Resolve a dispute. Only the designated arbitrator can call this.
+    /// Resolution types: "release" (to recipient), "refund" (to sender),
+    /// "split" (amount to recipient, rest to sender).
+    pub fn resolve_dispute(
+        env: Env,
+        escrow_id: u32,
+        arbitrator: Address,
+        resolution: Symbol,
+        to: Address,
+        amount: i128,
+    ) {
+        arbitrator.require_auth();
+
+        let mut escrow: Escrow = env
+            .storage()
+            .persistent()
+            .get(&DataKey::EscrowRecipient(escrow_id))
+            .unwrap_or_else(|| panic!("Escrow not found"));
+
+        if !escrow.disputed {
+            panic!("Escrow is not disputed");
+        }
+        if escrow.arbitrator != Some(arbitrator.clone()) {
+            panic!("Only the designated arbitrator can resolve this dispute");
+        }
+
+        let client = token::Client::new(&env, &escrow.token);
+        let contract = env.current_contract_address();
+
+        if resolution == Symbol::new(&env, "release") {
+            // Release amount to the specified recipient
+            client.transfer(&contract, &to, &amount);
+        } else if resolution == Symbol::new(&env, "refund") {
+            // Refund amount to the original sender
+            client.transfer(&contract, &escrow.from, &escrow.amount);
+        } else if resolution == Symbol::new(&env, "split") {
+            // Release amount to to, refund the rest to from
+            let refund = escrow.amount - amount;
+            client.transfer(&contract, &to, &amount);
+            if refund > 0 {
+                client.transfer(&contract, &escrow.from, &refund);
+            }
+        } else {
+            panic!("Invalid resolution type");
+        }
+
+        escrow.status = EscrowStatus::Released;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::EscrowRecipient(escrow_id), &escrow);
+        bump(&env, &DataKey::EscrowRecipient(escrow_id));
+
+        env.events().publish(
+            (Symbol::new(&env, "dispute_resolved"),),
+            (escrow_id, resolution, to, amount),
+        );
+    }
+
+    /// Return the list of registered arbitrators.
+    pub fn get_arbitrators(env: Env) -> Vec<Address> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Arbitrators)
+            .unwrap_or(Vec::new(&env))
     }
 
     // ─── Streaming payments ───────────────────────────────────────────────────
