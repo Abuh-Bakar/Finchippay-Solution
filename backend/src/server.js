@@ -72,7 +72,7 @@ const {
   getRequestId,
 } = require("./utils/correlationId");
 const { errorLogFields } = require("./utils/errorResponse");
-const { initRedis, closeRedis } = require("./services/cacheService");
+const { initRedis, closeRedis } = require("./services/cacheService");`nconst { markShuttingDown, markStartupComplete } = require("./services/healthService");
 const {
   closeAll: closeBalanceStreams,
 } = require("./services/balanceStreamService");
