@@ -4,6 +4,10 @@ export interface AddressBookContact {
   id: string;
   nickname: string;
   address: string;
+  federationAddress?: string;
+  federationResolved?: boolean;
+  federationCachedAt?: number;
+  groupIds?: number[];
   createdAt: number;
   updatedAt: number;
 }
@@ -12,6 +16,13 @@ const ADDRESS_BOOK_STORAGE_KEY = "finchippay:contacts";
 const LEGACY_CONTACTS_STORAGE_KEY = "finchippay-contacts";
 const LEGACY_FAVOURITES_STORAGE_KEY = "finchippay:favourites";
 const CONTACTS_UPDATED_EVENT = "finchippay:contacts-updated";
+const FEDERATION_CACHE_KEY = "finchippay:federation-cache";
+const FEDERATION_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+interface FederationCacheEntry {
+  address: string;
+  resolvedAt: number;
+}
 
 interface LegacyContact {
   id?: string;
@@ -20,6 +31,9 @@ interface LegacyContact {
   address?: string;
   createdAt?: number;
   updatedAt?: number;
+  federationAddress?: string;
+  federationResolved?: boolean;
+  federationCachedAt?: number;
 }
 
 function now() {
@@ -38,6 +52,9 @@ function makeContact(input: LegacyContact): AddressBookContact | null {
     id: input.id || `${address}:${input.createdAt || now()}`,
     nickname,
     address,
+    federationAddress: input.federationAddress,
+    federationResolved: input.federationResolved || false,
+    federationCachedAt: input.federationCachedAt,
     createdAt: typeof input.createdAt === "number" ? input.createdAt : now(),
     updatedAt: typeof input.updatedAt === "number" ? input.updatedAt : now(),
   };
@@ -79,12 +96,10 @@ export function saveAddressBookContacts(contacts: AddressBookContact[]) {
   try {
     window.localStorage.setItem(ADDRESS_BOOK_STORAGE_KEY, JSON.stringify(contacts));
     window.dispatchEvent(new CustomEvent(CONTACTS_UPDATED_EVENT, { detail: contacts }));
-  } catch {
-    // Ignore storage failures (private browsing, full quota, etc.).
-  }
+  } catch {}
 }
 
-export function upsertAddressBookContact(input: { nickname: string; address: string }) {
+export function upsertAddressBookContact(input: { nickname: string; address: string; federationAddress?: string }) {
   const nickname = input.nickname.trim();
   const address = input.address.trim();
 
@@ -99,6 +114,7 @@ export function upsertAddressBookContact(input: { nickname: string; address: str
     contacts[existingIndex] = {
       ...contacts[existingIndex],
       nickname,
+      federationAddress: input.federationAddress || contacts[existingIndex].federationAddress,
       updatedAt: timestamp,
     };
   } else {
@@ -106,6 +122,7 @@ export function upsertAddressBookContact(input: { nickname: string; address: str
       id: `${address}:${timestamp}`,
       nickname,
       address,
+      federationAddress: input.federationAddress,
       createdAt: timestamp,
       updatedAt: timestamp,
     });
@@ -156,7 +173,67 @@ export function clearAddressBook() {
     window.localStorage.removeItem(LEGACY_CONTACTS_STORAGE_KEY);
     window.localStorage.removeItem(LEGACY_FAVOURITES_STORAGE_KEY);
     window.dispatchEvent(new CustomEvent(CONTACTS_UPDATED_EVENT, { detail: [] }));
+  } catch {}
+}
+
+// ─── Federation resolution with caching ──────────────────────────────────
+
+function getFederationCache(): Record<string, FederationCacheEntry> {
+  try {
+    const raw = window.localStorage.getItem(FEDERATION_CACHE_KEY);
+    return raw ? JSON.parse(raw) : {};
   } catch {
-    // Ignore storage failures (private browsing, full quota, etc.).
+    return {};
   }
+}
+
+function saveFederationCache(cache: Record<string, FederationCacheEntry>) {
+  try {
+    window.localStorage.setItem(FEDERATION_CACHE_KEY, JSON.stringify(cache));
+  } catch {}
+}
+
+export function getCachedFederationAddress(federationAddress: string): string | null {
+  const cache = getFederationCache();
+  const entry = cache[federationAddress.trim().toLowerCase()];
+  if (!entry) return null;
+  if (now() - entry.resolvedAt > FEDERATION_CACHE_TTL_MS) return null;
+  return entry.address;
+}
+
+export function setCachedFederationAddress(federationAddress: string, stellarAddress: string) {
+  const cache = getFederationCache();
+  cache[federationAddress.trim().toLowerCase()] = {
+    address: stellarAddress,
+    resolvedAt: now(),
+  };
+  saveFederationCache(cache);
+}
+
+export async function resolveFederationWithCache(
+  federationAddress: string
+): Promise<string | null> {
+  const cached = getCachedFederationAddress(federationAddress);
+  if (cached) return cached;
+
+  const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "";
+  const url = `${apiBase}/federation?q=${encodeURIComponent(federationAddress)}&type=name`;
+
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data?.account_id && isValidStellarAddress(data.account_id)) {
+      setCachedFederationAddress(federationAddress, data.account_id);
+      return data.account_id;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearFederationCache() {
+  try {
+    window.localStorage.removeItem(FEDERATION_CACHE_KEY);
+  } catch {}
 }
