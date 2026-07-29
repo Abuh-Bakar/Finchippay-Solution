@@ -71,8 +71,6 @@ const logger = pino({
     censor: "[REDACTED]",
   },
   transport: transportConfig,
-    level: (label) => ({ level: label.toUpperCase() }),
-  },
   mixin() {
     const { getRequestId } = require("./correlationId");
     const correlationId = getRequestId();
