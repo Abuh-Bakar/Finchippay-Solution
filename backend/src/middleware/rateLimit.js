@@ -2,6 +2,7 @@
 
 const rateLimit = require("express-rate-limit");
 const { formatErrorResponse } = require("../../../shared/errorCodes");
+const logger = require("../utils/logger");
 const {
   createRateLimitHandler,
   recordRateLimitAllowed,
@@ -20,7 +21,7 @@ if (process.env.REDIS_URL) {
   });
 
   redisClient.on("error", (err) => {
-    console.error("Redis rate-limit client error:", err);
+    logger.error({ err }, "Redis rate-limit client error");
   });
 }
 

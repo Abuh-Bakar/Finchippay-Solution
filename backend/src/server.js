@@ -413,11 +413,10 @@ if (require.main === module) {
       });
     require("./services/dataRetentionService").startRetentionCron();
     const server = app.listen(PORT, () => {
-      console.log(`
- ✨ Finchippay Solution API
- 🚀 Server running at http://localhost:${PORT}
- 🌐 Network: ${process.env.STELLAR_NETWORK || "testnet"}
- `);
+      logger.info(
+        { port: PORT, network: process.env.STELLAR_NETWORK || "testnet" },
+        "Finchippay Solution API server started",
+      );
     });
 
     startTurretsServer();
