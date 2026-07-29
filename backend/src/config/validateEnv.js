@@ -5,6 +5,8 @@
 
 "use strict";
 
+const logger = require("../utils/logger");
+
 const VALID_NETWORKS = ["testnet", "mainnet"];
 
 /**
@@ -301,6 +303,10 @@ function validateEnv(env = process.env) {
     return;
   }
 
+  logger.error(
+    { errors, count: errors.length },
+    "Environment validation failed — copy backend/.env.example to backend/.env and set the required values",
+  );
   const logger = require("../utils/logger");
   logger.fatal({ errors }, "Environment validation failed. Copy backend/.env.example to backend/.env and set the required values.");
   process.exit(1);

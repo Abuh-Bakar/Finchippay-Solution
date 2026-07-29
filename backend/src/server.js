@@ -433,6 +433,10 @@ if (require.main === module) {
     require("./services/scheduledExecutor").start();
     require("./services/dataRetentionService").startRetentionCron();
     const server = app.listen(PORT, () => {
+      logger.info(
+        { port: PORT, network: process.env.STELLAR_NETWORK || "testnet" },
+        "Finchippay Solution API server started",
+      );
       logger.info(`
  ✨ Finchippay Solution API
  🚀 Server running at http://localhost:${PORT}

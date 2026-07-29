@@ -12,6 +12,7 @@
 "use strict";
 
 const metrics = require("../services/metricsService");
+const logger = require("../utils/logger");
 const {
   formatErrorResponse,
   ERROR_CODES,
@@ -92,8 +93,8 @@ function requireMetricsToken(req, res, next) {
   if (!expectedToken) {
     // No token configured — allow open access with a loud warning.
     if (process.env.NODE_ENV !== "test") {
-      console.warn(
-        "⚠️  METRICS_TOKEN is not set — /metrics endpoint is unprotected. " +
+      logger.warn(
+        "METRICS_TOKEN is not set — /metrics endpoint is unprotected. " +
           "Set METRICS_TOKEN in production to secure Prometheus scraping.",
       );
     }
