@@ -13,6 +13,26 @@ const {
 // ─── collectErrors ────────────────────────────────────────────────────────────
 
 describe("validateEnv.collectErrors", () => {
+  it("throws if JWT_SECRET is not set in production", () => {
+    expect(() => {
+      collectErrors({
+        NODE_ENV: "production",
+        STELLAR_NETWORK: "testnet",
+        HORIZON_URL: "https://horizon-testnet.stellar.org",
+      });
+    }).toThrow("FATAL: JWT_SECRET must be set in production.");
+  });
+
+  it("throws if JWT_SECRET is set to the insecure default value", () => {
+    expect(() => {
+      collectErrors({
+        JWT_SECRET: "finchippay_secret_key",
+        STELLAR_NETWORK: "testnet",
+        HORIZON_URL: "https://horizon-testnet.stellar.org",
+      });
+    }).toThrow("FATAL: JWT_SECRET is set to the insecure default value.");
+  });
+
   it("returns no errors when required vars are valid", () => {
     expect(
       collectErrors({
@@ -180,6 +200,42 @@ describe("validateEnv.collectErrors", () => {
         HORIZON_URL: "https://horizon-testnet.stellar.org",
         OTEL_EXPORTER_OTLP_ENDPOINT: "https://tempo-prod.example.com:443",
       }),
+    ).toEqual([]);
+  });
+
+  // ─── WEBHOOK_ENCRYPTION_KEY validation ─────────────────────────────────
+
+  it("does not require WEBHOOK_ENCRYPTION_KEY in non-production", () => {
+    expect(
+      collectErrors({
+        STELLAR_NETWORK: "testnet",
+        HORIZON_URL: "https://horizon-testnet.stellar.org",
+        NODE_ENV: "development",
+      })
+    ).toEqual([]);
+  });
+
+  it("requires WEBHOOK_ENCRYPTION_KEY in production", () => {
+    const errors = collectErrors({
+      STELLAR_NETWORK: "testnet",
+      HORIZON_URL: "https://horizon-testnet.stellar.org",
+      NODE_ENV: "production",
+    });
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("WEBHOOK_ENCRYPTION_KEY is required"),
+      ])
+    );
+  });
+
+  it("passes when WEBHOOK_ENCRYPTION_KEY is set in production", () => {
+    expect(
+      collectErrors({
+        STELLAR_NETWORK: "testnet",
+        HORIZON_URL: "https://horizon-testnet.stellar.org",
+        NODE_ENV: "production",
+        WEBHOOK_ENCRYPTION_KEY: "aaabbbcccdddeeefff000111222333444555666777888999000aaabbbcccdddee",
+      })
     ).toEqual([]);
   });
 });

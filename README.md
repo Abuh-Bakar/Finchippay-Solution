@@ -134,8 +134,16 @@ Swagger docs: http://localhost:4000/api/docs
 
 ```bash
 cd contracts/finchippay-contract
-cargo test
+cargo test                    # unit tests
+cargo test --test integration # end-to-end sandbox integration tests
 cargo build --release --target wasm32v1-none
+```
+
+The integration tests deploy the contract in a simulated Soroban sandbox and verify full workflows (Tip, Escrow, Stream, MultiSig, Receipt, Batch Send, Vesting, Emergency Withdrawal) including event emission, pagination, circuit-breaker pausing, and view function `NotFound` error handling. Each test starts with a fresh `Env` and deploys a clean contract instance.
+
+From the project root:
+```bash
+make test-integration
 ```
 
 ### Generate TypeScript contract bindings

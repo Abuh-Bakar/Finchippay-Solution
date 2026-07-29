@@ -42,6 +42,7 @@ import {
   upsertAddressBookContact,
 } from "@/lib/addressBook";
 import { formatXLM, shortenAddress } from "@/utils/format";
+import ContactPicker from "@/components/ContactPicker";
 import {
   SendIcon,
   CheckIcon,
@@ -295,6 +296,7 @@ function SendPaymentForm({
   const [contacts, setContacts] = useState<AddressBookContact[]>(loadAddressBookContacts);
   const [isContactsDropdownOpen, setIsContactsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [isContactPickerOpen, setIsContactPickerOpen] = useState(false);
 
   useEffect(() => subscribeToAddressBookContacts(setContacts), []);
 
@@ -977,6 +979,15 @@ function SendPaymentForm({
                 >
                   {isContactsDropdownOpen ? t("sendPayment.close") : t("sendPayment.contacts")}
                 </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsContactPickerOpen(true)}
+                  className="text-xs text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  title={t("sendPayment.selectContact")}
+                >
+                  {t("sendPayment.select") ?? "Select"}
+                </button>
                 {isValidDest && (
                   <button
                     type="button"
@@ -1266,8 +1277,19 @@ function SendConfirmationModal({ isOpen, destination, amount, asset, memo, estim
           <button onClick={onConfirm} className="flex-1 btn-primary py-3">{t("sendPayment.confirmAndSign")}</button>
         </div>
       </div>
+      {isContactPickerOpen && (
+        <ContactPicker
+          isOpen={isContactPickerOpen}
+          onClose={() => setIsContactPickerOpen(false)}
+          onSelect={(publicKey: string, name: string, memo?: string) => {
+            setDestination(publicKey);
+            if (memo) setMemo(memo);
+            setIsContactPickerOpen(false);
+          }}
+        />
+      )}
     </div>
-  );
+  )
 }
-
+ 
 export default withErrorBoundary(SendPaymentForm, "SendPaymentForm");

@@ -7,6 +7,8 @@
 
 "use strict";
 
+const logger = require("../utils/logger");
+
 const stellarService = require("./stellarService");
 const logger = require("../utils/logger");
 
@@ -218,6 +220,7 @@ async function getTotalReceiptCount() {
       return { totalReceiptCount };
     } catch (error) {
       logger.error({ err: error }, "Failed to fetch total receipt count from contract");
+      logger.error({ error }, "Failed to fetch total receipt count from contract");
       return { totalReceiptCount: 0 };
     }
   });

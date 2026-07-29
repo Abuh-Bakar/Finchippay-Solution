@@ -51,11 +51,32 @@ const themeOptions: Array<{
     description: "Always use the dark theme",
   },
   {
-    value: "system",
-    label: "System",
-    description: "Follow your device preference",
+    value: "highContrast",
+    label: "High Contrast",
+    description: "Force high‑contrast mode (WCAG AAA)",
   },
 ];
+
+function ContrastIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 3v18"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
 
 function ThemeOptionIcon({
   theme,
@@ -70,6 +91,10 @@ function ThemeOptionIcon({
 
   if (theme === "dark") {
     return <MoonIcon className={className} />;
+  }
+
+  if (theme === "highContrast" || theme === "high-contrast") {
+    return <ContrastIcon className={className} />;
   }
 
   return <SystemIcon className={className} />;
@@ -126,6 +151,8 @@ export default function ThemeToggle() {
   const currentThemeLabel =
     theme === "system"
       ? `System theme, currently ${resolved}`
+      : theme === "high-contrast"
+      ? "High contrast theme"
       : `${theme} theme`;
 
   return (
