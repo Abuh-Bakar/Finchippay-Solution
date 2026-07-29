@@ -1,218 +1,148 @@
 /**
  * __tests__/health.test.js
- * Unit tests for GET /health (liveness) and GET /health/ready (readiness).
- *
- * healthService is mocked so no real network calls are made, which means the
- * tests run fast and are fully deterministic.
+ * Unit tests for liveness, readiness, startup, and dependency probes.
  */
 
 "use strict";
 
 const request = require("supertest");
 
-// ─── Mock healthService before requiring the app ────────────────────────────
-jest.mock("../src/services/healthService");
-const { checkDependencies } = require("../src/services/healthService");
+jest.mock("../src/services/healthService", () => ({
+  checkDependencies: jest.fn(),
+  getLivenessState: jest.fn(),
+  getStartupState: jest.fn(),
+  markStartupComplete: jest.fn(),
+  markShuttingDown: jest.fn(),
+}));
 
-// ─── Mock auth middleware (standard pattern across the test suite) ────────────
 jest.mock("../src/middleware/auth", () => ({
   verifyJWT: (_req, _res, next) => next(),
   requireAdmin: (_req, _res, next) => next(),
 }));
 
+const {
+  checkDependencies,
+  getLivenessState,
+  getStartupState,
+} = require("../src/services/healthService");
 const app = require("../src/server");
 
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("GET /health — liveness probe", () => {
-  it("returns 200 with status ok", async () => {
-    const res = await request(app).get("/health");
-    expect(res.status).toBe(200);
-    expect(res.body.status).toBe("ok");
-  });
-
-  it("includes uptime as a non-negative number", async () => {
-    const res = await request(app).get("/health");
-    expect(typeof res.body.uptime).toBe("number");
-    expect(res.body.uptime).toBeGreaterThanOrEqual(0);
-  });
-
-  it("includes timestamp in ISO 8601 format", async () => {
-    const res = await request(app).get("/health");
-    expect(res.body.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
-  });
-
-  it("does NOT call checkDependencies (no external I/O)", async () => {
-    await request(app).get("/health");
-    expect(checkDependencies).not.toHaveBeenCalled();
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("GET /health/ready — readiness probe", () => {
-  afterEach(() => {
+describe("health probes", () => {
+  beforeEach(() => {
     jest.clearAllMocks();
+    getLivenessState.mockReturnValue({
+      status: "alive",
+      uptime: 12,
+      timestamp: "2026-07-29T00:00:00.000Z",
+    });
+    getStartupState.mockReturnValue({
+      status: "started",
+      initialized: true,
+      initDuration: 42,
+    });
   });
 
-  describe("when all dependencies are reachable", () => {
-    beforeEach(() => {
+  describe("GET /health/live", () => {
+    it("returns liveness without dependency I/O", async () => {
+      const res = await request(app).get("/health/live");
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe("alive");
+      expect(checkDependencies).not.toHaveBeenCalled();
+    });
+
+    it("keeps /health as a liveness alias", async () => {
+      const res = await request(app).get("/health");
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe("alive");
+    });
+  });
+
+  describe("GET /health/ready", () => {
+    it("returns ready with dependency checks and all_healthy summary", async () => {
       checkDependencies.mockResolvedValue({
         healthy: true,
+        summary: "all_healthy",
         dependencies: {
-          horizon: { status: "ok", latencyMs: 45 },
+          postgres: { status: "healthy", latency: 4, message: "ok" },
+          redis: { status: "healthy", latency: 1, message: "ok" },
+          horizon: { status: "healthy", latency: 45, message: "ok" },
         },
       });
-    });
 
-    it("returns HTTP 200", async () => {
-      const res = await request(app).get("/health/ready");
+      const res = await request(app).get("/api/health/ready");
+
       expect(res.status).toBe(200);
+      expect(res.body.status).toBe("ready");
+      expect(res.body.summary).toBe("all_healthy");
+      expect(res.body.checks.postgres.status).toBe("healthy");
     });
 
-    it("returns status ok", async () => {
-      const res = await request(app).get("/health/ready");
-      expect(res.body.status).toBe("ok");
-    });
-
-    it("includes horizon dependency with status ok and latencyMs", async () => {
-      const res = await request(app).get("/health/ready");
-      expect(res.body.dependencies.horizon.status).toBe("ok");
-      expect(typeof res.body.dependencies.horizon.latencyMs).toBe("number");
-    });
-  });
-
-  // ── Horizon unreachable ────────────────────────────────────────────────────
-
-  describe("when Horizon is unreachable", () => {
-    beforeEach(() => {
+    it("returns not_ready when a critical dependency fails", async () => {
       checkDependencies.mockResolvedValue({
         healthy: false,
+        summary: "critical_failure",
         dependencies: {
-          horizon: {
-            status: "error",
-            latencyMs: 5001,
-            error: "connect ECONNREFUSED 127.0.0.1:80",
-          },
+          postgres: { status: "unhealthy", latency: 10, message: "down" },
+          redis: { status: "healthy", latency: 1, message: "ok" },
+          horizon: { status: "healthy", latency: 45, message: "ok" },
         },
       });
-    });
 
-    it("returns HTTP 503", async () => {
-      const res = await request(app).get("/health/ready");
+      const res = await request(app).get("/api/health/ready");
+
       expect(res.status).toBe(503);
-    });
-
-    it("returns status error in body", async () => {
-      const res = await request(app).get("/health/ready");
-      expect(res.body.status).toBe("error");
-    });
-
-    it("reports horizon dependency as error", async () => {
-      const res = await request(app).get("/health/ready");
-      expect(res.body.dependencies.horizon.status).toBe("error");
-    });
-
-    it("includes an error message for the failing dependency", async () => {
-      const res = await request(app).get("/health/ready");
-      expect(typeof res.body.dependencies.horizon.error).toBe("string");
-      expect(res.body.dependencies.horizon.error.length).toBeGreaterThan(0);
+      expect(res.body.status).toBe("not_ready");
+      expect(res.body.summary).toBe("critical_failure");
+      expect(res.body.checks.postgres.message).toBe("down");
     });
   });
 
-  // ── Horizon times out ─────────────────────────────────────────────────────
+  describe("GET /health/started", () => {
+    it("returns startup state after initialization", async () => {
+      const res = await request(app).get("/api/health/started");
 
-  describe("when Horizon times out", () => {
-    beforeEach(() => {
-      checkDependencies.mockResolvedValue({
-        healthy: false,
-        dependencies: {
-          horizon: {
-            status: "error",
-            latencyMs: 5000,
-            error: "timed out after 5000 ms",
-          },
-        },
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe("started");
+      expect(res.body.initDuration).toBe(42);
+    });
+
+    it("returns 503 while initialization is incomplete", async () => {
+      getStartupState.mockReturnValue({
+        status: "starting",
+        initialized: false,
+        initDuration: 5,
       });
-    });
 
-    it("returns HTTP 503", async () => {
-      const res = await request(app).get("/health/ready");
+      const res = await request(app).get("/api/health/started");
+
       expect(res.status).toBe(503);
-    });
-
-    it("includes timeout error message", async () => {
-      const res = await request(app).get("/health/ready");
-      expect(res.body.dependencies.horizon.error).toMatch(/timed out/i);
+      expect(res.body.status).toBe("starting");
     });
   });
 
-  // ── Soroban RPC configured and healthy ────────────────────────────────────
-
-  describe("when Soroban RPC is configured and reachable", () => {
-    beforeEach(() => {
+  describe("GET /health/dependencies", () => {
+    it("returns detailed dependency status for admins", async () => {
       checkDependencies.mockResolvedValue({
         healthy: true,
+        summary: "degraded",
         dependencies: {
-          horizon: { status: "ok", latencyMs: 40 },
-          soroban_rpc: { status: "ok", latencyMs: 120 },
-        },
-      });
-    });
-
-    it("returns HTTP 200", async () => {
-      const res = await request(app).get("/health/ready");
-      expect(res.status).toBe(200);
-    });
-
-    it("includes soroban_rpc in dependencies", async () => {
-      const res = await request(app).get("/health/ready");
-      expect(res.body.dependencies.soroban_rpc.status).toBe("ok");
-      expect(typeof res.body.dependencies.soroban_rpc.latencyMs).toBe("number");
-    });
-  });
-
-  // ── Soroban RPC configured but unreachable ────────────────────────────────
-
-  describe("when Soroban RPC is unreachable", () => {
-    beforeEach(() => {
-      checkDependencies.mockResolvedValue({
-        healthy: false,
-        dependencies: {
-          horizon: { status: "ok", latencyMs: 40 },
+          postgres: { status: "healthy", latency: 4, message: "ok" },
           soroban_rpc: {
-            status: "error",
-            latencyMs: 5001,
-            error: "timed out after 5000 ms",
+            status: "degraded",
+            latency: 0,
+            message: "not configured",
           },
         },
       });
-    });
 
-    it("returns HTTP 503", async () => {
-      const res = await request(app).get("/health/ready");
-      expect(res.status).toBe(503);
-    });
+      const res = await request(app).get("/api/health/dependencies");
 
-    it("reports soroban_rpc dependency as error", async () => {
-      const res = await request(app).get("/health/ready");
-      expect(res.body.dependencies.soroban_rpc.status).toBe("error");
-    });
-  });
-
-  // ── checkDependencies rejects unexpectedly ────────────────────────────────
-
-  describe("when checkDependencies throws an unexpected error", () => {
-    beforeEach(() => {
-      checkDependencies.mockRejectedValue(
-        new Error("unexpected internal error"),
-      );
-    });
-
-    // The Express error handler should convert unhandled rejections to 500.
-    it("returns HTTP 500", async () => {
-      const res = await request(app).get("/health/ready");
-      expect(res.status).toBe(500);
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe("degraded");
+      expect(res.body.checks.soroban_rpc.status).toBe("degraded");
+      expect(res.body.checked_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     });
   });
 });
