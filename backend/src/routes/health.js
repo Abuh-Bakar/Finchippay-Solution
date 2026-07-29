@@ -1,106 +1,52 @@
 /**
  * src/routes/health.js
- * Health check endpoints — used by CI, load-balancers, and Kubernetes probes.
- *
- * GET /health        — liveness probe (no external I/O, always fast).
- * GET /health/ready  — readiness probe (deep check of downstream dependencies).
+ * Health check endpoints used by CI, load balancers, and Kubernetes probes.
  */
 
 "use strict";
 
 const express = require("express");
-const { checkDependencies } = require("../services/healthService");
+const {
+  checkDependencies,
+  getLivenessState,
+  getStartupState,
+} = require("../services/healthService");
+const { verifyJWT, requireAdmin } = require("../middleware/auth");
 
 const router = express.Router();
 
-// Optional Redis status — loaded lazily to avoid circular dependency issues.
-let getRedisStatus = null;
-try {
-  getRedisStatus = require("../services/cacheService").getRedisStatus;
-} catch {
-  // cacheService not available; redis field will report "disabled".
+function sendLive(_req, res) {
+  res.json(getLivenessState());
 }
 
-/**
- * @swagger
- * /health:
- *   get:
- *     summary: Liveness check
- *     description: >
- *       Lightweight check — no external calls. Returns 200 as long as the
- *       Node.js process is alive. Use as a Kubernetes livenessProbe.
- *     tags: [Health]
- *     responses:
- *       200:
- *         description: Service is alive.
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: ok
- *                 service:
- *                   type: string
- *                   example: finchippay-api
- *                 network:
- *                   type: string
- *                   example: testnet
- *                 uptime:
- *                   type: number
- *                   description: Process uptime in seconds.
- *                   example: 123.4
- *                 timestamp:
- *                   type: string
- *                   format: date-time
- *                 redis:
- *                   type: string
- *                   example: connected
- */
-router.get("/", (_req, res) => {
-  res.json({
-    status: "ok",
-    service: "finchippay-api",
-    network: process.env.STELLAR_NETWORK || "testnet",
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString(),
-    redis: getRedisStatus ? getRedisStatus() : "disabled",
-  });
-});
+router.get("/", sendLive);
+router.get("/live", sendLive);
 
-/**
- * @swagger
- * /health/ready:
- *   get:
- *     summary: Readiness check
- *     description: >
- *       Deep check — probes all downstream dependencies (Horizon, Soroban RPC
- *       when configured). Returns 200 when all dependencies are reachable;
- *       returns 503 when any dependency is down. Use as a Kubernetes
- *       readinessProbe so traffic is only routed to healthy pods.
- *     tags: [Health]
- *     responses:
- *       200:
- *         description: All dependencies are reachable.
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ReadinessResponse'
- *       503:
- *         description: One or more dependencies are unreachable.
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ReadinessResponse'
- */
 router.get("/ready", async (_req, res, next) => {
   try {
-    const { healthy, dependencies } = await checkDependencies();
-    const statusCode = healthy ? 200 : 503;
-    res.status(statusCode).json({
-      status: healthy ? "ok" : "error",
-      dependencies,
+    const { healthy, summary, dependencies } = await checkDependencies();
+    res.status(healthy ? 200 : 503).json({
+      status: healthy ? "ready" : "not_ready",
+      checks: dependencies,
+      summary,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/started", (_req, res) => {
+  const startup = getStartupState();
+  res.status(startup.initialized ? 200 : 503).json(startup);
+});
+
+router.get("/dependencies", verifyJWT, requireAdmin, async (_req, res, next) => {
+  try {
+    const { summary, dependencies } = await checkDependencies();
+    res.json({
+      status: summary,
+      checks: dependencies,
+      checked_at: new Date().toISOString(),
     });
   } catch (err) {
     next(err);
