@@ -29,7 +29,7 @@
 //!   multi-sig amounts are capped to prevent griefing and permanent lock-up.
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Symbol, Val, Vec,
 };
 
 // ─── Storage lifetime constants ───────────────────────────────────────────────
@@ -82,9 +82,13 @@ pub enum ContractError {
     /// The recipient's escrow index already holds `MAX_USER_ESCROWS` entries.
     IndexFull = 18,
     /// The emergency withdrawal has not yet reached its activation ledger.
-    EmergencyWithdrawalNotReady = 18,
+    EmergencyWithdrawalNotReady = 19,
     /// The caller is not an authorised admin signer for this withdrawal.
-    NotAdminSigner = 19,
+    NotAdminSigner = 20,
+    /// The referenced admin action proposal does not exist.
+    ProposalNotFound = 21,
+    /// The admin action proposal was already executed.
+    ProposalAlreadyExecuted = 22,
 }
 
 // ─── Shared data types ────────────────────────────────────────────────────────
@@ -350,6 +354,28 @@ const MAX_ADMIN_SIGNERS: u32 = 20;
 /// declares a layout version >= this value, preventing bricked storage.
 const STORAGE_LAYOUT_VERSION: u32 = 1;
 
+// ─── Admin multi-sig proposal type ────────────────────────────────────────────
+
+/// A single admin-governance action proposed for approval by the admin signer set.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct AdminActionProposal {
+    /// Auto-incrementing proposal ID.
+    pub id: u64,
+    /// Which admin action is proposed (e.g. "pause", "upgrade", "rescue").
+    pub action_type: Symbol,
+    /// Additional data needed to execute the action (function-specific).
+    pub action_data: Vec<Val>,
+    /// Admin signers that have approved so far.
+    pub approvals: Vec<Address>,
+    /// Number of unique admin approvals required to execute.
+    pub threshold: u32,
+    /// Whether this proposal has been executed.
+    pub executed: bool,
+    /// Ledger after which the proposal expires and can no longer be approved.
+    pub expiration_ledger: u32,
+}
+
 // ─── Storage key enum ─────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -391,6 +417,10 @@ pub enum DataKey {
     // Emergency withdrawal
     EmergencyWithdrawalCount,
     EmergencyWithdrawal(u32),
+    /// Admin-governance multi-sig action proposal counter.
+    AdminActionCount,
+    /// A single admin action proposal by ID.
+    AdminActionProposal(u64),
     /// List of addresses authorised to approve emergency withdrawals.
     AdminSigners,
     /// Number of admin approvals required for emergency withdrawal execution.
@@ -807,6 +837,155 @@ impl FinchippayContract {
             (Symbol::new(&env, "admin_signers_set"),),
             (threshold, signers.len()),
         );
+    }
+
+    // ─── Admin multi-sig governance ─────────────────────────────────────────
+
+    /// Propose an admin action for multi-sig approval.
+    ///
+    /// Anyone can propose — execution requires threshold approvals from
+    /// the configured admin signers.
+    pub fn propose_admin_action(
+        env: Env,
+        proposer: Address,
+        action_type: Symbol,
+        action_data: Vec<Val>,
+    ) -> u64 {
+        // Load admin signers config (must exist).
+        let _signers: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AdminSigners)
+            .unwrap_or_else(|| panic!("Admin signers not configured"));
+        let threshold: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AdminSignersThreshold)
+            .unwrap_or_else(|| panic!("Admin signers threshold not configured"));
+
+        let mut counter: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AdminActionCount)
+            .unwrap_or(0);
+        counter += 1;
+
+        let current_ledger = env.ledger().sequence();
+        let proposal = AdminActionProposal {
+            id: counter,
+            action_type: action_type.clone(),
+            action_data,
+            approvals: Vec::new(&env),
+            threshold,
+            executed: false,
+            // Expire after 7 days (~120,960 ledgers at 5s/ledger).
+            expiration_ledger: current_ledger + 120_960,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::AdminActionProposal(counter), &proposal);
+        bump(&env, &DataKey::AdminActionProposal(counter));
+        env.storage()
+            .persistent()
+            .set(&DataKey::AdminActionCount, &counter);
+        bump(&env, &DataKey::AdminActionCount);
+
+        env.events().publish(
+            (Symbol::new(&env, "admin_action_proposed"),),
+            (counter, action_type, proposer),
+        );
+
+        counter
+    }
+
+    /// Approve a pending admin action proposal.
+    ///
+    /// When approvals reach the threshold, the action is auto-executed
+    /// immediately.
+    pub fn approve_admin_action(env: Env, proposal_id: u64, approver: Address) {
+        approver.require_auth();
+
+        // Validate signer
+        let signers: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AdminSigners)
+            .unwrap_or_else(|| panic!("Admin signers not configured"));
+        if !signers.contains(&approver) {
+            panic!("{:?}", ContractError::NotAdminSigner);
+        }
+
+        // Load proposal
+        let mut proposal: AdminActionProposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AdminActionProposal(proposal_id))
+            .unwrap_or_else(|| panic!("{:?}", ContractError::ProposalNotFound));
+
+        if proposal.executed {
+            panic!("{:?}", ContractError::ProposalAlreadyExecuted);
+        }
+
+        if proposal.approvals.contains(&approver) {
+            panic!("{:?}", ContractError::AlreadySigned);
+        }
+
+        let current_ledger = env.ledger().sequence();
+        if current_ledger > proposal.expiration_ledger {
+            panic!("{:?}", ContractError::ProposalExpired);
+        }
+
+        proposal.approvals.push_back(approver.clone());
+        let approval_count = proposal.approvals.len() as u32;
+
+        env.events().publish(
+            (Symbol::new(&env, "admin_action_approved"),),
+            (proposal_id, approver, approval_count, proposal.threshold),
+        );
+
+        // Auto-execute when threshold met
+        if approval_count >= proposal.threshold {
+            proposal.executed = true;
+            env.storage()
+                .persistent()
+                .set(&DataKey::AdminActionProposal(proposal_id), &proposal);
+            bump(&env, &DataKey::AdminActionProposal(proposal_id));
+
+            // Dispatch the action
+            Self::execute_admin_action(&env, &proposal);
+        } else {
+            env.storage()
+                .persistent()
+                .set(&DataKey::AdminActionProposal(proposal_id), &proposal);
+            bump(&env, &DataKey::AdminActionProposal(proposal_id));
+        }
+    }
+
+    /// Internal: execute the concrete admin action after threshold is met.
+    fn execute_admin_action(env: &Env, proposal: &AdminActionProposal) {
+        let action = &proposal.action_type;
+        if action == &Symbol::new(env, "pause") {
+            Self::do_pause(env);
+        } else if action == &Symbol::new(env, "unpause") {
+            Self::do_unpause(env);
+        }
+        // upgrade, rescue_tokens, and set_pauser require parameter data
+        // and are executed via their existing single-admin entrypoints.
+    }
+
+    /// Execute pause without auth check (called from execute_admin_action).
+    fn do_pause(env: &Env) {
+        env.storage().persistent().set(&DataKey::Paused, &true);
+        bump(env, &DataKey::Paused);
+        env.events().publish((Symbol::new(env, "paused"),), ());
+    }
+
+    /// Execute unpause without auth check.
+    fn do_unpause(env: &Env) {
+        env.storage().persistent().set(&DataKey::Paused, &false);
+        bump(env, &DataKey::Paused);
+        env.events().publish((Symbol::new(env, "unpaused"),), ());
     }
 
     /// Return the current pauser address, if one is set.
