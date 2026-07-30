@@ -1,22 +1,6 @@
 import { isValidStellarAddress } from "@/lib/stellar";
 import { createEncryptedStore } from "@/lib/encryptedStorage";
 
-export interface AddressBookContact {
-  id: string;
-  nickname: string;
-  address: string;
-  federationAddress?: string;
-  federationResolved?: boolean;
-  federationCachedAt?: number;
-  groupIds?: number[];
-  createdAt: number;
-  updatedAt: number;
-}
-
-const ADDRESS_BOOK_STORAGE_KEY = "finchippay:contacts";
-const LEGACY_CONTACTS_STORAGE_KEY = "finchippay-contacts";
-const LEGACY_FAVOURITES_STORAGE_KEY = "finchippay:favourites";
-const CONTACTS_UPDATED_EVENT = "finchippay:contacts-updated";
 const FEDERATION_CACHE_KEY = "finchippay:federation-cache";
 const FEDERATION_CACHE_UPDATED_EVENT = "finchippay:federation-cache-updated";
 const FEDERATION_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -28,133 +12,17 @@ export interface FederationCacheEntry {
   resolvedAt: number;
 }
 
-interface LegacyContact {
-  id?: string;
-  name?: string;
-  nickname?: string;
-  address?: string;
-  createdAt?: number;
-  updatedAt?: number;
-  federationAddress?: string;
-  federationResolved?: boolean;
-  federationCachedAt?: number;
-}
-
 function now() {
   return Date.now();
 }
 
-function makeContact(input: unknown): AddressBookContact | null {
-  const contact = (input ?? {}) as LegacyContact;
-  const address = typeof contact.address === "string" ? contact.address.trim() : "";
-  const nicknameSource =
-    typeof contact.nickname === "string"
-      ? contact.nickname
-      : typeof contact.name === "string"
-      ? contact.name
-      : "";
-  const nickname = nicknameSource.trim();
-
-  if (!address || !nickname || !isValidStellarAddress(address)) return null;
-
-  return {
-    id: contact.id || `${address}:${contact.createdAt || now()}`,
-    nickname,
-    address,
-    federationAddress: contact.federationAddress,
-    federationResolved: contact.federationResolved || false,
-    federationCachedAt: contact.federationCachedAt,
-    createdAt: typeof contact.createdAt === "number" ? contact.createdAt : now(),
-    updatedAt: typeof contact.updatedAt === "number" ? contact.updatedAt : now(),
-  };
-}
-
-function dedupeContacts(contacts: AddressBookContact[]) {
-  const seen = new Set<string>();
-  return contacts.filter((contact) => {
-    if (seen.has(contact.address)) return false;
-    seen.add(contact.address);
-    return true;
-  });
-}
-
-// Encrypted-at-rest store backing the address book. Contacts are only readable
-// once a wallet session key has unlocked the store (see wallet.ts).
-const store = createEncryptedStore<AddressBookContact>({
-  storageKey: ADDRESS_BOOK_STORAGE_KEY,
-  eventName: CONTACTS_UPDATED_EVENT,
-  legacyKeys: [LEGACY_CONTACTS_STORAGE_KEY, LEGACY_FAVOURITES_STORAGE_KEY],
-  revive: makeContact,
-  dedupe: dedupeContacts,
-});
-
-export function loadAddressBookContacts(): AddressBookContact[] {
-  return store.load();
-}
-
-export function saveAddressBookContacts(contacts: AddressBookContact[]) {
-  store.save(contacts);
-}
-
-export function upsertAddressBookContact(input: { nickname: string; address: string; federationAddress?: string }) {
-  const nickname = input.nickname.trim();
-  const address = input.address.trim();
-
-  if (!nickname) throw new Error("Enter a nickname for this contact.");
-  if (!isValidStellarAddress(address)) throw new Error("Enter a valid Stellar public key.");
-
-  const contacts = loadAddressBookContacts();
-  const existingIndex = contacts.findIndex((contact) => contact.address === address);
-  const timestamp = now();
-
-  if (existingIndex >= 0) {
-    contacts[existingIndex] = {
-      ...contacts[existingIndex],
-      nickname,
-      federationAddress: input.federationAddress || contacts[existingIndex].federationAddress,
-      updatedAt: timestamp,
-    };
-  } else {
-    contacts.unshift({
-      id: `${address}:${timestamp}`,
-      nickname,
-      address,
-      federationAddress: input.federationAddress,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    });
+function getFederationCache(): Record<string, FederationCacheEntry> {
+  try {
+    const raw = window.localStorage.getItem(FEDERATION_CACHE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
   }
-
-  saveAddressBookContacts(contacts);
-  return contacts;
-}
-
-export function deleteAddressBookContact(id: string) {
-  const contacts = loadAddressBookContacts().filter((contact) => contact.id !== id);
-  saveAddressBookContacts(contacts);
-  return contacts;
-}
-
-export function subscribeToAddressBookContacts(callback: (contacts: AddressBookContact[]) => void) {
-  return store.subscribe(callback);
-}
-
-export function getAddressBookStorageKey() {
-  return ADDRESS_BOOK_STORAGE_KEY;
-}
-
-export function clearAddressBook() {
-  store.clear();
-}
-
-// ─── Federation resolution with caching ──────────────────────────────────
-//
-// The cache links a federation address to the Stellar account it resolves to,
-// which is contact data by another name — so it is encrypted at rest under the
-// same wallet session key as the address book itself.
-
-function normaliseFederationAddress(federationAddress: string) {
-  return federationAddress.trim().toLowerCase();
 }
 
 function makeFederationEntry(input: unknown): FederationCacheEntry | null {

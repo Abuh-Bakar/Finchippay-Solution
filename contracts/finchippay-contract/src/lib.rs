@@ -20,7 +20,11 @@
 //! - All arithmetic uses `checked_add` / `checked_sub` / `checked_mul` with
 //!   explicit panics so overflows are never silently truncated.
 //! - Storage TTLs are extended on every read and write to prevent ledger
-//!   expiry from corrupting live streams or pending multi-sig proposals.
+//!   expiry from corrupting live streams or pending multi-sig proposals. Newly
+//!   created entries start at the `MIN_TTL_LEDGERS` floor, later touches lift
+//!   any entry that has decayed past `MIN_TTL_THRESHOLD`, and `bump_all_ttls`
+//!   lets an admin sweep cold entries that nobody reads. `get_min_ttl` reports
+//!   the lowest lifetime the contract can still prove, for off-chain alerting.
 //! - **Emergency pause**: admin can freeze all value-transferring operations
 //!   (circuit breaker pattern) to contain potential exploits.
 //! - **Upgradability**: admin can point the contract at a new WASM hash to
@@ -34,10 +38,22 @@ use soroban_sdk::{
 
 // ─── Storage lifetime constants ───────────────────────────────────────────────
 
-/// Minimum remaining TTL (in ledgers) before we bump persistent storage.
-const PERSISTENT_LIFETIME_THRESHOLD: u32 = 100_000;
-/// Target TTL (in ledgers) after a bump (~1 year at 5 s/ledger).
-const PERSISTENT_BUMP_AMOUNT: u32 = 500_000;
+/// Target TTL (in ledgers) a persistent entry is extended to (~31 days at
+/// 5 s/ledger). Every entry the contract creates or sweeps is guaranteed to
+/// have at least this many ledgers of life remaining.
+const MIN_TTL_LEDGERS: u32 = 535_680;
+/// Remaining TTL below which a hot-path touch refreshes an entry. Reads and
+/// updates only pay for a TTL extension once an entry drops under this bound,
+/// which keeps per-call gas flat on frequently exercised paths.
+const MIN_TTL_THRESHOLD: u32 = 100_000;
+/// Hard cap on the number of keys a single `bump_all_ttls` call will touch, so
+/// a sweep can never exceed the resource budget of one Soroban transaction.
+const MAX_TTL_BUMP_KEYS: u32 = 100;
+/// Number of variants in `TtlClass`, i.e. how many key groups a full sweep
+/// walks through.
+const TTL_CLASS_COUNT: u32 = 7;
+/// Number of singleton configuration keys enumerated by the `Config` class.
+const TTL_CONFIG_KEYS: u32 = 9;
 
 // ─── Error catalogue ──────────────────────────────────────────────────────────
 
@@ -85,6 +101,15 @@ pub enum ContractError {
     EmergencyWithdrawalNotReady = 19,
     /// The caller is not an authorised admin signer for this withdrawal.
     NotAdminSigner = 20,
+    /// The supplied swap `path` is malformed: fewer than 2 addresses, or its
+    /// first/last entries don't match `token_in`/`token_out`.
+    InvalidPath = 21,
+    /// The swap would return less than the caller's `min_amount_out`.
+    SlippageExceeded = 22,
+    /// The input required to satisfy an exact-output swap exceeds `max_amount_in`.
+    ExcessiveAmountIn = 23,
+    /// `new_fee_bps` exceeds `MAX_SWAP_FEE_BPS`.
+    InvalidFeeBps = 24,
 }
 
 // ─── Shared data types ────────────────────────────────────────────────────────
@@ -167,6 +192,23 @@ const MAX_USER_ESCROWS: u32 = 100;
 const MAX_USER_STREAMS: u32 = 100;
 const MAX_PAGE_SIZE: u32 = 50;
 
+// ─── Batch swap helper types ─────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct SwapItem {
+    pub token: Address,
+    pub amount: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct TokenTotal {
+    pub token: Address,
+    pub total: i128,
+}
+
+
 // ─── Streaming payments ───────────────────────────────────────────────────────
 
 /// A continuous per-ledger payment stream from `payer` to `recipient`.
@@ -197,6 +239,8 @@ pub struct Stream {
     pub start_ledger: u32,
     /// True once the payer has closed the stream.
     pub closed: bool,
+    pub paused_at_ledger: u32,
+    pub total_paused_duration: u32,
 }
 
 /// Pure arithmetic core of the streaming payment formula, factored out of
@@ -206,11 +250,26 @@ pub struct Stream {
 /// Does not account for `stream.closed` — callers that care about closed
 /// streams (i.e. the contract itself) check that separately.
 pub fn claimable_at(stream: &Stream, current_ledger: u32) -> i128 {
-    let elapsed = current_ledger.saturating_sub(stream.start_ledger) as i128;
+    if current_ledger <= stream.start_ledger || stream.closed {
+        return 0;
+    }
+
+    let active_paused_duration = if stream.paused_at_ledger > 0 {
+        current_ledger.saturating_sub(stream.paused_at_ledger)
+    } else {
+        0
+    };
+
+    let effective_elapsed = current_ledger
+        .saturating_sub(stream.start_ledger)
+        .saturating_sub(stream.total_paused_duration)
+        .saturating_sub(active_paused_duration);
+
     let total_streamed = stream
         .rate_per_ledger
-        .checked_mul(elapsed)
+        .checked_mul(effective_elapsed as i128)
         .expect("overflow");
+
     let capped = total_streamed.min(stream.deposited);
     (capped - stream.claimed).max(0)
 }
@@ -356,7 +415,35 @@ const MAX_ADMIN_SIGNERS: u32 = 20;
 /// or any persistent struct field layout changes. The admin must call
 /// `validate_storage_compatibility` before upgrading to ensure the new WASM
 /// declares a layout version >= this value, preventing bricked storage.
-const STORAGE_LAYOUT_VERSION: u32 = 1;
+const STORAGE_LAYOUT_VERSION: u32 = 3;
+
+// ─── Storage TTL classes ──────────────────────────────────────────────────────
+
+/// A group of persistent keys that `bump_all_ttls` can enumerate and sweep as a
+/// unit, and that `get_min_ttl` reports a guaranteed remaining lifetime for.
+///
+/// Only groups reachable from an on-chain counter are listed. Tip records,
+/// locked balances, and cached contract balances are keyed by an arbitrary
+/// address with no global registry, so they cannot be enumerated on-chain; they
+/// rely on the per-operation bumps in the functions that touch them instead.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum TtlClass {
+    /// Admin, pauser, paused flag, versions, admin signers, arbitrators.
+    Config,
+    /// Global receipt counter, index mapping, and per-payer receipt records.
+    Receipts,
+    /// Escrow counter, per-id recipient, and per-recipient escrow index.
+    Escrows,
+    /// Stream counter, per-id stream, and per-payer stream index.
+    Streams,
+    /// Multi-sig proposal counter and per-id proposals.
+    MultiSig,
+    /// Vesting schedule counter and per-id schedules.
+    Vesting,
+    /// Emergency withdrawal counter and per-id withdrawals.
+    Emergency,
+}
 
 // ─── Storage key enum ─────────────────────────────────────────────────────────
 
@@ -407,16 +494,62 @@ pub enum DataKey {
     AdminSigners,
     /// Number of admin approvals required for emergency withdrawal execution.
     AdminSignersThreshold,
+    // Storage lifetime bookkeeping
+    /// Ledger at which every key in a `TtlClass` was last guaranteed to have at
+    /// least `MIN_TTL_LEDGERS` of life remaining. Written only by a completed
+    /// class sweep, which is what makes `get_min_ttl` a sound lower bound.
+    TtlWatermark(TtlClass),
+    /// Resume position of a partial sweep, as `(class_index, key_index)`.
+    TtlSweepCursor,
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/// Refresh an existing entry that is running low on life. Because the threshold
+/// is below the target, an entry with plenty of TTL left costs nothing to touch,
+/// which keeps hot paths (claims, approvals, view functions) cheap.
+///
+/// Callers must be sure the entry exists — `extend_ttl` traps on a missing key.
 fn bump<K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(env: &Env, key: &K) {
-    env.storage().persistent().extend_ttl(
-        key,
-        PERSISTENT_LIFETIME_THRESHOLD,
-        PERSISTENT_BUMP_AMOUNT,
-    );
+    env.storage()
+        .persistent()
+        .extend_ttl(key, MIN_TTL_THRESHOLD, MIN_TTL_LEDGERS);
+}
+
+/// Extend an entry so that its remaining TTL is unconditionally at least
+/// `MIN_TTL_LEDGERS`.
+///
+/// Setting the threshold equal to the target makes the post-condition hold no
+/// matter what the entry's TTL was beforehand, which is what lets a completed
+/// sweep record a watermark that `get_min_ttl` can trust. Used when an entry is
+/// first created and by `bump_all_ttls`; both are rare enough that the extra TTL
+/// write is irrelevant, and on networks whose minimum persistent TTL already
+/// exceeds the target it costs nothing at all.
+fn bump_to_floor<K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(env: &Env, key: &K) {
+    env.storage()
+        .persistent()
+        .extend_ttl(key, MIN_TTL_LEDGERS, MIN_TTL_LEDGERS);
+}
+
+/// `bump_to_floor` for keys that may legitimately be absent. Returns the number
+/// of keys bumped (0 or 1) so sweep callers can count real work.
+fn bump_to_floor_if_present<K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(
+    env: &Env,
+    key: &K,
+) -> u32 {
+    if env.storage().persistent().has(key) {
+        bump_to_floor(env, key);
+        1
+    } else {
+        0
+    }
+}
+
+/// `bump` for keys that may legitimately be absent.
+fn bump_if_present<K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(env: &Env, key: &K) {
+    if env.storage().persistent().has(key) {
+        bump(env, key);
+    }
 }
 
 fn get_admin(env: &Env) -> Address {
@@ -431,10 +564,10 @@ fn get_admin(env: &Env) -> Address {
 }
 
 fn locked_balance(env: &Env, token_address: &Address) -> i128 {
-    env.storage()
-        .persistent()
-        .get(&DataKey::LockedBalance(token_address.clone()))
-        .unwrap_or(0)
+    let key = DataKey::LockedBalance(token_address.clone());
+    let balance = env.storage().persistent().get(&key).unwrap_or(0);
+    bump_if_present(env, &key);
+    balance
 }
 
 fn increase_locked_balance(env: &Env, token_address: &Address, amount: i128) {
@@ -470,12 +603,18 @@ fn get_token_client<'a>(env: &'a Env, token_address: &'a Address) -> token::Clie
 /// Panics with `TransferFailed` if the balance check does not hold.
 fn get_contract_balance(env: &Env, token: &token::Client) -> i128 {
     let key = DataKey::LastContractBalance(token.address.clone());
-    env.storage().persistent().get(&key).unwrap_or_else(|| {
-        let bal = token.balance(&env.current_contract_address());
-        env.storage().persistent().set(&key, &bal);
-        bump(env, &key);
-        bal
-    })
+    match env.storage().persistent().get(&key) {
+        Some(bal) => {
+            bump(env, &key);
+            bal
+        }
+        None => {
+            let bal = token.balance(&env.current_contract_address());
+            env.storage().persistent().set(&key, &bal);
+            bump(env, &key);
+            bal
+        }
+    }
 }
 
 fn set_contract_balance(env: &Env, token_address: &Address, balance: i128) {
@@ -527,10 +666,7 @@ fn require_not_paused(env: &Env) {
     if paused {
         panic!("Contract is paused");
     }
-    // Only bump TTL if the key exists in storage.
-    if env.storage().persistent().has(&DataKey::Paused) {
-        bump(env, &DataKey::Paused);
-    }
+    bump_if_present(env, &key);
 }
 
 /// Check that the contract has been initialised. Panics if `initialize()` was
@@ -561,6 +697,177 @@ fn get_admin_signers_threshold(env: &Env) -> u32 {
         .expect("admin signers threshold not configured");
     bump(env, &key);
     threshold
+}
+
+// ─── Storage TTL sweeping ───────────────────────────────────────────────────
+
+/// Read a counter that gates how many items a TTL class contains.
+fn counter(env: &Env, key: &DataKey) -> u32 {
+    env.storage().persistent().get(key).unwrap_or(0)
+}
+
+/// Map a sweep class index onto its `TtlClass`. Indices come from the stored
+/// cursor, so they are always below `TTL_CLASS_COUNT`.
+fn ttl_class_at(index: u32) -> TtlClass {
+    match index {
+        0 => TtlClass::Config,
+        1 => TtlClass::Receipts,
+        2 => TtlClass::Escrows,
+        3 => TtlClass::Streams,
+        4 => TtlClass::MultiSig,
+        5 => TtlClass::Vesting,
+        _ => TtlClass::Emergency,
+    }
+}
+
+/// Human-readable name reported by `get_min_ttl`.
+fn ttl_class_symbol(env: &Env, class: &TtlClass) -> Symbol {
+    match class {
+        TtlClass::Config => Symbol::new(env, "config"),
+        TtlClass::Receipts => Symbol::new(env, "receipts"),
+        TtlClass::Escrows => Symbol::new(env, "escrows"),
+        TtlClass::Streams => Symbol::new(env, "streams"),
+        TtlClass::MultiSig => Symbol::new(env, "multisig"),
+        TtlClass::Vesting => Symbol::new(env, "vesting"),
+        TtlClass::Emergency => Symbol::new(env, "emergency"),
+    }
+}
+
+/// How many sweep items a class holds. Item 0 of every counted class is the
+/// counter itself, so the count is `1 + items` and is never zero.
+fn ttl_class_len(env: &Env, class: &TtlClass) -> u32 {
+    match class {
+        TtlClass::Config => TTL_CONFIG_KEYS,
+        TtlClass::Receipts => 1 + counter(env, &DataKey::TotalReceiptCount),
+        TtlClass::Escrows => 1 + counter(env, &DataKey::EscrowCount),
+        TtlClass::Streams => 1 + counter(env, &DataKey::StreamCount),
+        TtlClass::MultiSig => 1 + counter(env, &DataKey::MultiSigCount),
+        TtlClass::Vesting => 1 + counter(env, &DataKey::VestingCount),
+        TtlClass::Emergency => 1 + counter(env, &DataKey::EmergencyWithdrawalCount),
+    }
+}
+
+/// Whether a class holds any state worth guaranteeing a lifetime for. `Config`
+/// always does, since `initialize` writes into it.
+fn ttl_class_is_populated(env: &Env, class: &TtlClass) -> bool {
+    match class {
+        TtlClass::Config => true,
+        _ => ttl_class_len(env, class) > 1,
+    }
+}
+
+/// Bump the `index`-th singleton configuration key. Most are optional, so each
+/// one is guarded.
+fn bump_config_key(env: &Env, index: u32) -> u32 {
+    match index {
+        0 => bump_to_floor_if_present(env, &DataKey::Admin),
+        1 => bump_to_floor_if_present(env, &DataKey::Version),
+        2 => bump_to_floor_if_present(env, &DataKey::StorageLayoutVersion),
+        3 => bump_to_floor_if_present(env, &DataKey::Paused),
+        4 => bump_to_floor_if_present(env, &DataKey::Pauser),
+        5 => bump_to_floor_if_present(env, &DataKey::AdminSigners),
+        6 => bump_to_floor_if_present(env, &DataKey::AdminSignersThreshold),
+        7 => bump_to_floor_if_present(env, &DataKey::Arbitrators),
+        _ => bump_to_floor_if_present(env, &DataKey::ArbitratorCount),
+    }
+}
+
+/// Bump every key belonging to sweep item `index` of `class` and return how many
+/// keys were actually touched.
+///
+/// An item can own more than one key — an escrow owns both its per-id recipient
+/// entry and the recipient's escrow index — so the caller checks its budget
+/// before starting an item rather than between the keys of one item. That keeps
+/// a sweep making progress for any `max_keys >= 1`.
+fn bump_ttl_class_item(env: &Env, class: &TtlClass, index: u32) -> u32 {
+    match class {
+        TtlClass::Config => bump_config_key(env, index),
+        TtlClass::Receipts => {
+            if index == 0 {
+                return bump_to_floor_if_present(env, &DataKey::TotalReceiptCount);
+            }
+            let index_key = DataKey::ReceiptByIndex(index - 1);
+            let entry: Option<(Address, u32)> = env.storage().persistent().get(&index_key);
+            match entry {
+                Some((payer, local_index)) => {
+                    bump_to_floor(env, &index_key);
+                    1 + bump_to_floor_if_present(
+                        env,
+                        &DataKey::ReceiptRecord(payer.clone(), local_index),
+                    ) + bump_to_floor_if_present(env, &DataKey::ReceiptCount(payer))
+                }
+                None => 0,
+            }
+        }
+        TtlClass::Escrows => {
+            if index == 0 {
+                return bump_to_floor_if_present(env, &DataKey::EscrowCount);
+            }
+            let recipient_key = DataKey::EscrowRecipient(index - 1);
+            let recipient: Option<Address> = env.storage().persistent().get(&recipient_key);
+            match recipient {
+                Some(recipient) => {
+                    bump_to_floor(env, &recipient_key);
+                    1 + bump_to_floor_if_present(env, &DataKey::EscrowByRecipient(recipient))
+                }
+                None => 0,
+            }
+        }
+        TtlClass::Streams => {
+            if index == 0 {
+                return bump_to_floor_if_present(env, &DataKey::StreamCount);
+            }
+            let stream_key = DataKey::Stream(index - 1);
+            let stream: Option<Stream> = env.storage().persistent().get(&stream_key);
+            match stream {
+                Some(stream) => {
+                    bump_to_floor(env, &stream_key);
+                    1 + bump_to_floor_if_present(env, &DataKey::StreamByPayer(stream.payer))
+                }
+                None => 0,
+            }
+        }
+        TtlClass::MultiSig => {
+            if index == 0 {
+                bump_to_floor_if_present(env, &DataKey::MultiSigCount)
+            } else {
+                bump_to_floor_if_present(env, &DataKey::MultiSig(index - 1))
+            }
+        }
+        TtlClass::Vesting => {
+            if index == 0 {
+                bump_to_floor_if_present(env, &DataKey::VestingCount)
+            } else {
+                bump_to_floor_if_present(env, &DataKey::Vesting(index - 1))
+            }
+        }
+        TtlClass::Emergency => {
+            if index == 0 {
+                bump_to_floor_if_present(env, &DataKey::EmergencyWithdrawalCount)
+            } else {
+                bump_to_floor_if_present(env, &DataKey::EmergencyWithdrawal(index - 1))
+            }
+        }
+    }
+}
+
+/// Record that every key in `class` has just been raised to `MIN_TTL_LEDGERS`.
+fn set_ttl_watermark(env: &Env, class: &TtlClass) {
+    let key = DataKey::TtlWatermark(class.clone());
+    env.storage()
+        .persistent()
+        .set(&key, &env.ledger().sequence());
+    bump_to_floor(env, &key);
+}
+
+/// Remaining lifetime `class` is guaranteed to have, derived from its watermark.
+/// `None` means no sweep has ever completed for the class, so nothing is
+/// guaranteed.
+fn ttl_class_remaining(env: &Env, class: &TtlClass) -> Option<u32> {
+    let key = DataKey::TtlWatermark(class.clone());
+    let swept_at: u32 = env.storage().persistent().get(&key)?;
+    let elapsed = env.ledger().sequence().saturating_sub(swept_at);
+    Some(MIN_TTL_LEDGERS.saturating_sub(elapsed))
 }
 
 // ─── Invariant checking ─────────────────────────────────────────────────────
@@ -685,15 +992,19 @@ impl FinchippayContract {
             return Err(ContractError::AlreadyInitialized);
         }
         env.storage().persistent().set(&DataKey::Admin, &admin);
-        bump(&env, &DataKey::Admin);
+        bump_to_floor(&env, &DataKey::Admin);
         env.storage()
             .persistent()
             .set(&DataKey::Version, &CONTRACT_VERSION);
-        bump(&env, &DataKey::Version);
+        bump_to_floor(&env, &DataKey::Version);
         env.storage()
             .persistent()
             .set(&DataKey::StorageLayoutVersion, &STORAGE_LAYOUT_VERSION);
-        bump(&env, &DataKey::StorageLayoutVersion);
+        bump_to_floor(&env, &DataKey::StorageLayoutVersion);
+        // The three keys just written are the only ones the Config class holds
+        // at this point, and all are at the TTL floor, so the guarantee that
+        // `get_min_ttl` reports for the class already holds.
+        set_ttl_watermark(&env, &TtlClass::Config);
         env.events().publish((Symbol::new(&env, "init"),), admin);
         Ok(())
     }
@@ -718,10 +1029,10 @@ impl FinchippayContract {
 
     /// Return `true` if the contract is currently paused (circuit breaker).
     pub fn is_paused(env: Env) -> bool {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Paused)
-            .unwrap_or(false)
+        let key = DataKey::Paused;
+        let paused = env.storage().persistent().get(&key).unwrap_or(false);
+        bump_if_present(&env, &key);
+        paused
     }
 
     /// Admin: pause all value-transferring operations. Read-only functions remain
@@ -739,7 +1050,7 @@ impl FinchippayContract {
             panic!("Unauthorized");
         }
         env.storage().persistent().set(&DataKey::Paused, &true);
-        bump(&env, &DataKey::Paused);
+        bump_to_floor(&env, &DataKey::Paused);
         env.events().publish((Symbol::new(&env, "paused"),), ());
     }
 
@@ -757,7 +1068,7 @@ impl FinchippayContract {
             panic!("Unauthorized");
         }
         env.storage().persistent().set(&DataKey::Paused, &false);
-        bump(&env, &DataKey::Paused);
+        bump_to_floor(&env, &DataKey::Paused);
         env.events().publish((Symbol::new(&env, "unpaused"),), ());
     }
 
@@ -770,7 +1081,7 @@ impl FinchippayContract {
             panic!("Unauthorized");
         }
         env.storage().persistent().set(&DataKey::Pauser, &pauser);
-        bump(&env, &DataKey::Pauser);
+        bump_to_floor(&env, &DataKey::Pauser);
         env.events()
             .publish((Symbol::new(&env, "pauser_set"),), pauser);
     }
@@ -809,11 +1120,11 @@ impl FinchippayContract {
         env.storage()
             .persistent()
             .set(&DataKey::AdminSignersThreshold, &threshold);
-        bump(&env, &DataKey::AdminSignersThreshold);
+        bump_to_floor(&env, &DataKey::AdminSignersThreshold);
         env.storage()
             .persistent()
             .set(&DataKey::AdminSigners, &signers);
-        bump(&env, &DataKey::AdminSigners);
+        bump_to_floor(&env, &DataKey::AdminSigners);
 
         env.events().publish(
             (Symbol::new(&env, "admin_signers_set"),),
@@ -912,6 +1223,123 @@ impl FinchippayContract {
             (Symbol::new(&env, "upgraded"),),
             (current_ver + 1, new_wasm_hash, new_layout_version),
         );
+    }
+
+    // ─── Storage lifetime management ───────────────────────────────────────────
+
+    /// Admin: extend the TTL of every enumerable persistent entry, resuming from
+    /// wherever the previous call left off.
+    ///
+    /// A contract with thousands of escrows, streams, and receipts cannot be
+    /// swept inside one transaction's resource budget, so each call touches at
+    /// most `min(max_keys, MAX_TTL_BUMP_KEYS)` keys and stores a cursor. Call
+    /// repeatedly until the return value is smaller than the requested limit to
+    /// finish a full pass; the cursor wraps back to the start after the last
+    /// class, so an off-chain job can simply keep calling on a schedule.
+    ///
+    /// Every key a pass touches is left with at least `MIN_TTL_LEDGERS` of life
+    /// remaining, and completing a class records that fact for `get_min_ttl`.
+    ///
+    /// Tip records, locked balances, and cached contract balances are keyed by
+    /// arbitrary addresses with no on-chain registry to enumerate, so they are
+    /// not swept; they are kept alive by the bumps in the functions that touch
+    /// them.
+    ///
+    /// Returns the number of keys bumped by this call. Because a single sweep
+    /// item can own up to three keys and the budget is checked per item, the
+    /// return value may exceed `max_keys` by at most two.
+    pub fn bump_all_ttls(env: Env, admin: Address, max_keys: u32) -> u32 {
+        require_initialized(&env);
+        admin.require_auth();
+        let stored = get_admin(&env);
+        if admin != stored {
+            panic!("Unauthorized");
+        }
+        if max_keys == 0 {
+            panic!("max_keys must be positive");
+        }
+        let limit = max_keys.min(MAX_TTL_BUMP_KEYS);
+
+        let cursor_key = DataKey::TtlSweepCursor;
+        let (mut class_index, mut key_index): (u32, u32) = env
+            .storage()
+            .persistent()
+            .get(&cursor_key)
+            .unwrap_or((0, 0));
+        if class_index >= TTL_CLASS_COUNT {
+            class_index = 0;
+            key_index = 0;
+        }
+
+        let mut bumped: u32 = 0;
+        while class_index < TTL_CLASS_COUNT && bumped < limit {
+            let class = ttl_class_at(class_index);
+            let class_len = ttl_class_len(&env, &class);
+
+            while key_index < class_len && bumped < limit {
+                bumped = bumped.saturating_add(bump_ttl_class_item(&env, &class, key_index));
+                key_index += 1;
+            }
+
+            if key_index < class_len {
+                break;
+            }
+            set_ttl_watermark(&env, &class);
+            class_index += 1;
+            key_index = 0;
+        }
+
+        // A completed pass wraps so the next call starts a fresh one.
+        if class_index >= TTL_CLASS_COUNT {
+            class_index = 0;
+            key_index = 0;
+        }
+        env.storage()
+            .persistent()
+            .set(&cursor_key, &(class_index, key_index));
+        bump_to_floor(&env, &cursor_key);
+
+        env.events().publish(
+            (Symbol::new(&env, "ttl_bumped"),),
+            (bumped, class_index, key_index),
+        );
+        bumped
+    }
+
+    /// Return the lowest guaranteed remaining TTL across all populated storage
+    /// classes, together with the name of the class holding it.
+    ///
+    /// Soroban exposes no host function for reading an entry's TTL, so this
+    /// cannot inspect live ledger entries. Instead it reports the lifetime the
+    /// contract can still *prove*: `bump_all_ttls` raises every key in a class
+    /// to `MIN_TTL_LEDGERS` and stamps the ledger it did so, newly created
+    /// entries start at the same floor, and later touches only ever raise a TTL.
+    /// The returned value is therefore a lower bound on the true minimum — safe
+    /// to alert on.
+    ///
+    /// A class that has never been swept reports `0`, which is the signal for an
+    /// off-chain monitor to call `bump_all_ttls`. When no class holds any state,
+    /// returns `(MIN_TTL_LEDGERS, "none")`.
+    pub fn get_min_ttl(env: Env) -> (u32, Symbol) {
+        let mut min_ttl = MIN_TTL_LEDGERS;
+        let mut worst: Option<TtlClass> = None;
+
+        for class_index in 0..TTL_CLASS_COUNT {
+            let class = ttl_class_at(class_index);
+            if !ttl_class_is_populated(&env, &class) {
+                continue;
+            }
+            let remaining = ttl_class_remaining(&env, &class).unwrap_or(0);
+            if worst.is_none() || remaining < min_ttl {
+                min_ttl = remaining;
+                worst = Some(class);
+            }
+        }
+
+        match worst {
+            Some(class) => (min_ttl, ttl_class_symbol(&env, &class)),
+            None => (MIN_TTL_LEDGERS, Symbol::new(&env, "none")),
+        }
     }
 
     /// Estimates resource bounds for `send_tip`
@@ -1098,7 +1526,7 @@ impl FinchippayContract {
         env.storage()
             .persistent()
             .set(&DataKey::EmergencyWithdrawal(id), &withdrawal);
-        bump(&env, &DataKey::EmergencyWithdrawal(id));
+        bump_to_floor(&env, &DataKey::EmergencyWithdrawal(id));
         env.storage()
             .persistent()
             .set(&DataKey::EmergencyWithdrawalCount, &(id + 1));
@@ -1147,33 +1575,27 @@ impl FinchippayContract {
         );
 
         // Auto-execute if threshold reached AND activation ledger passed.
-        let mut executed = false;
-        if withdrawal.approvals.len() >= withdrawal.threshold {
-            if env.ledger().sequence() >= withdrawal.activation_ledger {
-                let token = get_token_client(&env, &withdrawal.token);
-                let to = withdrawal.to.clone();
-                let amount = withdrawal.amount;
-                contract_transfer_out(&env, &token, &to, &amount);
-                withdrawal.status = EmergencyWithdrawalStatus::Executed;
-                executed = true;
-                env.events().publish(
-                    (Symbol::new(&env, "emergency_withdrawal_executed"), id),
-                    (to, amount),
-                );
-            }
-            // If threshold met but delay not elapsed, we just record the approval;
-            // execution will happen on a subsequent call after the activation ledger.
+        // If the threshold is met but the delay has not elapsed, we just record
+        // the approval; execution happens on a later call past the activation
+        // ledger.
+        if withdrawal.approvals.len() >= withdrawal.threshold
+            && env.ledger().sequence() >= withdrawal.activation_ledger
+        {
+            let token = get_token_client(&env, &withdrawal.token);
+            let to = withdrawal.to.clone();
+            let amount = withdrawal.amount;
+            contract_transfer_out(&env, &token, &to, &amount);
+            withdrawal.status = EmergencyWithdrawalStatus::Executed;
+            env.events().publish(
+                (Symbol::new(&env, "emergency_withdrawal_executed"), id),
+                (to, amount),
+            );
         }
 
         env.storage()
             .persistent()
             .set(&DataKey::EmergencyWithdrawal(id), &withdrawal);
         bump(&env, &DataKey::EmergencyWithdrawal(id));
-
-        if executed {
-            // Extend TTL after successful execution.
-            bump(&env, &DataKey::EmergencyWithdrawal(id));
-        }
     }
 
     /// Execute a pending emergency withdrawal. Can only be called after both the
@@ -1259,10 +1681,10 @@ impl FinchippayContract {
 
     /// Return the total number of emergency withdrawals ever initiated.
     pub fn get_emergency_withdrawal_count(env: Env) -> u32 {
-        env.storage()
-            .persistent()
-            .get(&DataKey::EmergencyWithdrawalCount)
-            .unwrap_or(0)
+        let key = DataKey::EmergencyWithdrawalCount;
+        let count = env.storage().persistent().get(&key).unwrap_or(0);
+        bump_if_present(&env, &key);
+        count
     }
 
     /// Check invariants for a given domain. Returns `Symbol::new("ok")` or the
@@ -1345,7 +1767,7 @@ impl FinchippayContract {
         env.storage()
             .persistent()
             .set(&DataKey::TipRecord(to.clone(), count), &record);
-        bump(&env, &DataKey::TipRecord(to.clone(), count));
+        bump_to_floor(&env, &DataKey::TipRecord(to.clone(), count));
 
         env.events()
             .publish((Symbol::new(&env, "tip"), from.clone(), to.clone()), amount);
@@ -1428,7 +1850,7 @@ impl FinchippayContract {
         env.storage()
             .persistent()
             .set(&DataKey::ReceiptRecord(from.clone(), count), &receipt);
-        bump(&env, &DataKey::ReceiptRecord(from.clone(), count));
+        bump_to_floor(&env, &DataKey::ReceiptRecord(from.clone(), count));
 
         env.storage()
             .persistent()
@@ -1445,7 +1867,7 @@ impl FinchippayContract {
         env.storage()
             .persistent()
             .set(&DataKey::ReceiptByIndex(global_count), &(from.clone(), count));
-        bump(&env, &DataKey::ReceiptByIndex(global_count));
+        bump_to_floor(&env, &DataKey::ReceiptByIndex(global_count));
         
         env.storage()
             .persistent()
@@ -1538,6 +1960,7 @@ impl FinchippayContract {
             Some(r) => r,
             None => return false,
         };
+        bump(&env, &key);
         receipt.amount == expected_amount && receipt.memo == expected_memo
     }
 
@@ -1619,7 +2042,7 @@ impl FinchippayContract {
         env.storage()
             .persistent()
             .set(&DataKey::EscrowRecipient(next_id), &to);
-        bump(&env, &DataKey::EscrowRecipient(next_id));
+        bump_to_floor(&env, &DataKey::EscrowRecipient(next_id));
 
         env.storage()
             .persistent()
@@ -1628,7 +2051,7 @@ impl FinchippayContract {
 
         r_escrows.push_back(escrow);
         env.storage().persistent().set(&rkey, &r_escrows);
-        bump(&env, &rkey);
+        bump_to_floor(&env, &rkey);
 
         env.events().publish(
             (Symbol::new(&env, "escrow_create"), next_id),
@@ -1647,6 +2070,7 @@ impl FinchippayContract {
             .persistent()
             .get(&DataKey::EscrowRecipient(id))
             .expect("escrow recipient not found");
+        bump(&env, &DataKey::EscrowRecipient(id));
 
         let rkey = DataKey::EscrowByRecipient(recipient);
         let mut r_escrows: Vec<Escrow> = env
@@ -1730,6 +2154,7 @@ impl FinchippayContract {
             .persistent()
             .get(&DataKey::EscrowRecipient(id))
             .expect("escrow recipient not found");
+        bump(&env, &DataKey::EscrowRecipient(id));
 
         let rkey = DataKey::EscrowByRecipient(recipient);
         let mut r_escrows: Vec<Escrow> = env
@@ -1783,6 +2208,7 @@ impl FinchippayContract {
             .persistent()
             .get(&DataKey::EscrowRecipient(id))
             .expect("escrow recipient not found");
+        bump(&env, &DataKey::EscrowRecipient(id));
 
         let rkey = DataKey::EscrowByRecipient(recipient);
         let mut r_escrows: Vec<Escrow> = env
@@ -1856,10 +2282,10 @@ impl FinchippayContract {
 
     /// Return the total number of escrows ever created.
     pub fn get_escrow_count(env: Env) -> u32 {
-        env.storage()
-            .persistent()
-            .get(&DataKey::EscrowCount)
-            .unwrap_or(0)
+        let key = DataKey::EscrowCount;
+        let count = env.storage().persistent().get(&key).unwrap_or(0);
+        bump_if_present(&env, &key);
+        count
     }
 
     /// Stable alias for `get_escrow_count`. Provides a consistent SDK
@@ -1892,13 +2318,13 @@ impl FinchippayContract {
         env.storage()
             .persistent()
             .set(&DataKey::Arbitrators, &arbitrators);
-        bump(&env, &DataKey::Arbitrators);
+        bump_to_floor(&env, &DataKey::Arbitrators);
 
         let count: u32 = arbitrators.len();
         env.storage()
             .persistent()
             .set(&DataKey::ArbitratorCount, &count);
-        bump(&env, &DataKey::ArbitratorCount);
+        bump_to_floor(&env, &DataKey::ArbitratorCount);
 
         env.events()
             .publish((Symbol::new(&env, "arbitrator_added"),), arbitrator);
@@ -1932,13 +2358,13 @@ impl FinchippayContract {
         env.storage()
             .persistent()
             .set(&DataKey::Arbitrators, &new_list);
-        bump(&env, &DataKey::Arbitrators);
+        bump_to_floor(&env, &DataKey::Arbitrators);
 
         let count: u32 = new_list.len();
         env.storage()
             .persistent()
             .set(&DataKey::ArbitratorCount, &count);
-        bump(&env, &DataKey::ArbitratorCount);
+        bump_to_floor(&env, &DataKey::ArbitratorCount);
 
         env.events()
             .publish((Symbol::new(&env, "arbitrator_removed"),), arbitrator);
@@ -1975,6 +2401,7 @@ impl FinchippayContract {
             .persistent()
             .get(&DataKey::Arbitrators)
             .unwrap_or_else(|| panic!("No arbitrators registered"));
+        bump(&env, &DataKey::Arbitrators);
         if !arbitrators.contains(&arbitrator) {
             panic!("Arbitrator is not registered");
         }
@@ -2017,7 +2444,7 @@ impl FinchippayContract {
         env.storage()
             .persistent()
             .set(&DataKey::EscrowRecipient(next_id), &to);
-        bump(&env, &DataKey::EscrowRecipient(next_id));
+        bump_to_floor(&env, &DataKey::EscrowRecipient(next_id));
         env.storage()
             .persistent()
             .set(&DataKey::EscrowCount, &(next_id + 1));
@@ -2130,10 +2557,14 @@ impl FinchippayContract {
 
     /// Return the list of registered arbitrators.
     pub fn get_arbitrators(env: Env) -> Vec<Address> {
-        env.storage()
+        let key = DataKey::Arbitrators;
+        let arbitrators = env
+            .storage()
             .persistent()
-            .get(&DataKey::Arbitrators)
-            .unwrap_or(Vec::new(&env))
+            .get(&key)
+            .unwrap_or(Vec::new(&env));
+        bump_if_present(&env, &key);
+        arbitrators
     }
 
     // ─── Streaming payments ───────────────────────────────────────────────────
@@ -2190,12 +2621,14 @@ impl FinchippayContract {
             claimed: 0,
             start_ledger: env.ledger().sequence(),
             closed: false,
+            paused_at_ledger: 0,
+            total_paused_duration: 0,
         };
         increase_locked_balance(&env, &stream.token, deposit);
         env.storage()
             .persistent()
             .set(&DataKey::Stream(id), &stream);
-        bump(&env, &DataKey::Stream(id));
+        bump_to_floor(&env, &DataKey::Stream(id));
         env.storage()
             .persistent()
             .set(&DataKey::StreamCount, &(id + 1));
@@ -2210,7 +2643,7 @@ impl FinchippayContract {
         if p_streams.len() < MAX_USER_STREAMS {
             p_streams.push_back(id);
             env.storage().persistent().set(&s_key, &p_streams);
-            bump(&env, &s_key);
+            bump_to_floor(&env, &s_key);
         }
 
         env.events().publish(
@@ -2510,10 +2943,10 @@ impl FinchippayContract {
 
     /// Return the total number of streams ever opened.
     pub fn get_stream_count(env: Env) -> u32 {
-        env.storage()
-            .persistent()
-            .get(&DataKey::StreamCount)
-            .unwrap_or(0)
+        let key = DataKey::StreamCount;
+        let count = env.storage().persistent().get(&key).unwrap_or(0);
+        bump_if_present(&env, &key);
+        count
     }
 
     /// Stable alias for `get_stream_count`. Generates a consistent SDK
@@ -2545,11 +2978,9 @@ impl FinchippayContract {
         let mut result = Vec::new(&env);
         for i in offset..end {
             let id = p_streams.get(i).unwrap();
-            let stream: Stream = env
-                .storage()
-                .persistent()
-                .get(&DataKey::Stream(id))
-                .unwrap();
+            let stream_key = DataKey::Stream(id);
+            let stream: Stream = env.storage().persistent().get(&stream_key).unwrap();
+            bump(&env, &stream_key);
             result.push_back(stream);
         }
         result
@@ -2678,7 +3109,7 @@ impl FinchippayContract {
         env.storage()
             .persistent()
             .set(&DataKey::MultiSig(id), &proposal);
-        bump(&env, &DataKey::MultiSig(id));
+        bump_to_floor(&env, &DataKey::MultiSig(id));
         env.storage()
             .persistent()
             .set(&DataKey::MultiSigCount, &(id + 1));
@@ -2839,10 +3270,10 @@ impl FinchippayContract {
 
     /// Return total number of multi-sig proposals ever created.
     pub fn get_multisig_count(env: Env) -> u32 {
-        env.storage()
-            .persistent()
-            .get(&DataKey::MultiSigCount)
-            .unwrap_or(0)
+        let key = DataKey::MultiSigCount;
+        let count = env.storage().persistent().get(&key).unwrap_or(0);
+        bump_if_present(&env, &key);
+        count
     }
 
     /// Stable alias for `get_multisig_count`. Provides a consistent SDK
@@ -2857,22 +3288,11 @@ impl FinchippayContract {
     /// monitoring and dashboards. Returns (escrow_count, stream_count,
     /// multisig_count).
     pub fn get_contract_stats(env: Env) -> (u32, u32, u32) {
-        let escrows = env
-            .storage()
-            .persistent()
-            .get(&DataKey::EscrowCount)
-            .unwrap_or(0);
-        let streams = env
-            .storage()
-            .persistent()
-            .get(&DataKey::StreamCount)
-            .unwrap_or(0);
-        let multisigs = env
-            .storage()
-            .persistent()
-            .get(&DataKey::MultiSigCount)
-            .unwrap_or(0);
-        (escrows, streams, multisigs)
+        (
+            Self::get_escrow_count(env.clone()),
+            Self::get_stream_count(env.clone()),
+            Self::get_multisig_count(env),
+        )
     }
 
     // ─── Batch send ───────────────────────────────────────────────────────────
@@ -2948,7 +3368,7 @@ impl FinchippayContract {
             env.storage()
                 .persistent()
                 .set(&DataKey::TipRecord(to.clone(), current_count), &record);
-            bump(&env, &DataKey::TipRecord(to.clone(), current_count));
+            bump_to_floor(&env, &DataKey::TipRecord(to.clone(), current_count));
 
             recipient_updates.set(
                 to.clone(),
@@ -3089,7 +3509,7 @@ impl FinchippayContract {
             env.storage()
                 .persistent()
                 .set(&DataKey::TipRecord(to.clone(), count), &record);
-            bump(&env, &DataKey::TipRecord(to.clone(), count));
+            bump_to_floor(&env, &DataKey::TipRecord(to.clone(), count));
         }
 
         env.events().publish(
@@ -3097,6 +3517,33 @@ impl FinchippayContract {
             (from, recipients.len(), total_amount),
         );
         Ok(())
+    }
+
+    /// Estimate total amounts per token for a batch of swap items.
+    ///
+    /// Useful for off-chain clients to validate totals before submitting a
+    /// composite transaction. This function is pure (reads no mutable state)
+    /// and returns aggregated totals for each token present in `swaps`.
+    pub fn estimate_batch_swap_totals(env: Env, swaps: Vec<SwapItem>) -> Vec<TokenTotal> {
+        require_initialized(&env);
+        let mut totals: soroban_sdk::Map<Address, i128> = soroban_sdk::Map::new(&env);
+        for i in 0..swaps.len() {
+            let s = swaps.get(i).unwrap();
+            if s.amount <= 0 {
+                panic!("Non-positive amount in swap item");
+            }
+            let prev = match totals.get(s.token.clone()) {
+                Some(v) => v,
+                None => 0,
+            };
+            let new_total = prev.checked_add(s.amount).expect("overflow");
+            totals.set(s.token.clone(), new_total);
+        }
+        let mut out: Vec<TokenTotal> = Vec::new(&env);
+        for (tok, tot) in totals.iter() {
+            out.push_back(TokenTotal { token: tok, total: tot });
+        }
+        out
     }
 
     pub fn create_vesting(
@@ -3152,7 +3599,7 @@ impl FinchippayContract {
         env.storage()
             .persistent()
             .set(&DataKey::Vesting(next_id), &vesting);
-        bump(&env, &DataKey::Vesting(next_id));
+        bump_to_floor(&env, &DataKey::Vesting(next_id));
 
         env.storage()
             .persistent()
@@ -3282,10 +3729,12 @@ impl FinchippayContract {
     }
 
     pub fn get_claimable_vesting(env: Env, id: u32) -> i128 {
-        let vesting: VestingSchedule = match env.storage().persistent().get(&DataKey::Vesting(id)) {
+        let key = DataKey::Vesting(id);
+        let vesting: VestingSchedule = match env.storage().persistent().get(&key) {
             Some(v) => v,
             None => return 0,
         };
+        bump(&env, &key);
 
         if vesting.revoked {
             return 0;
@@ -3318,6 +3767,209 @@ impl FinchippayContract {
         } else {
             claimable
         }
+    }
+
+    // ─── Swap / DEX ─────────────────────────────────────────────────────────
+
+    /// Admin: designate the address that receives protocol swap fees.
+    /// Defaults to the admin address if never called.
+    pub fn set_fee_collector(
+        env: Env,
+        admin: Address,
+        collector: Address,
+    ) -> Result<(), ContractError> {
+        admin.require_auth();
+        if admin != get_admin(&env) {
+            return Err(ContractError::Unauthorized);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::FeeCollector, &collector);
+        bump(&env, &DataKey::FeeCollector);
+        env.events()
+            .publish((Symbol::new(&env, "fee_collector_set"),), collector);
+        Ok(())
+    }
+
+    /// Return the current fee-collector address (admin if unset).
+    pub fn get_fee_collector(env: Env) -> Address {
+        get_fee_collector_address(&env)
+    }
+
+    /// Admin: update the swap fee, in basis points. Must be within
+    /// `[0, MAX_SWAP_FEE_BPS]` (0%–10%).
+    pub fn set_swap_fee(env: Env, admin: Address, new_fee_bps: u32) -> Result<(), ContractError> {
+        admin.require_auth();
+        if admin != get_admin(&env) {
+            return Err(ContractError::Unauthorized);
+        }
+        if new_fee_bps > MAX_SWAP_FEE_BPS {
+            return Err(ContractError::InvalidFeeBps);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::SwapFee, &new_fee_bps);
+        bump(&env, &DataKey::SwapFee);
+        env.events()
+            .publish((Symbol::new(&env, "swap_fee_set"),), new_fee_bps);
+        Ok(())
+    }
+
+    /// Return the current swap fee in basis points (30 = 0.3% by default).
+    pub fn get_swap_fee(env: Env) -> u32 {
+        get_swap_fee_bps(&env)
+    }
+
+    /// Swap an exact `amount_in` of `token_in` for at least `min_amount_out`
+    /// of `token_out`, protecting the caller from slippage.
+    ///
+    /// `path` must start with `token_in` and end with `token_out`; a 0.3%
+    /// (or admin-configured) protocol fee is deducted from `amount_in` and
+    /// sent to the fee collector before the swap executes.
+    ///
+    /// # Pricing model
+    /// This contract does not (yet) source live prices from an on-chain AMM
+    /// or the classic Stellar DEX order books — Soroban contracts have no
+    /// host function to invoke `path_payment_strict_send`/`strict_receive`,
+    /// and building an AMM is explicitly out of scope for this change (see
+    /// issue #9 / #479). The post-fee remainder is settled 1:1 against the
+    /// contract's own `token_out` reserves, which must be funded ahead of
+    /// time (e.g. by the admin transferring `token_out` to the contract
+    /// address). Intermediate `path` hops are validated for shape but are
+    /// not separately transferred, since the contract holds no inventory of
+    /// intermediate tokens. Real price discovery is tracked as follow-up
+    /// work once a router/AMM contract is wired in.
+    pub fn swap_exact_tokens_for_tokens(
+        env: Env,
+        caller: Address,
+        token_in: Address,
+        token_out: Address,
+        amount_in: i128,
+        min_amount_out: i128,
+        path: Vec<Address>,
+    ) -> Result<i128, ContractError> {
+        require_initialized(&env);
+        require_not_paused(&env);
+        caller.require_auth();
+
+        if amount_in <= 0 {
+            return Err(ContractError::NonPositiveAmount);
+        }
+        if min_amount_out < 0 {
+            return Err(ContractError::NonPositiveAmount);
+        }
+        if token_in == token_out {
+            return Err(ContractError::InvalidPath);
+        }
+        validate_swap_path(&path, &token_in, &token_out)?;
+
+        let fee_bps = get_swap_fee_bps(&env);
+        let (fee, amount_to_swap) = compute_swap_fee(amount_in, fee_bps);
+        let amount_out = amount_to_swap;
+
+        if amount_out < min_amount_out {
+            return Err(ContractError::SlippageExceeded);
+        }
+
+        let token_in_client = get_token_client(&env, &token_in);
+        if fee > 0 {
+            let collector = get_fee_collector_address(&env);
+            require_transfer_succeeded(&env, &token_in_client, &caller, &collector, &fee);
+        }
+        let contract_address = env.current_contract_address();
+        require_transfer_succeeded(
+            &env,
+            &token_in_client,
+            &caller,
+            &contract_address,
+            &amount_to_swap,
+        );
+
+        let token_out_client = get_token_client(&env, &token_out);
+        contract_transfer_out(&env, &token_out_client, &caller, &amount_out);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "swap"),
+                caller.clone(),
+                token_in.clone(),
+                token_out.clone(),
+            ),
+            (amount_in, amount_out, fee),
+        );
+
+        Ok(amount_out)
+    }
+
+    /// Swap up to `max_amount_in` of `token_in` for an exact `amount_out` of
+    /// `token_out`. Reverts with `ExcessiveAmountIn` if the fee-inclusive
+    /// input required would exceed `max_amount_in`. See
+    /// `swap_exact_tokens_for_tokens` for the pricing-model caveat.
+    pub fn swap_tokens_for_exact_tokens(
+        env: Env,
+        caller: Address,
+        token_in: Address,
+        token_out: Address,
+        amount_out: i128,
+        max_amount_in: i128,
+        path: Vec<Address>,
+    ) -> Result<i128, ContractError> {
+        require_initialized(&env);
+        require_not_paused(&env);
+        caller.require_auth();
+
+        if amount_out <= 0 {
+            return Err(ContractError::NonPositiveAmount);
+        }
+        if max_amount_in <= 0 {
+            return Err(ContractError::NonPositiveAmount);
+        }
+        if token_in == token_out {
+            return Err(ContractError::InvalidPath);
+        }
+        validate_swap_path(&path, &token_in, &token_out)?;
+
+        let fee_bps = get_swap_fee_bps(&env);
+        let amount_in = compute_required_amount_in(amount_out, fee_bps);
+
+        if amount_in > max_amount_in {
+            return Err(ContractError::ExcessiveAmountIn);
+        }
+
+        let (fee, amount_to_swap) = compute_swap_fee(amount_in, fee_bps);
+        // Ceiling division in compute_required_amount_in can leave a few
+        // extra units in amount_to_swap versus amount_out; that dust stays
+        // in the contract's reserves rather than shorting the caller.
+        debug_assert!(amount_to_swap >= amount_out);
+
+        let token_in_client = get_token_client(&env, &token_in);
+        if fee > 0 {
+            let collector = get_fee_collector_address(&env);
+            require_transfer_succeeded(&env, &token_in_client, &caller, &collector, &fee);
+        }
+        let contract_address = env.current_contract_address();
+        require_transfer_succeeded(
+            &env,
+            &token_in_client,
+            &caller,
+            &contract_address,
+            &amount_to_swap,
+        );
+
+        let token_out_client = get_token_client(&env, &token_out);
+        contract_transfer_out(&env, &token_out_client, &caller, &amount_out);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "swap"),
+                caller.clone(),
+                token_in.clone(),
+                token_out.clone(),
+            ),
+            (amount_in, amount_out, fee),
+        );
+
+        Ok(amount_in)
     }
 }
 
@@ -4752,8 +5404,8 @@ mod tests {
         amounts.push_back(300i128);
         amounts.push_back(200i128);
         let mut memos = soroban_sdk::Vec::new(&env);
-        memos.push_back(Symbol::new(&env, ""));
-        memos.push_back(Symbol::new(&env, ""));
+        memos.push_back(Symbol::new(&env, "m1"));
+        memos.push_back(Symbol::new(&env, "m2"));
         client.batch_send(&token_id, &from, &recipients, &amounts, &memos);
 
         let events = env.events().all().filter_by_contract(&contract_id);
@@ -5418,14 +6070,14 @@ mod tests {
         let env = Env::default();
         let (_, client) = deploy(&env);
         let version = client.get_storage_layout_version();
-        assert_eq!(version, 1);
+        assert_eq!(version, STORAGE_LAYOUT_VERSION);
     }
 
     #[test]
     fn test_validate_compatibility_same_version_passes() {
         let env = Env::default();
         let (_, client) = deploy(&env);
-        assert!(client.validate_storage_compatibility(&1));
+        assert!(client.validate_storage_compatibility(&STORAGE_LAYOUT_VERSION));
     }
 
     #[test]
@@ -5453,6 +6105,290 @@ mod tests {
 
         let dummy_hash = BytesN::from_array(&env, &[1u8; 32]);
         client.upgrade(&admin, &dummy_hash, &0);
+    }
+
+    // ==================== Storage TTL Tests ====================
+
+    use soroban_sdk::testutils::storage::Persistent as _;
+
+    /// The contract instance and the token contract must outlive the long ledger
+    /// jumps these tests perform, so they are registered while the network's
+    /// minimum persistent TTL is generous. Data entries written afterwards are
+    /// born with a short lifetime, which is what makes a bump observable.
+    const TTL_TEST_ENTRY_BIRTH_TTL: u32 = 4_096;
+
+    fn ttl_env() -> Env {
+        let env = Env::default();
+        env.ledger().with_mut(|li| {
+            li.sequence_number = 1_000;
+            li.min_persistent_entry_ttl = 6_000_000;
+            li.max_entry_ttl = 6_312_001;
+        });
+        env
+    }
+
+    fn shorten_entry_lifetimes(env: &Env) {
+        env.ledger()
+            .with_mut(|li| li.min_persistent_entry_ttl = TTL_TEST_ENTRY_BIRTH_TTL);
+    }
+
+    fn ttl_of(env: &Env, contract: &Address, key: &DataKey) -> u32 {
+        env.as_contract(contract, || env.storage().persistent().get_ttl(key))
+    }
+
+    /// Deploy a contract plus a funded token, then switch to short-lived entries.
+    fn ttl_fixture(env: &Env) -> (Address, FinchippayContractClient<'_>, Address, Address) {
+        let (id, client) = deploy(env);
+        let admin = client.get_admin();
+        let payer = Address::generate(env);
+        env.mock_all_auths();
+        let token = create_token(env, &admin, &payer, 10_000_000);
+        shorten_entry_lifetimes(env);
+        (id, client, token, payer)
+    }
+
+    #[test]
+    fn test_created_entry_starts_at_ttl_floor() {
+        let env = ttl_env();
+        let (id, client, token, payer) = ttl_fixture(&env);
+        let recipient = Address::generate(&env);
+
+        let release = env.ledger().sequence() + 100;
+        client.create_escrow(
+            &token,
+            &payer,
+            &recipient,
+            &50_000,
+            &release,
+            &Symbol::new(&env, "rent"),
+        );
+
+        assert_eq!(
+            ttl_of(&env, &id, &DataKey::EscrowRecipient(0)),
+            MIN_TTL_LEDGERS
+        );
+        assert_eq!(
+            ttl_of(&env, &id, &DataKey::EscrowByRecipient(recipient)),
+            MIN_TTL_LEDGERS
+        );
+    }
+
+    #[test]
+    fn test_read_refreshes_entry_that_fell_below_threshold() {
+        let env = ttl_env();
+        let (id, client, token, payer) = ttl_fixture(&env);
+        let recipient = Address::generate(&env);
+        let start = env.ledger().sequence();
+
+        client.create_escrow(
+            &token,
+            &payer,
+            &recipient,
+            &50_000,
+            &(start + 100),
+            &Symbol::new(&env, "rent"),
+        );
+
+        // Age the entry until only just under the refresh threshold is left.
+        advance(&env, start + MIN_TTL_LEDGERS - MIN_TTL_THRESHOLD + 1);
+        assert!(ttl_of(&env, &id, &DataKey::EscrowRecipient(0)) < MIN_TTL_THRESHOLD);
+
+        // A plain view call is enough to restore a full lifetime.
+        let escrow = client.get_escrow(&0);
+        assert_eq!(escrow.amount, 50_000);
+        assert_eq!(
+            ttl_of(&env, &id, &DataKey::EscrowRecipient(0)),
+            MIN_TTL_LEDGERS
+        );
+    }
+
+    #[test]
+    fn test_bumped_entry_outlives_an_unbumped_one() {
+        let env = ttl_env();
+        let (id, client, token, payer) = ttl_fixture(&env);
+        let recipient = Address::generate(&env);
+        let start = env.ledger().sequence();
+
+        client.create_escrow(
+            &token,
+            &payer,
+            &recipient,
+            &50_000,
+            &(start + 100),
+            &Symbol::new(&env, "rent"),
+        );
+
+        // A write that skips the bump only gets the network minimum, which is
+        // exactly the data-loss scenario the bumps exist to prevent.
+        let unbumped = DataKey::TipTotal(recipient.clone());
+        env.as_contract(&id, || {
+            env.storage().persistent().set(&unbumped, &7i128);
+        });
+        assert!(ttl_of(&env, &id, &unbumped) < MIN_TTL_LEDGERS);
+        assert_eq!(
+            ttl_of(&env, &id, &DataKey::EscrowRecipient(0)),
+            MIN_TTL_LEDGERS
+        );
+
+        // Long past the point the unbumped entry would have expired, the
+        // escrow is still intact.
+        advance(&env, start + 300_000);
+        assert_eq!(client.get_escrow(&0).amount, 50_000);
+    }
+
+    #[test]
+    fn test_bump_all_ttls_refreshes_cold_entries() {
+        let env = ttl_env();
+        let (id, client, token, payer) = ttl_fixture(&env);
+        let admin = client.get_admin();
+        let recipient = Address::generate(&env);
+        let start = env.ledger().sequence();
+
+        client.create_escrow(
+            &token,
+            &payer,
+            &recipient,
+            &50_000,
+            &(start + 100),
+            &Symbol::new(&env, "rent"),
+        );
+        client.open_stream(&token, &payer, &recipient, &10, &50_000);
+
+        // Nobody touches these entries; they simply decay.
+        advance(&env, start + 500_000);
+        assert!(ttl_of(&env, &id, &DataKey::EscrowRecipient(0)) < MIN_TTL_THRESHOLD);
+        assert!(ttl_of(&env, &id, &DataKey::Stream(0)) < MIN_TTL_THRESHOLD);
+
+        // Three config keys, the two escrow keys plus their counter, and the two
+        // stream keys plus theirs.
+        let bumped = client.bump_all_ttls(&admin, &100);
+        assert_eq!(bumped, 9);
+
+        for key in [
+            DataKey::Admin,
+            DataKey::Version,
+            DataKey::StorageLayoutVersion,
+            DataKey::EscrowCount,
+            DataKey::EscrowRecipient(0),
+            DataKey::EscrowByRecipient(recipient),
+            DataKey::StreamCount,
+            DataKey::Stream(0),
+            DataKey::StreamByPayer(payer),
+        ] {
+            assert!(
+                ttl_of(&env, &id, &key) >= MIN_TTL_LEDGERS,
+                "a swept key was left below the TTL floor"
+            );
+        }
+
+        // The entries that had actually decayed sit exactly on the floor.
+        assert_eq!(
+            ttl_of(&env, &id, &DataKey::EscrowRecipient(0)),
+            MIN_TTL_LEDGERS
+        );
+        assert_eq!(ttl_of(&env, &id, &DataKey::Stream(0)), MIN_TTL_LEDGERS);
+    }
+
+    #[test]
+    fn test_bump_all_ttls_resumes_across_calls() {
+        let env = ttl_env();
+        let (id, client, token, payer) = ttl_fixture(&env);
+        let admin = client.get_admin();
+        let start = env.ledger().sequence();
+
+        let mut recipients = Vec::new(&env);
+        for _ in 0..4 {
+            let recipient = Address::generate(&env);
+            client.create_escrow(
+                &token,
+                &payer,
+                &recipient,
+                &50_000,
+                &(start + 100),
+                &Symbol::new(&env, "rent"),
+            );
+            recipients.push_back(recipient);
+        }
+
+        advance(&env, start + 500_000);
+
+        // A budget of two keys per call never runs away, and repeated calls
+        // eventually cover every escrow.
+        for _ in 0..12 {
+            let bumped = client.bump_all_ttls(&admin, &2);
+            assert!(bumped <= 4, "a call bumped {bumped} keys with a budget of 2");
+        }
+
+        for index in 0..recipients.len() {
+            assert_eq!(
+                ttl_of(&env, &id, &DataKey::EscrowRecipient(index)),
+                MIN_TTL_LEDGERS
+            );
+            assert_eq!(
+                ttl_of(
+                    &env,
+                    &id,
+                    &DataKey::EscrowByRecipient(recipients.get(index).unwrap())
+                ),
+                MIN_TTL_LEDGERS
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "Unauthorized")]
+    fn test_bump_all_ttls_rejects_non_admin() {
+        let env = ttl_env();
+        let (_, client) = deploy(&env);
+        env.mock_all_auths();
+        client.bump_all_ttls(&Address::generate(&env), &10);
+    }
+
+    #[test]
+    #[should_panic(expected = "max_keys must be positive")]
+    fn test_bump_all_ttls_rejects_zero_budget() {
+        let env = ttl_env();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        env.mock_all_auths();
+        client.bump_all_ttls(&admin, &0);
+    }
+
+    #[test]
+    fn test_get_min_ttl_tracks_sweeps() {
+        let env = ttl_env();
+        let (_, client, token, payer) = ttl_fixture(&env);
+        let admin = client.get_admin();
+        let recipient = Address::generate(&env);
+        let start = env.ledger().sequence();
+
+        // `initialize` leaves the only populated class at the floor.
+        assert_eq!(
+            client.get_min_ttl(),
+            (MIN_TTL_LEDGERS, Symbol::new(&env, "config"))
+        );
+
+        // A newly populated class has no proven lifetime until it is swept.
+        client.create_escrow(
+            &token,
+            &payer,
+            &recipient,
+            &50_000,
+            &(start + 100),
+            &Symbol::new(&env, "rent"),
+        );
+        assert_eq!(client.get_min_ttl(), (0, Symbol::new(&env, "escrows")));
+
+        client.bump_all_ttls(&admin, &100);
+        assert_eq!(
+            client.get_min_ttl(),
+            (MIN_TTL_LEDGERS, Symbol::new(&env, "config"))
+        );
+
+        // The guarantee decays as the ledger advances.
+        advance(&env, start + 10_000);
+        let (remaining, _) = client.get_min_ttl();
+        assert_eq!(remaining, MIN_TTL_LEDGERS - 10_000);
     }
 }
 

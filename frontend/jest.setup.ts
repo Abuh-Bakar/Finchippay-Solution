@@ -1,6 +1,9 @@
 import "@testing-library/jest-dom";
+import { toHaveNoViolations } from "jest-axe";
 import { TextDecoder, TextEncoder } from "util";
 import { webcrypto } from "crypto";
+
+expect.extend(toHaveNoViolations);
 
 Object.assign(global, {
   TextEncoder,

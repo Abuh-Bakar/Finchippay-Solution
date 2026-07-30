@@ -23,27 +23,6 @@ import {
   clearJwtToken as clearAuthToken,
 } from "./auth";
 import { sdk } from "./sdk-instance";
-import {
-  lockAddressBook,
-  unlockAddressBook,
-  reEncryptAddressBook,
-  lockFederationCache,
-  unlockFederationCache,
-  reEncryptFederationCache,
-} from "./addressBook";
-import {
-  unlockPaymentTemplates,
-  lockPaymentTemplates,
-  reEncryptPaymentTemplates,
-} from "./paymentTemplates";
-import {
-  deriveKey,
-  getOrCreateSalt,
-  setSessionKey,
-  clearSessionKey,
-  getSessionKey,
-  getSessionOwner,
-} from "./encryption";
 
 // ─── SEP-0010 helpers ────────────────────────────────────────────────────────
 
@@ -329,12 +308,6 @@ export function disconnectWallet(): void {
 
   setJwtToken(null);
   clearAuthToken();
-  // Lock (don't wipe) the encrypted stores: forget the in-memory key and
-  // decrypted cache but keep the ciphertext so it survives reconnect.
-  lockAddressBook();
-  lockFederationCache();
-  clearSessionKey();
-  lockPaymentTemplates();
 }
 
 /**

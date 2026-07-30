@@ -33,17 +33,6 @@ jest.mock("@/lib/sdk-instance", () => ({
   initSdkAuth: jest.fn(),
 }));
 
-// Mock the addressBook module
-jest.mock("@/lib/addressBook", () => ({
-  clearAddressBook: jest.fn(),
-  lockAddressBook: jest.fn(),
-  unlockAddressBook: jest.fn(),
-  reEncryptAddressBook: jest.fn(),
-  lockFederationCache: jest.fn(),
-  unlockFederationCache: jest.fn(),
-  reEncryptFederationCache: jest.fn(),
-}));
-
 // Mock fetch
 global.fetch = jest.fn();
 
@@ -61,11 +50,6 @@ import {
 } from "@/lib/wallet";
 
 import * as freighterApi from "@stellar/freighter-api";
-import { clearAddressBook, lockAddressBook } from "@/lib/addressBook";
-import { sdk } from "@/lib/sdk-instance";
-
-const mockGetChallenge = sdk.getChallenge as jest.Mock;
-const mockVerifyChallenge = sdk.verifyChallenge as jest.Mock;
 
 const mockIsConnected = freighterApi.isConnected as jest.Mock;
 const mockGetAddress = freighterApi.getAddress as jest.Mock;
@@ -82,15 +66,6 @@ describe("wallet.ts", () => {
     jest.clearAllMocks();
     setJwtToken(null);
     (global.fetch as jest.Mock).mockClear();
-    // disconnectWallet fires a best-effort logout fetch; give it a resolvable
-    // default so `.catch(...)` doesn't run on `undefined`. Tests that need a
-    // specific response still override with mockResolvedValueOnce.
-    (global.fetch as jest.Mock).mockResolvedValue({
-      ok: true,
-      json: async () => ({}),
-    });
-    (clearAddressBook as jest.Mock).mockClear();
-    (lockAddressBook as jest.Mock).mockClear();
   });
 
   describe("isFreighterInstalled", () => {
@@ -359,16 +334,6 @@ describe("wallet.ts", () => {
       expect(clearJwtToken).toHaveBeenCalled();
     });
 
-    it("disconnectWallet locks the address book (retains ciphertext, drops key)", () => {
-      setJwtToken("test-token");
-
-      disconnectWallet();
-
-      // Disconnect must lock (forget the in-memory key/cache) rather than wipe
-      // the encrypted envelope, so contacts survive a reconnect.
-      expect(lockAddressBook).toHaveBeenCalled();
-      expect(clearAddressBook).not.toHaveBeenCalled();
-    });
   });
 
   describe("performSEP0010Auth", () => {

@@ -338,3 +338,12 @@ export function useWallet() {
 
   return context;
 }
+
+/**
+ * Like {@link useWallet}, but returns `undefined` instead of throwing when
+ * rendered outside a `WalletProvider` — for components that may be mounted
+ * standalone (e.g. in tests) and only need to read wallet state opportunistically.
+ */
+export function useWalletOptional(): WalletContextValue | undefined {
+  return useContext(WalletContext);
+}

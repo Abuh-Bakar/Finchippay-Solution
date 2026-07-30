@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import Link from "next/link";
 import WalletConnect from "@/components/WalletConnect";
 import {
@@ -6,13 +6,6 @@ import {
   resolveFederationAddress,
 } from "@/lib/stellar";
 import {
-  type AddressBookContact,
-  addressBookNeedsReEncryption,
-  deleteAddressBookContact,
-  loadAddressBookContacts,
-  saveAddressBookContacts,
-  subscribeToAddressBookContacts,
-  upsertAddressBookContact,
   resolveFederationWithCache,
   getCachedFederationAddress,
 } from "@/lib/addressBook";
@@ -24,6 +17,7 @@ import {
 } from "@/lib/contactImportExport";
 import ContactImportModal from "@/components/ContactImportModal";
 import { useContacts } from "@/hooks/useContacts";
+import type { Contact } from "@/lib/contactsDB";
 import { copyToClipboard } from "@/utils/format";
 import { useToast } from "@/lib/useToast";
 import Head from "next/head";
@@ -72,13 +66,12 @@ export default function Contacts() {
   const { publicKey } = useWallet();
   const router = useRouter();
   const { showToast } = useToast();
-  const { contacts: dbContacts, groups, addToGroup, removeFromGroup, createGroup, deleteGroup } = useContacts();
+  const { contacts, add: addContact, update: updateContact, remove: removeContact, groups, addToGroup, createGroup, deleteGroup } = useContacts();
 
-  const [contacts, setContacts] = useState<AddressBookContact[]>(loadAddressBookContacts);
   const [showImportModal, setShowImportModal] = useState(false);
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [federationInput, setFederationInput] = useState("");
   const [federationLoading, setFederationLoading] = useState(false);
   const [federationResult, setFederationResult] = useState<{ address: string; federationAddress: string } | null>(null);
@@ -87,13 +80,7 @@ export default function Contacts() {
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [newGroupColor, setNewGroupColor] = useState("#6366f1");
-  const [dragContact, setDragContact] = useState<string | null>(null);
-
-  // Encryption state: whether stored contacts belong to a different wallet.
-  const [needsReEncryption, setNeedsReEncryption] = useState(false);
-  const [reEncrypting, setReEncrypting] = useState(false);
-
-  useEffect(() => subscribeToAddressBookContacts(setContacts), []);
+  const [dragContact, setDragContact] = useState<number | null>(null);
 
   useEffect(() => {
     setNeedsReEncryption(publicKey ? addressBookNeedsReEncryption(publicKey) : false);
@@ -129,7 +116,7 @@ export default function Contacts() {
     }
   }, [showToast]);
 
-  const handleSaveContact = () => {
+  const handleSaveContact = async () => {
     if (!name.trim() || !address.trim()) {
       showToast("Please enter both name and address");
       return;
@@ -138,32 +125,31 @@ export default function Contacts() {
       showToast("Invalid Stellar address");
       return;
     }
-    if (editingId) {
-      const updatedAt = Date.now();
-      const nextContacts = contacts.map((contact) =>
-        contact.id === editingId ? { ...contact, nickname: name.trim(), address, updatedAt } : contact
-      );
-      saveAddressBookContacts(nextContacts);
-      setContacts(nextContacts);
-      showToast("Contact updated");
-      setEditingId(null);
-    } else {
-      setContacts(upsertAddressBookContact({ nickname: name, address }));
-      showToast("Contact saved");
+    try {
+      if (editingId !== null) {
+        await updateContact(editingId, { name: name.trim(), publicKey: address.trim() });
+        showToast("Contact updated");
+        setEditingId(null);
+      } else {
+        await addContact({ name: name.trim(), publicKey: address.trim() });
+        showToast("Contact saved");
+      }
+      setName("");
+      setAddress("");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to save contact");
     }
-    setName("");
-    setAddress("");
   };
 
-  const handleDeleteContact = (id: string) => {
-    setContacts(deleteAddressBookContact(id));
+  const handleDeleteContact = async (id: number) => {
+    await removeContact(id);
     showToast("Contact deleted");
   };
 
-  const handleEditContact = (contact: AddressBookContact) => {
-    setEditingId(contact.id);
-    setName(contact.nickname);
-    setAddress(contact.address);
+  const handleEditContact = (contact: Contact) => {
+    setEditingId(contact.id ?? null);
+    setName(contact.name);
+    setAddress(contact.publicKey);
   };
 
   const handleCancelEdit = () => {
@@ -198,8 +184,8 @@ export default function Contacts() {
     showToast("Address copied to form");
   };
 
-  const handleSendXLM = (contact: AddressBookContact) => {
-    router.push({ pathname: "/dashboard", query: { prefillDestination: contact.address } });
+  const handleSendXLM = (contact: Contact) => {
+    router.push({ pathname: "/dashboard", query: { prefillDestination: contact.publicKey } });
   };
 
   const handleCopyAddress = (addr: string) => {
@@ -208,12 +194,12 @@ export default function Contacts() {
   };
 
   // Drag & drop group assignment
-  const handleDragStart = (contactId: string) => {
+  const handleDragStart = (contactId: number) => {
     setDragContact(contactId);
   };
 
   const handleDropOnGroup = async (groupId: number) => {
-    if (!dragContact) return;
+    if (dragContact === null) return;
     const contact = contacts.find((c) => c.id === dragContact);
     if (!contact) return;
     if (contact.groupIds?.includes(groupId)) {
@@ -221,14 +207,7 @@ export default function Contacts() {
       setDragContact(null);
       return;
     }
-    const updatedContact = {
-      ...contact,
-      groupIds: [...(contact.groupIds || []), groupId],
-      updatedAt: Date.now(),
-    };
-    const nextContacts = contacts.map((c) => (c.id === dragContact ? updatedContact : c));
-    saveAddressBookContacts(nextContacts);
-    setContacts(nextContacts);
+    await addToGroup(dragContact, groupId);
     showToast("Contact added to group");
     setDragContact(null);
   };
@@ -258,8 +237,8 @@ export default function Contacts() {
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       return (
-        c.nickname.toLowerCase().includes(q) ||
-        c.address.toLowerCase().includes(q) ||
+        c.name.toLowerCase().includes(q) ||
+        c.publicKey.toLowerCase().includes(q) ||
         (c.federationAddress || "").toLowerCase().includes(q)
       );
     }
@@ -267,39 +246,35 @@ export default function Contacts() {
   });
 
   // Get group names for a contact
-  const getGroupNames = (contact: AddressBookContact) => {
+  const getGroupNames = (contact: Contact) => {
     return (contact.groupIds || [])
       .map((gid) => groups.find((g) => g.id === gid))
       .filter(Boolean);
   };
 
-  const handleImportContacts = (imported: Array<{ name: string; address: string; federation?: string }>, overwriteDuplicates: boolean) => {
-    const existing = loadAddressBookContacts();
-    const existingByAddress = new Map(existing.map((c) => [c.address, c]));
-    const timestamp = Date.now();
+  const handleImportContacts = async (imported: Array<{ name: string; address: string; federation?: string }>, overwriteDuplicates: boolean) => {
+    const existingByAddress = new Map(contacts.map((c) => [c.publicKey, c]));
     let added = 0;
     let updated = 0;
     for (const row of imported) {
-      const existingContact = existingByAddress.get(row.address);
-      if (existingContact) {
-        if (overwriteDuplicates) {
-          existingByAddress.set(row.address, { ...existingContact, nickname: row.name, updatedAt: timestamp });
+      const existing = existingByAddress.get(row.address);
+      if (existing) {
+        if (overwriteDuplicates && existing.id !== undefined) {
+          await updateContact(existing.id, {
+            name: row.name,
+            ...(row.federation ? { federationAddress: row.federation } : {}),
+          });
           updated++;
         }
       } else {
-        existingByAddress.set(row.address, {
-          id: `${row.address}:${timestamp + added}`,
-          nickname: row.name,
-          address: row.address,
-          createdAt: timestamp,
-          updatedAt: timestamp,
+        await addContact({
+          name: row.name,
+          publicKey: row.address,
+          ...(row.federation ? { federationAddress: row.federation } : {}),
         });
         added++;
       }
     }
-    const merged = Array.from(existingByAddress.values());
-    saveAddressBookContacts(merged);
-    setContacts(merged);
     setShowImportModal(false);
     const parts: string[] = [];
     if (added > 0) parts.push(`${added} added`);
@@ -337,10 +312,10 @@ export default function Contacts() {
         {/* Encryption notice */}
         <div className="mt-4 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
           <div className="flex items-start gap-2">
-            <LockIcon className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-emerald-800 dark:text-emerald-200">
-              Your contacts are encrypted on this device with a key derived from your connected wallet, and are cleared when you disconnect. Avoid using this feature on shared or public computers.
-            </p>
+            <svg className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+            </svg>
+            <p className="text-sm text-amber-800 dark:text-amber-200">Your contacts are stored locally in this browser and persist across sessions. Avoid using this feature on shared or public computers.</p>
           </div>
         </div>
 
@@ -375,7 +350,7 @@ export default function Contacts() {
           </button>
           <button onClick={() => {
             if (contacts.length === 0) { showToast("No contacts to export"); return; }
-            const csv = exportContactsCSV(contacts.map((c) => ({ name: c.nickname, address: c.address, federation: c.federationAddress })));
+            const csv = exportContactsCSV(contacts.map((c) => ({ name: c.name, address: c.publicKey, federation: c.federationAddress })));
             downloadFile(csv, "finchippay-contacts.csv", "text/csv");
             showToast(`Exported ${contacts.length} contact${contacts.length !== 1 ? "s" : ""}`);
           }} disabled={contacts.length === 0} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-700/50 border border-slate-300 dark:border-slate-600/50 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
@@ -384,7 +359,7 @@ export default function Contacts() {
           </button>
           <button onClick={() => {
             if (contacts.length === 0) { showToast("No contacts to export"); return; }
-            const vcf = exportContactsVCard(contacts.map((c) => ({ name: c.nickname, address: c.address, federation: c.federationAddress })));
+            const vcf = exportContactsVCard(contacts.map((c) => ({ name: c.name, address: c.publicKey, federation: c.federationAddress })));
             downloadFile(vcf, "finchippay-contacts.vcf", "text/vcard");
             showToast(`Exported ${contacts.length} contact${contacts.length !== 1 ? "s" : ""}`);
           }} disabled={contacts.length === 0} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-700/50 border border-slate-300 dark:border-slate-600/50 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
@@ -399,7 +374,11 @@ export default function Contacts() {
       </div>
 
       {showImportModal && (
-        <ContactImportModal existingContacts={contacts} onImport={handleImportContacts} onClose={() => setShowImportModal(false)} />
+        <ContactImportModal
+          existingContacts={contacts.map((c) => ({ id: String(c.id), nickname: c.name, address: c.publicKey }))}
+          onImport={handleImportContacts}
+          onClose={() => setShowImportModal(false)}
+        />
       )}
 
       <div className="flex gap-6">
@@ -602,29 +581,29 @@ export default function Contacts() {
                   <div
                     key={contact.id}
                     draggable
-                    onDragStart={() => handleDragStart(contact.id)}
+                    onDragStart={() => contact.id !== undefined && handleDragStart(contact.id)}
                     className="card-hover p-4 rounded-xl border border-slate-200 dark:border-slate-700/50 bg-white dark:bg-slate-800/30 transition-all cursor-grab active:cursor-grabbing"
                   >
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="font-semibold text-slate-900 dark:text-white">{contact.nickname}</h3>
+                          <h3 className="font-semibold text-slate-900 dark:text-white">{contact.name}</h3>
                           <FederationBadge address={contact.federationAddress} />
                           {getGroupNames(contact).map((g) => g && (
                             <GroupBadge key={g.id} name={g.name} color={g.color} />
                           ))}
                         </div>
-                        <p className="text-xs text-slate-600 dark:text-slate-400 font-mono mt-1 break-all">{contact.address}</p>
+                        <p className="text-xs text-slate-600 dark:text-slate-400 font-mono mt-1 break-all">{contact.publicKey}</p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
-                        <button onClick={() => handleCopyAddress(contact.address)} title="Copy address" className="p-2 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-700/50 transition-colors">
+                        <button onClick={() => handleCopyAddress(contact.publicKey)} title="Copy address" className="p-2 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-700/50 transition-colors">
                           <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                         </button>
                         <button onClick={() => handleSendXLM(contact)} title="Send XLM to this contact" className="px-3 py-2 rounded-lg text-sm font-medium text-stellar-700 dark:text-stellar-300 bg-stellar-50 dark:bg-stellar-500/10 border border-stellar-500/20 hover:bg-stellar-500/20 hover:border-stellar-500/30 transition-colors">Send</button>
                         <button onClick={() => handleEditContact(contact)} title="Edit contact" className="p-2 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-700/50 transition-colors">
                           <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                         </button>
-                        <button onClick={() => handleDeleteContact(contact.id)} title="Delete contact" className="p-2 rounded-lg text-slate-500 hover:text-red-600 dark:text-slate-400 dark:hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                        <button onClick={() => contact.id !== undefined && handleDeleteContact(contact.id)} title="Delete contact" className="p-2 rounded-lg text-slate-500 hover:text-red-600 dark:text-slate-400 dark:hover:text-red-400 hover:bg-red-500/10 transition-colors">
                           <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                         </button>
                       </div>
