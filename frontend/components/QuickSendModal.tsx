@@ -52,7 +52,7 @@ export default function QuickSendModal({
         <button
           onClick={onClose}
           aria-label="Close quick send modal"
-          className="absolute -top-3 -right-3 z-10 w-7 h-7 flex items-center justify-center rounded-full border border-slate-700 bg-slate-900 text-slate-400 hover:text-white hover:border-slate-500 transition-colors shadow-lg"
+          className="absolute -top-3 -right-3 z-10 w-7 h-7 flex items-center justify-center rounded-full border border-slate-700 bg-slate-900 text-slate-400 hover:text-white hover:border-slate-500 transition-colors shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stellar-400/60"
         >
           <XIcon className="w-3.5 h-3.5" />
         </button>

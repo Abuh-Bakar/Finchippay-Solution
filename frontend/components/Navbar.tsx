@@ -435,5 +435,6 @@ export default function Navbar({ onTakeTour }: NavbarProps) {
         </div>
       )}
     </nav>
+    </>
   );
 }

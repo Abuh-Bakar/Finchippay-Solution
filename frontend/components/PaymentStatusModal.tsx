@@ -122,7 +122,7 @@ export default function PaymentStatusModal({
                     ? "Payment failed"
                     : "Processing payment"}
               </h3>
-              <p className="mt-1 text-sm text-slate-400">
+              <p id="payment-status-description" className="mt-1 text-sm text-slate-400">
                 {status === "success"
                   ? "Your transaction has been confirmed on the Stellar network."
                   : status === "error"
@@ -135,7 +135,8 @@ export default function PaymentStatusModal({
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-lg border border-white/10 px-3 py-1.5 text-sm font-medium text-slate-300 transition-colors hover:border-white/20 hover:text-white"
+                aria-label="Close payment status modal"
+                className="rounded-lg border border-white/10 px-3 py-1.5 text-sm font-medium text-slate-300 transition-colors hover:border-white/20 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stellar-400/60"
               >
                 Close
               </button>

@@ -64,6 +64,7 @@ export default function QRCodeModal({ isOpen, onClose, publicKey, amount }: QRCo
             Receive Payment QR Code
           </h3>
           <button
+            ref={closeButtonRef}
             onClick={onClose}
             aria-label="Close QR code dialog"
             className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors p-1 rounded-lg hover:bg-slate-50 dark:hover:bg-white/5"
@@ -106,7 +107,8 @@ export default function QRCodeModal({ isOpen, onClose, publicKey, amount }: QRCo
         <div className="flex gap-3">
           <button
             onClick={downloadQRCode}
-            className="flex-1 bg-stellar-500 hover:bg-stellar-600 text-white font-medium py-2.5 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
+            aria-label="Download QR code as PNG"
+            className="flex-1 bg-stellar-500 hover:bg-stellar-600 text-white font-medium py-2.5 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stellar-400/60"
           >
             <DownloadIcon className="w-4 h-4" aria-hidden="true" />
             Download QR
