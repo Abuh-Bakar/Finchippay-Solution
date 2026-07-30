@@ -4,7 +4,6 @@
  */
 
 "use strict";
-const crypto = require("crypto");
 
 // ─── Environment ─────────────────────────────────────────────────────────────
 // dotenv must load before the tracing module so OTEL_EXPORTER_OTLP_ENDPOINT
@@ -26,6 +25,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 const pinoHttp = require("pino-http");
 const rateLimit = require("express-rate-limit");
+const { limitHandler } = require("./middleware/rateLimit");
 const Sentry = require("@sentry/node");
 const { formatErrorResponse, ERROR_CODES } = require("../../shared/errorCodes");
 
@@ -40,6 +40,7 @@ const turretsRoutes = require("./routes/turrets");
 const tipsRoutes = require("./routes/tips");
 const webhookRoutes = require("./routes/webhooks");
 const parsePaymentRoutes = require("./routes/parsePayment");
+const { strictLimiter } = require("./middleware/rateLimit");
 const scheduledTransactionRoutes = require("./routes/scheduledTransactions");
 const sep24Routes = require("./routes/sep24");
 const sep12Routes = require("./routes/sep12");
@@ -50,6 +51,7 @@ const featuresRoutes = require("./routes/features");
 const adminFeatureFlagsRoutes = require("./routes/adminFeatureFlags");
 const tokensRoutes = require("./routes/tokens");
 const pushRoutes = require("./routes/push");
+const contactRoutes = require("./routes/contacts");
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./swagger");
 const { startTurretsServer } = require("./turretsServer");
@@ -58,18 +60,17 @@ const {
   startRetryWorker,
   closeAllStreams: closeWebhookStreams,
 } = require("./services/webhookSubscriptionService");
-const {
-  startCleanupWorker,
-  stopCleanupWorker,
-} = require("./services/eventCleanupService");
 const logger = require("./utils/logger");
 const { validateEnv, parseAllowedOrigins } = require("./config/validateEnv");
 const { requireJsonContentType } = require("./middleware/bodyParsing");
 const { trackHttpMetrics } = require("./middleware/metrics");
 const metricsRoutes = require("./routes/metrics");
-const { requestIdMiddleware } = require("./middleware/requestId");
-const { getRequestId } = require("./utils/correlationId");
+const {
+  correlationMiddleware,
+} = require("./utils/correlationId");
+const { errorLogFields } = require("./utils/errorResponse");
 const { initRedis, closeRedis } = require("./services/cacheService");
+const shutdownState = require("./services/shutdownState");
 const {
   closeAll: closeBalanceStreams,
 } = require("./services/balanceStreamService");
@@ -78,6 +79,11 @@ const { zodErrorHandler } = require("./validation/middleware");
 // correlation-ID provider (#270).
 const { errorLogFields } = require("./utils/errorResponse");
 const traceContextMiddleware = require("./middleware/tracing");
+
+const { ApolloServer } = require("apollo-server-express");
+const { ApolloServerPluginLandingPageGraphQLPlayground } = require("apollo-server-core");
+const typeDefs = require("./graphql/schema");
+const resolvers = require("./graphql/resolvers");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -159,22 +165,11 @@ function getFederationServerUrl(req) {
  * The backend serves no HTML pages of its own except Swagger UI at /api/docs,
  * so the policy is intentionally restrictive.
  */
-const helmetOptions = {
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", "data:"],
-      connectSrc: ["'self'"],
-      fontSrc: ["'self'"],
-      objectSrc: ["'none'"],
-      frameSrc: ["'none'"],
-    },
-  },
-};
+const securityHeaders = require("./middleware/securityHeaders");
+const corsConfig = require("./middleware/corsConfig");
 
-app.use(helmet(helmetOptions));
+app.use(securityHeaders);
+app.use(corsConfig);
 // Prometheus HTTP metrics — track duration & count for every request.
 app.use(trackHttpMetrics);
 // Request ID middleware (#172) — generates/adopts X-Request-ID, attaches
@@ -277,10 +272,30 @@ const limiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: formatErrorResponse("RATE_LIMITED_GLOBAL"),
+  // Counts rejections into rate_limit_hits_total{limiter="global"} (#272).
+  handler: limitHandler("global", "RATE_LIMITED_GLOBAL"),
 });
 app.use(limiter);
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
+// Versioned API (v1) plus legacy /api/* aliases with Deprecation header (#83).
+
+const apiRouteMounts = [
+  { path: "/auth", router: authRoutes },
+  { path: "/accounts", router: accountRoutes },
+  { path: "/payments", router: paymentRoutes },
+  { path: "/webhooks", router: webhookRoutes },
+  { path: "/analytics", router: analyticsRoutes },
+  { path: "/turrets", router: turretsRoutes },
+  { path: "/tips", router: tipsRoutes },
+  { path: "/parse-payment", router: parsePaymentRoutes },
+  { path: "/scheduled-txns", router: scheduledTransactionRoutes },
+  { path: "/sep24", router: sep24Routes },
+];
+
+for (const { path, router } of apiRouteMounts) {
+  app.use(`/api/v1${path}`, router);
+}
 
 app.use("/api/auth", authRoutes);
 app.use("/api/accounts", accountRoutes);
@@ -290,7 +305,7 @@ app.use("/api/webhooks", webhookRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/turrets", turretsRoutes);
 app.use("/api/tips", tipsRoutes);
-app.use("/api/parse-payment", parsePaymentRoutes);
+app.use("/api/parse-payment", strictLimiter, parsePaymentRoutes);
 app.use("/api/scheduled-transactions", scheduledTransactionRoutes);
 app.use("/api/events", eventRoutes);
 app.use("/api/notifications", notificationRoutes);
@@ -368,16 +383,29 @@ app.use((err, req, res, next) => {
 
 // ─── Graceful shutdown ────────────────────────────────────────────────
 
+// How long to wait after readiness starts failing before tearing down
+// background workers and exiting — gives Kubernetes time to observe the
+// failed readiness probe and stop routing new traffic (readinessProbe
+// periodSeconds: 10 in kubernetes/backend/deployment.yaml).
+const SHUTDOWN_DRAIN_MS = parseInt(process.env.SHUTDOWN_DRAIN_MS, 10) || 10_000;
+
 async function gracefulShutdown(signal, server, otelSdk) {
+  markShuttingDown();
   logger.info({ signal }, "Received shutdown signal — draining…");
+
+  // Fail readiness immediately so /api/health/ready starts returning 503
+  // before any in-flight work is torn down.
+  shutdownState.markShuttingDown();
 
   server.close((err) => {
     if (err) logger.error({ err }, "Error closing HTTP server");
   });
 
-  stopCleanupWorker();
+  // Give Kubernetes time to observe the failed readiness probe and drain
+  // in-flight requests before workers are stopped and the process exits.
+  await new Promise((resolve) => setTimeout(resolve, SHUTDOWN_DRAIN_MS));
 
-  // Stop scheduled executor
+  // 1. Stop scheduled executor
   try {
     require("./services/scheduledExecutor").stop();
   } catch (err) {
@@ -449,9 +477,45 @@ if (require.main === module) {
     // Start scheduled transaction executor
     require("./services/scheduledExecutor").start();
     require("./services/dataRetentionService").startRetentionCron();
-    startCleanupWorker();
+
+    const apolloServer = new ApolloServer({
+      typeDefs,
+      resolvers,
+      context: ({ req }) => {
+        let user = null;
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith("Bearer ")) {
+          try {
+            const token = authHeader.split(" ")[1];
+            const jwt = require("jsonwebtoken");
+            const decoded = jwt.verify(
+              token,
+              process.env.JWT_SECRET || "finchippay_secret_key",
+            );
+            if (decoded.publicKey && /^G[A-Z0-9]{55}$/.test(decoded.publicKey)) {
+              user = decoded;
+            }
+          } catch {
+            // invalid token — context.user stays null
+          }
+        }
+        return { user };
+      },
+      introspection: process.env.NODE_ENV !== "production",
+      plugins:
+        process.env.NODE_ENV !== "production"
+          ? [ApolloServerPluginLandingPageGraphQLPlayground()]
+          : [],
+    });
+
+    await apolloServer.start();
+    apolloServer.applyMiddleware({ app, path: "/api/graphql" });
 
     const server = app.listen(PORT, () => {
+      logger.info(
+        { port: PORT, network: process.env.STELLAR_NETWORK || "testnet" },
+        "Finchippay Solution API server started",
+      );
       logger.info(`
  ✨ Finchippay Solution API
  🚀 Server running at http://localhost:${PORT}

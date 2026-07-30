@@ -149,7 +149,8 @@
     "balanceTrendUpward": "Tendencia del saldo: al alza",
     "balanceTrendDownward": "Tendencia del saldo: a la baja",
     "balanceLive": "En vivo",
-    "balancePolling": "Actualizando cada 30 s"
+    "balancePolling": "Actualizando cada 30 s",
+    "viewPortfolio": "Ver cartera →"
   },
   "portfolio": {
     "title": "Portafolio",

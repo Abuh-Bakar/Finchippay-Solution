@@ -26,6 +26,8 @@ import {
 
 // Dynamic imports for large components to improve initial load (Lighthouse Performance)
 import Skeleton from "@/components/Skeleton";
+import AnimatedCounter from "@/components/AnimatedCounter";
+import { FadeIn, StaggerContainer } from "@/components/FadeIn";
 
 // Browser-only: reads Notification.permission and localStorage on mount.
 const PushNotificationPrompt = dynamic(
@@ -45,6 +47,7 @@ const MultiSigFlow = dynamic(() => import("../components/MultiSigFlow"), {
   loading: () => <Skeleton height="h-64" />,
 });
 const OnboardingTour = dynamic(() => import("../components/OnboardingTour"), { ssr: false });
+const FeatureTour = dynamic(() => import("../components/FeatureTour"), { ssr: false });
 const BatchPaymentForm = dynamic(() => import("../components/BatchPaymentForm"), {
   ssr: false,
   loading: () => <Skeleton height="h-64" />,
@@ -97,7 +100,10 @@ import { useToastContext } from "@/lib/ToastContext";
 import { getJwtToken } from "@/lib/auth";
 import { URIParseResult, uriToPrefillData } from "@/lib/sep0007";
 import { useWallet } from "@/lib/useWallet";
+import DashboardPortfolioWidget from "@/components/DashboardPortfolioWidget";
 import { useBalanceStream } from "@/lib/useBalanceStream";
+import FeatureAnnouncement from "@/components/FeatureAnnouncement";
+import type { Step } from "react-joyride";
 
 interface DashboardProps {
   stellarURI?: URIParseResult | null;
@@ -176,6 +182,25 @@ function formatSnapshotTime(savedAt: number) {
   });
 }
 
+const BATCH_PAYMENTS_FEATURE_ID = "batch-payments-v1";
+
+const BATCH_PAYMENTS_TOUR_STEPS: Step[] = [
+  {
+    target: '[data-tour="batch-send-tab"]',
+    title: "Batch Payments",
+    content: "Switch to this tab to send XLM to multiple recipients in a single transaction.",
+    placement: "bottom",
+    disableBeacon: true,
+  },
+  {
+    target: '[data-tour="batch-payment-form"]',
+    title: "Add recipients",
+    content: "Add each recipient's address and amount, then review and sign once to send them all together.",
+    placement: "right",
+    disableBeacon: true,
+  },
+];
+
 export default function Dashboard({ stellarURI }: DashboardProps) {
   const { publicKey } = useWallet();
   const { t } = useTranslation("common");
@@ -217,6 +242,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
 
   const router = useRouter();
   const [activePaymentTab, setActivePaymentTab] = useState<"single" | "batch">("single");
+  const [showBatchFeatureTour, setShowBatchFeatureTour] = useState(false);
 
   // Build prefill object from query parameters.
   // Supports legacy ?prefillDestination= (contacts page) and
@@ -294,7 +320,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
     const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "";
     try {
       const response = await fetch(
-        `${apiBase}/api/accounts/resolve/${encodeURIComponent(publicKey)}`
+        `${apiBase}/api/v1/accounts/resolve/${encodeURIComponent(publicKey)}`
       );
       if (response.ok) {
         const payload = await response.json();
@@ -405,7 +431,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
       }
 
       const response = await fetch(
-        `${apiBase}/api/payments/${encodeURIComponent(publicKey)}/stats`,
+        `${apiBase}/api/v1/payments/${encodeURIComponent(publicKey)}/stats`,
         { headers }
       );
 
@@ -581,7 +607,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
       const token = getJwtToken();
       if (token) headers["Authorization"] = `Bearer ${token}`;
       const res = await fetch(
-        `${apiBase}/api/analytics/${encodeURIComponent(publicKey)}/top-recipients`,
+        `${apiBase}/api/v1/analytics/${encodeURIComponent(publicKey)}/top-recipients`,
         { headers }
       );
       if (res.ok) {
@@ -809,6 +835,9 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
   const handleToggleNotifications = async () => {
     // --- Disable ---
     if (notificationEnabled) {
+      if (publicKey) {
+        await unsubscribePush(publicKey);
+      }
       localStorage.setItem('notificationOptIn', 'false');
       setNotificationEnabled(false);
 
@@ -838,25 +867,22 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
     }
 
     try {
-      const subscribed = await subscribeToPush();
+      if (!publicKey) return;
+      const subscribed = await subscribeToPush(publicKey);
       if (!subscribed) return;
 
       localStorage.setItem('notificationOptIn', 'true');
       setNotificationEnabled(true);
       showToast('Payment notifications enabled');
 
-      // Confirm with an immediate notification so the user sees it working.
-      // Use showNotification() via the service worker registration —
-      // this is the Push API-correct method, not new Notification().
       const registration = await navigator.serviceWorker.ready;
-      await registration.showNotification('Stellar Pay', {
+      await registration.showNotification('Finchippay', {
         body: 'You will now receive notifications for incoming payments.',
         icon: '/favicon.svg',
         badge: '/favicon.svg',
       });
     } catch (err) {
-      console.error('Failed to enable push notifications:', err);
-      showToast('Could not enable notifications. Please try again.');
+      showToast('Error enabling notifications');
     }
   };
 
@@ -956,7 +982,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 animate-fade-in cursor-default select-none">
+    <StaggerContainer className="max-w-6xl mx-auto px-4 sm:px-6 py-10 cursor-default select-none">
       <Head>
         <title>Dashboard | Finchippay-Solution</title>
         <meta name="description" content="Manage your Stellar account, view balances, send payments, and monitor streaming, escrow, and multi-sig activity. Real-time dashboard with analytics and wallet summary." />
@@ -1013,26 +1039,32 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
         </div>
       </div>
 
-      <PaymentStatsWidget
+      <FadeIn>
+        <PaymentStatsWidget
         stats={paymentStats}
         loading={paymentStatsLoading}
         error={paymentStatsError}
         onRetry={fetchPaymentStats}
         t={t}
       />
+      </FadeIn>
 
-      <ContractEventStatsWidget
+      <FadeIn>
+        <ContractEventStatsWidget
         count={contractEventCount}
         loading={contractEventCountLoading}
         t={t}
       />
+      </FadeIn>
 
-      <MonthlySpendingChart 
+      <FadeIn>
+        <MonthlySpendingChart
         data={spendingData} 
         loading={spendingLoading}
         onBarClick={setSelectedMonth}
         t={t}
       />
+      </FadeIn>
 
       {selectedMonth && (
         <div className="mb-8 p-4 rounded-xl bg-stellar-500/5 border border-stellar-500/10 flex items-center justify-between animate-fade-in">
@@ -1135,10 +1167,11 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
             ) : xlmBalance !== null ? (
               <div>
                 <div className={`font-display text-3xl font-bold text-slate-900 dark:text-white ${balanceFlash ? "balance-flash" : ""}`}>
-                  {parseFloat(xlmBalance).toLocaleString("en-US", {
-                    maximumFractionDigits: 4,
-                  })}
-                  <span className="text-stellar-700 dark:text-stellar-400 text-xl ml-2">XLM</span>
+                  <AnimatedCounter
+                    value={parseFloat(xlmBalance) || 0}
+                    decimals={4}
+                    suffix={<span className="text-stellar-700 dark:text-stellar-400 text-xl ml-2">XLM</span>}
+                  />
                 </div>
                 {xlmPrice !== null && (
                   <p className="text-sm text-slate-600 dark:text-slate-400 mt-0.5">
@@ -1213,6 +1246,10 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
           </div>
         )}
       </div>
+
+      {/* Portfolio dashboard widget (#482): total value, 24h change, P&L,
+          asset allocation, and historical value chart. */}
+      <DashboardPortfolioWidget publicKey={publicKey} />
 
       {/* Reserve warning (#164). Amber when balance is within 2 XLM of the
           minimum reserve, red when at or below it. Suppressed when the
@@ -1313,6 +1350,24 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
         </div>
       ))}
 
+      <Link
+        href="/portfolio"
+        className="card mb-6 flex items-center justify-between gap-4 bg-gradient-to-br from-stellar-500/10 to-blue-500/5 dark:from-stellar-500/5 dark:to-blue-500/10 border-stellar-500/20 hover:border-stellar-500/40 transition-colors group"
+      >
+        <div>
+          <p className="font-semibold text-slate-900 dark:text-white">{t("portfolio.title")}</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+            {t("portfolio.totalValue")}:{" "}
+            {xlmPrice !== null && xlmBalance !== null
+              ? formatUSD(parseFloat(xlmBalance) * xlmPrice)
+              : "—"}
+          </p>
+        </div>
+        <span className="text-stellar-600 dark:text-stellar-400 group-hover:translate-x-0.5 transition-transform">
+          {t("dashboard.viewPortfolio")}
+        </span>
+      </Link>
+
       <FeatureGate flag="streaming_payments">
         <StreamingPayments publicKey={publicKey} />
       </FeatureGate>
@@ -1361,6 +1416,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
               </button>
               <button
                 type="button"
+                data-tour="batch-send-tab"
                 onClick={() => setActivePaymentTab("batch")}
                 className={`rounded-3xl px-4 py-2 text-sm font-semibold transition ${
                   activePaymentTab === "batch"
@@ -1390,11 +1446,13 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
               }
             />
           ) : (
-            <BatchPaymentForm
-              publicKey={publicKey}
-              xlmBalance={xlmBalance || "0"}
-              onBatchSuccess={handlePaymentSuccess}
-            />
+            <div data-tour="batch-payment-form">
+              <BatchPaymentForm
+                publicKey={publicKey}
+                xlmBalance={xlmBalance || "0"}
+                onBatchSuccess={handlePaymentSuccess}
+              />
+            </div>
           )}
         </div>
 
@@ -1443,7 +1501,24 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
         onComplete={handleTourComplete}
         onSkip={handleTourSkip}
       />
-    </div>
+      {!showOnboardingTour && !showBatchFeatureTour && (
+        <FeatureAnnouncement
+          featureId={BATCH_PAYMENTS_FEATURE_ID}
+          title="New: Batch Payments!"
+          description="Send XLM to multiple recipients at once, in a single transaction."
+          onStartTour={() => {
+            setActivePaymentTab("batch");
+            setShowBatchFeatureTour(true);
+          }}
+        />
+      )}
+      <FeatureTour
+        featureId={BATCH_PAYMENTS_FEATURE_ID}
+        steps={BATCH_PAYMENTS_TOUR_STEPS}
+        isVisible={showBatchFeatureTour}
+        onClose={() => setShowBatchFeatureTour(false)}
+      />
+    </StaggerContainer>
   );
 }
 

@@ -12,25 +12,23 @@
 
 const pino = require("pino");
 
-// Lazy require avoids circular init issues if correlationId ever imports logger.
-function getCorrelationFields() {
-  try {
-    const { getRequestId, getSessionId } = require("./correlationId");
-    const requestId = getRequestId();
-    const sessionId = getSessionId();
-    const fields = {};
-    if (requestId) {
-      fields.requestId = requestId;
-      // Alias retained for dashboards / Sentry tags that key on correlationId.
-      fields.correlationId = requestId;
-    }
-    if (sessionId) fields.sessionId = sessionId;
-    return fields;
-  } catch {
-    return {};
-  }
-}
+const isProduction = process.env.NODE_ENV === "production";
 
+let transportConfig = undefined;
+if (!isProduction) {
+  try {
+    require.resolve("pino-pretty");
+    transportConfig = {
+      target: "pino-pretty",
+      options: {
+        colorize: true,
+        translateTime: "SYS:standard",
+        ignore: "pid,hostname",
+      },
+    };
+  } catch (_) {
+    // pino-pretty not installed — fall back to JSON output in development too.
+  }
 const STELLAR_SECRET_KEY_PATTERN = /S[A-Z2-7]{55}/g;
 const REDACTED_STELLAR = "[REDACTED_STELLAR_SECRET]";
 
@@ -61,9 +59,7 @@ function redactStellarKeys(obj) {
           str.replace(STELLAR_SECRET_KEY_PATTERN, REDACTED_STELLAR),
         );
       }
-    } catch {
-      // ignore non-serializable objects
-    }
+    } catch { /* ignore */ }
   }
   return obj;
 }
@@ -75,7 +71,37 @@ const logger = pino({
     return getCorrelationFields();
   },
   formatters: {
-    level: (label) => ({ level: label.toUpperCase() }),
+    level: (label) => {
+      return { level: label.toUpperCase() };
+    },
+    bindings: (bindings) => {
+      return { service: "finchippay-backend", ...bindings };
+    },
+  },
+  timestamp: pino.stdTimeFunctions.isoTime,
+  redact: {
+    paths: [
+      "privateKey",
+      "secret",
+      "password",
+      "token",
+      "signature",
+      "jwt",
+      "authorization",
+      "apiKey",
+      "api_key",
+      "accessToken",
+      "access_token",
+      "refreshToken",
+      "refresh_token",
+    ],
+    censor: "[REDACTED]",
+  },
+  transport: transportConfig,
+  mixin() {
+    const { getRequestId } = require("./correlationId");
+    const correlationId = getRequestId();
+    return correlationId ? { correlationId } : {};
   },
   timestamp: pino.stdTimeFunctions.isoTime,
   serializers: {
