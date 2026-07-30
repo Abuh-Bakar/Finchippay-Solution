@@ -23,7 +23,7 @@ require("./config/fetchInterceptor");
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
-const requestLogger = require("./middleware/requestLogger");
+const pinoHttp = require("pino-http");
 const rateLimit = require("express-rate-limit");
 const { limitHandler } = require("./middleware/rateLimit");
 const Sentry = require("@sentry/node");
@@ -75,10 +75,10 @@ const {
   closeAll: closeBalanceStreams,
 } = require("./services/balanceStreamService");
 const { zodErrorHandler } = require("./validation/middleware");
+// Requiring errorResponse registers getRequestId as the shared registry's
+// correlation-ID provider (#270).
+const { errorLogFields } = require("./utils/errorResponse");
 const traceContextMiddleware = require("./middleware/tracing");
-const correlationIdMiddleware = require("./middleware/correlationId");
-const { setCorrelationIdProvider } = require("../../shared/errorCodes");
-setCorrelationIdProvider(correlationIdMiddleware.getCorrelationId);
 
 const { ApolloServer } = require("apollo-server-express");
 const { ApolloServerPluginLandingPageGraphQLPlayground } = require("apollo-server-core");
@@ -114,6 +114,12 @@ Sentry.init({
         ...v,
         value: sanitizeMessage(v.value),
       }));
+    }
+    // Attach correlation ID so Sentry events can be cross-referenced with logs.
+    const requestId = getRequestId();
+    if (requestId) {
+      event.tags = { ...event.tags, correlationId: requestId };
+      event.extra = { ...event.extra, correlationId: requestId };
     }
     return event;
   },
@@ -166,12 +172,19 @@ app.use(securityHeaders);
 app.use(corsConfig);
 // Prometheus HTTP metrics — track duration & count for every request.
 app.use(trackHttpMetrics);
-// Correlation ID middleware — generates/adopts X-Request-ID, stores in ALS.
-app.use(correlationMiddleware);
+// Request ID middleware (#172) — generates/adopts X-Request-ID, attaches
+// req.log child logger, stores context in ALS, tags Sentry.
+// Mounted before pino-http so the requestId appears in every log line.
+app.use(requestIdMiddleware);
 app.use(traceContextMiddleware);
-app.use(correlationIdMiddleware);
-// Structured JSON request logging
-app.use(requestLogger);
+// Structured JSON request logging (#269) — replaces morgan('dev'); reuses the
+// shared pino logger so HTTP logs are machine-parseable (Datadog/CloudWatch).
+app.use(
+  pinoHttp({
+    logger,
+    genReqId: (req) => req.id || crypto.randomUUID(),
+  }),
+);
 
 // Content-Type enforcement (#81)
 app.use(requireJsonContentType);
@@ -183,16 +196,17 @@ bodyParsing(app);
 // /api/turrets gets a larger limit for txFunction payloads.
 app.use("/api/turrets", express.json({ limit: "512kb" }));
 
+// JSON body parsing error handler — uses standardized error codes
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
-    return res.status(400).json({ error: "Invalid JSON body" });
+    return res
+      .status(ERROR_CODES.VAL_INVALID_JSON.httpStatus)
+      .json(formatErrorResponse("VAL_INVALID_JSON"));
   }
   if (err.type === "entity.too.large" || err.status === 413) {
-    const limit = err.limit || "unknown";
-    return res.status(413).json({
-      error: "PAYLOAD_TOO_LARGE",
-      message: `Request body exceeds the ${limit} limit.`,
-    });
+    return res
+      .status(ERROR_CODES.VAL_BODY_TOO_LARGE.httpStatus)
+      .json(formatErrorResponse("VAL_BODY_TOO_LARGE"));
   }
   next();
 });
@@ -212,9 +226,17 @@ app.use(
       }
     },
     methods: ["GET", "POST", "DELETE"],
-    // traceparent/tracestate: W3C Trace Context headers the frontend's
-    // OpenTelemetry instrumentation attaches to every fetch() call.
-    allowedHeaders: ["Content-Type", "Authorization", "traceparent", "tracestate"],
+    // X-Request-ID / X-Session-ID: correlation headers for structured logging (#50).
+    // traceparent / tracestate: W3C Trace Context from frontend OpenTelemetry.
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Request-ID",
+      "X-Session-ID",
+      "traceparent",
+      "tracestate",
+    ],
+    exposedHeaders: ["X-Request-ID", "X-Session-ID"],
     credentials: true,
   }),
 );
@@ -318,7 +340,8 @@ app.get("/api/docs.json", (req, res) => {
 
 app.use((req, res) => {
   const sanitizedPath = req.path.replace(/[\r\n]/g, "");
-  logger.warn({ method: req.method, path: sanitizedPath }, "Route not found");
+  const log = req.log || logger;
+  log.warn({ method: req.method, path: sanitizedPath }, "Route not found");
   res
     .status(ERROR_CODES.RES_ROUTE_NOT_FOUND.httpStatus)
     .json(formatErrorResponse("RES_ROUTE_NOT_FOUND"));
@@ -328,15 +351,17 @@ app.use((req, res) => {
 
 Sentry.setupExpressErrorHandler(app);
 
-// Convert any stray ZodError into the standard 400 payload.
+// Convert any stray ZodError (thrown outside the validate() middleware) into
+// the standard 400 payload.
 app.use(zodErrorHandler);
 
 app.use((err, req, res, next) => {
   void next;
+  const log = req.log || logger;
   if (err.errorCode) {
     const entry = formatErrorResponse(err.errorCode, err.details);
     const status = err.status || ERROR_CODES[err.errorCode]?.httpStatus || 500;
-    logger.error(
+    log.error(
       { ...errorLogFields(err.errorCode, { details: err.details }), status },
       "Request error",
     );
@@ -346,11 +371,10 @@ app.use((err, req, res, next) => {
   const status = err.status || 500;
   const message =
     sanitizeMessage(err.message) || ERROR_CODES.SRV_INTERNAL.message;
-  logger.error(
+  log.error(
     { ...errorLogFields("SRV_INTERNAL"), status, message },
     "Request error",
   );
-
   const fallback = formatErrorResponse("SRV_INTERNAL", {
     originalMessage: sanitizeMessage(err.message),
   });
@@ -388,24 +412,22 @@ async function gracefulShutdown(signal, server, otelSdk) {
     logger.error({ err }, "Error stopping scheduled executor");
   }
 
-  // 2. Close webhook Horizon SSE streams (stops retry worker, waits for deliveries)
+  // Close webhook Horizon SSE streams (stops retry worker, waits for deliveries)
   try {
     await closeWebhookStreams();
   } catch (err) {
     logger.error({ err }, "Error closing webhook streams");
   }
 
-  // 3. Close balance SSE streams
+  // Close balance SSE streams
   try {
     closeBalanceStreams();
   } catch (err) {
     logger.error({ err }, "Error closing balance streams");
   }
 
-  // 4. Close Redis connection
   await closeRedis();
 
-  // 5. Flush OTel spans (time-boxed at 5 s)
   if (otelSdk) {
     try {
       await Promise.race([
@@ -429,9 +451,6 @@ if (require.main === module) {
   (async () => {
     validateEnv();
 
-    // Auto-run pending migrations in development so the schema is always
-    // current for local work. Other environments migrate explicitly via the
-    // deploy pipeline (npm run migrate), not on boot.
     if (process.env.NODE_ENV === "development") {
       try {
         const [batchNo, migrated] = await require("./db").migrate.latest();
@@ -447,7 +466,6 @@ if (require.main === module) {
       }
     }
 
-    // Initialise Redis connection (non-blocking; degrades gracefully if unavailable)
     initRedis().catch((err) => {
       logger.error({ err }, "Redis initialisation failed");
     });
