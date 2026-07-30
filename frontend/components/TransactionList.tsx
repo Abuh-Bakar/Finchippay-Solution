@@ -3,7 +3,7 @@
  * Displays paginated payment history for a Stellar account.
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useReducer } from "react";
 import { useRouter } from "next/router";
 import { useTranslation } from "react-i18next";
 import { withErrorBoundary } from "@/components/ErrorBoundary";
@@ -15,7 +15,7 @@ import {
   PaymentHistoryResponse,
 } from "@/lib/stellar";
 import { formatAsset, timeAgo, copyToClipboard } from "@/utils/format";
-import { loadAddressBookContacts, upsertAddressBookContact } from "@/lib/addressBook";
+import { useContacts } from "@/hooks/useContacts";
 import {
   HistoryIcon,
   ArrowUpIcon,
@@ -24,7 +24,11 @@ import {
   ExternalLinkIcon,
   PrinterIcon,
 } from "@/components/icons";
+import TransactionSearchBar from "./TransactionSearchBar";
+import HighlightedTransactionRow from "./HighlightedTransactionRow";
+import { SearchResult } from "@/lib/transactionSearch";
 import clsx from "clsx";
+import { motion, AnimatePresence } from "framer-motion";
 
 export type TransactionDirectionFilter = "all" | "sent" | "received";
 
@@ -133,8 +137,10 @@ function TransactionList({
   onPaymentsChange,
   onPrintReceipt,
   incomingPayment,
+  onSendAgain,
 }: TransactionListProps) {
   const { t } = useTranslation("common");
+  const { contacts, add: addContact, update: updateContact } = useContacts();
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -143,7 +149,58 @@ function TransactionList({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const [stalePaymentsAt, setStalePaymentsAt] = useState<number | null>(null);
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   
+  type PendingAction =
+    | { type: "ADD"; payload: PaymentRecord }
+    | { type: "RESOLVE"; payload: { pendingId: string; resolvedTx: PaymentRecord } }
+    | { type: "REMOVE"; payload: string }
+    | { type: "INIT"; payload: PaymentRecord[] };
+
+  const [pendingPayments, dispatchPending] = useReducer((state: PaymentRecord[], action: PendingAction): PaymentRecord[] => {
+    switch (action.type) {
+      case "ADD":
+        return [action.payload, ...state];
+      case "RESOLVE":
+        return state.filter((tx) => tx.id !== action.payload.pendingId);
+      case "REMOVE":
+        return state.filter((tx) => tx.id !== action.payload);
+      case "INIT":
+        return action.payload;
+      default:
+        return state;
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(sessionStorage.getItem("finchippay:pending-txs") || "[]");
+      dispatchPending({ type: "INIT", payload: stored });
+    } catch {}
+
+    const onPending = (e: any) => dispatchPending({ type: "ADD", payload: e.detail });
+    const onResolved = (e: any) => {
+      dispatchPending({ type: "RESOLVE", payload: e.detail });
+      setPayments((prev) => {
+        if (prev.some(p => p.id === e.detail.resolvedTx.id)) return prev;
+        const next = [e.detail.resolvedTx, ...prev];
+        onPaymentsChange?.(next);
+        return next;
+      });
+    };
+    const onFailed = (e: any) => dispatchPending({ type: "REMOVE", payload: e.detail.pendingId });
+
+    window.addEventListener("finchippay:pending-tx", onPending);
+    window.addEventListener("finchippay:resolved-tx", onResolved);
+    window.addEventListener("finchippay:failed-tx", onFailed);
+
+    return () => {
+      window.removeEventListener("finchippay:pending-tx", onPending);
+      window.removeEventListener("finchippay:resolved-tx", onResolved);
+      window.removeEventListener("finchippay:failed-tx", onFailed);
+    };
+  }, [onPaymentsChange]);
+
   // Pull-to-refresh state
   const [pullStartY, setPullStartY] = useState(0);
   const [pullMoveY, setPullMoveY] = useState(0);
@@ -285,15 +342,19 @@ function TransactionList({
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleSaveContact = (address: string) => {
-    const existing = loadAddressBookContacts().find((contact) => contact.address === address);
+  const handleSaveContact = async (address: string) => {
+    const existing = contacts.find((contact) => contact.publicKey === address);
     const nickname = window.prompt(
       existing ? "Update contact nickname:" : "Nickname for this contact:",
-      existing?.nickname || address.slice(0, 8)
+      existing?.name || address.slice(0, 8)
     );
 
     if (!nickname) return;
-    upsertAddressBookContact({ nickname, address });
+    if (existing?.id !== undefined) {
+      await updateContact(existing.id, { name: nickname });
+    } else {
+      await addContact({ name: nickname, publicKey: address });
+    }
   };
 
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -341,7 +402,7 @@ function TransactionList({
     });
   }, [incomingPayment, onPaymentsChange]);
 
-  const visiblePayments = filterPayments(payments, filters);
+  const visiblePayments = filterPayments([...pendingPayments, ...payments], filters);
   const hasActiveFilters =
     filters.direction !== "all" || filters.minAmount.trim() !== "" || filters.memoSearch.trim() !== "";
 
@@ -484,20 +545,65 @@ function TransactionList({
               Offline history snapshot from {formatSnapshotTime(stalePaymentsAt)}
             </div>
           )}
+
+          {/* Advanced Transaction Search Bar */}
+          {!compact && (
+            <div className="mb-6">
+              <TransactionSearchBar
+                payments={payments}
+                onSearchResults={setSearchResults}
+              />
+            </div>
+          )}
           
           <div className="mb-4 flex items-center gap-3 text-xs text-stellar-700 dark:text-stellar-400">
             <span className="w-1 h-1 rounded-full bg-stellar-400 flex-shrink-0" />
             <span>{t("transactions.keyboardNav")}</span>
           </div>
+
+          {/* Search Results Summary */}
+          {searchResults.length > 0 && (
+            <div className="mb-4 p-3 rounded-lg bg-amber-50 dark:bg-amber-500/5 border border-amber-200 dark:border-amber-800">
+              <p className="text-sm text-amber-900 dark:text-amber-200">
+                Found <strong>{searchResults.length}</strong> matching transaction{searchResults.length !== 1 ? "s" : ""}
+              </p>
+            </div>
+          )}
           
           <div
             role="list"
             aria-label={t("transactions.paymentHistory")}
             className="space-y-2"
           >
-        {visiblePayments.map((tx, index) => (
-          <div
+        <AnimatePresence initial={false}>
+        {/* Display search results if available, otherwise display filtered transactions */}
+        {searchResults.length > 0
+          ? searchResults.map((result) => (
+              <motion.div
+                key={result.payment.id}
+                layout
+                initial={{ opacity: 0, height: 0, scale: 0.95 }}
+                animate={{ opacity: 1, height: "auto", scale: 1 }}
+                exit={{ opacity: 0, height: 0, scale: 0.95 }}
+                transition={{ duration: 0.15 }}
+              >
+                <HighlightedTransactionRow
+                  result={result}
+                  payment={result.payment}
+                  compact={compact}
+                  onPrintReceipt={onPrintReceipt}
+                  onSendAgain={onSendAgain}
+                />
+              </motion.div>
+            ))
+          : visiblePayments.map((tx, index) => (
+          <motion.div
             key={tx.id}
+            layout
+            initial={{ opacity: 0, height: 0, scale: 0.95 }}
+            animate={{ opacity: 1, height: "auto", scale: 1 }}
+            exit={{ opacity: 0, height: 0, scale: 0.95 }}
+            transition={{ duration: 0.2 }}
             role="listitem"
             tabIndex={focusedIndex === index ? 0 : -1}
             onKeyDown={(e) => {
@@ -509,16 +615,14 @@ function TransactionList({
                 setFocusedIndex((prev) => Math.max(prev - 1, 0));
               } else if (e.key === 'Enter' && focusedIndex === index) {
                 e.preventDefault();
-                const address = tx.type === "sent" ? tx.to : tx.from;
-                copyToClipboard(address);
-                setCopiedId(tx.id);
-                setTimeout(() => setCopiedId(null), 2000);
+                router.push(`/tx/${tx.transactionHash}`);
               }
             }}
             onBlur={() => setFocusedIndex(-1)}
             onFocus={() => setFocusedIndex(index)}
+            onClick={() => router.push(`/tx/${tx.transactionHash}`)}
             className={clsx(
-              "flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-white/3 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors group relative",
+              "flex items-center gap-3 p-3 rounded-xl bg-slate-50 rtl:flex-row-reverse dark:bg-white/3 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors group relative cursor-pointer",
               focusedIndex === index && "outline-none ring-2 ring-stellar-500 ring-offset-2"
             )}
             aria-label={`${tx.type === "sent" ? "Sent" : "Received"} ${formatAsset(tx.amount, tx.asset)} ${tx.type === "sent" ? "to" : "from"} ${tx.type === "sent" ? tx.to : tx.from}`}
@@ -533,9 +637,9 @@ function TransactionList({
               )}
             >
               {tx.type === "sent" ? (
-                <ArrowUpIcon className="w-4 h-4 text-red-400" />
+                <ArrowUpIcon className="w-4 h-4 text-red-400 rtl:rotate-180" />
               ) : (
-                <ArrowDownIcon className="w-4 h-4 text-emerald-400" />
+                <ArrowDownIcon className="w-4 h-4 text-emerald-400 rtl:rotate-180" />
               )}
             </div>
 
@@ -545,15 +649,22 @@ function TransactionList({
                 <span className="text-sm font-medium text-slate-200 capitalize">
                   {tx.type === "sent" ? t("transactions.sentTo") : t("transactions.receivedFrom")}
                 </span>
+                {tx.isPending && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-500">
+                    <div className="w-2.5 h-2.5 border border-amber-500 border-t-transparent rounded-full animate-spin" />
+                    Pending
+                  </span>
+                )}
                 <button
-                  onClick={() =>
+                  onClick={(e) => {
+                    e.stopPropagation();
                     handleCopy(
                       tx.type === "sent" ? tx.to : tx.from,
                       tx.id
-                    )
-                  }
+                    );
+                  }}
                   aria-label={`Copy ${tx.type === "sent" ? "recipient" : "sender"} address`}
-                  className="address-pill hover:border-stellar-500/40 transition-colors text-xs"
+                  className="address-pill hover:border-stellar-500/40 transition-colors text-xs dark:hover:border-stellar-300/60"
                 >
                   {copiedId === tx.id
                     ? t("transactions.copied")
@@ -576,7 +687,7 @@ function TransactionList({
             <div className="flex items-center gap-2 flex-shrink-0">
               <span
                 className={clsx(
-                  "text-sm font-mono font-medium",
+                  "text-sm font-mono font-medium bidi-ltr",
                   tx.type === "sent" ? "text-red-400" : "text-emerald-400"
                 )}
               >
@@ -596,9 +707,10 @@ function TransactionList({
               {/* Send Again — only for sent transactions */}
               {tx.type === "sent" && (
                 <button
-                  onClick={() =>
-                    router.push(`/dashboard?to=${encodeURIComponent(tx.to)}&amount=${encodeURIComponent(tx.amount)}`)
-                  }
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    router.push(`/dashboard?to=${encodeURIComponent(tx.to)}&amount=${encodeURIComponent(tx.amount)}`);
+                  }}
                   className="opacity-0 group-hover:opacity-100 transition-opacity text-xs text-stellar-700 dark:text-stellar-400 hover:text-stellar-600 dark:hover:text-stellar-300 font-medium whitespace-nowrap"
                   title={t("transactions.prefillSendForm")}
                   aria-label={t("transactions.sendAgainToRecipient")}
@@ -611,6 +723,7 @@ function TransactionList({
                 href={explorerUrl(tx.transactionHash) ?? undefined}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
                 className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-600 dark:text-slate-400 hover:text-stellar-700 dark:hover:text-stellar-400"
                 title={t("transactions.viewOnExpert")}
                 aria-label={t("transactions.viewOnExpert")}
@@ -618,8 +731,9 @@ function TransactionList({
                 <ExternalLinkIcon className="w-3.5 h-3.5" />
               </a>
             </div>
-          </div>
+          </motion.div>
         ))}
+        </AnimatePresence>
 
         {/* Infinite Scroll Sentinel / Loading Indicator */}
         {infiniteScroll && (

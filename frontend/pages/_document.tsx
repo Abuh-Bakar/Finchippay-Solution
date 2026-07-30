@@ -7,7 +7,7 @@ import { Html, Head, Main, NextScript } from "next/document";
 
 export default function Document() {
   return (
-    <Html lang="en" suppressHydrationWarning>
+    <Html lang="en" dir="ltr" suppressHydrationWarning>
       <Head>
         {/* Resolve the saved theme before React loads to prevent a flash. */}
         <script
@@ -15,6 +15,11 @@ export default function Document() {
             __html: `
               (function() {
                 try {
+                  var locale = localStorage.getItem('finchippay:lang') || navigator.language || 'en';
+                  var language = locale.toLowerCase().split('-')[0];
+                  var direction = ['ar', 'he', 'fa', 'ur'].indexOf(language) !== -1 ? 'rtl' : 'ltr';
+                  document.documentElement.dir = direction;
+                  document.documentElement.lang = locale;
                   const saved = localStorage.getItem('finchippay:theme');
                   const theme =
                     saved === 'light' || saved === 'dark' || saved === 'system'
