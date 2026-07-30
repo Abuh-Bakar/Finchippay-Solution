@@ -1,14 +1,13 @@
 import type { Config } from "jest";
 
 const config: Config = {
-  testEnvironment: "jsdom",
+  testEnvironment: "<rootDir>/jest.environment.ts",
   transform: { "^.+\\.tsx?$": ["ts-jest", { tsconfig: { jsx: "react-jsx" } }] },
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/$1",
-    "^@stellar/stellar-sdk$": "<rootDir>/node_modules/@stellar/stellar-sdk/lib/index.js",
+    "^@stellar/stellar-sdk$": "<rootDir>/../node_modules/@stellar/stellar-sdk/lib/index.js",
   },
-  setupFiles: ["<rootDir>/jest.setup.ts"],
-  setupFilesAfterEnv: ["@testing-library/jest-dom", "<rootDir>/jest.a11y.setup.ts"],
+  setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
   testPathIgnorePatterns: ["<rootDir>/e2e/"],
   collectCoverageFrom: [
     "components/RecurringPayments.tsx",
@@ -16,6 +15,9 @@ const config: Config = {
     "components/TradeForm.tsx",
   ],
   coverageThreshold: {
+    global: {
+      lines: 70,
+    },
     "./components/RecurringPayments.tsx": {
       lines: 70,
     },

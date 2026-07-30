@@ -7,6 +7,8 @@
 
 import { useEffect, useRef } from "react";
 import SendPaymentForm from "@/components/SendPaymentForm";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
+import {  } from "@/components/icons";
 
 interface QuickSendModalProps {
   isOpen: boolean;
@@ -24,55 +26,7 @@ export default function QuickSendModal({
   usdcBalance,
 }: QuickSendModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
-
-  // Close on Escape key with focus management
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      }
-
-      // Trap focus within the modal
-      if (e.key === "Tab") {
-        const focusableElements = overlayRef.current?.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-        );
-        if (!focusableElements || focusableElements.length === 0) return;
-
-        const first = focusableElements[0];
-        const last = focusableElements[focusableElements.length - 1];
-
-        if (e.shiftKey) {
-          if (document.activeElement === first) {
-            e.preventDefault();
-            last.focus();
-          }
-        } else {
-          if (document.activeElement === last) {
-            e.preventDefault();
-            first.focus();
-          }
-        }
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-
-    // Focus the close button or first focusable element on open
-    const closeBtn = overlayRef.current?.querySelector<HTMLElement>('[aria-label="Close quick send modal"]');
-    setTimeout(() => closeBtn?.focus(), 50);
-
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      // Restore focus to previously focused element
-      previouslyFocused?.focus();
-    };
-  }, [isOpen, onClose]);
+  const panelRef = useFocusTrap<HTMLDivElement>({ active: isOpen, onEscape: onClose });
 
   // Prevent body scroll while modal is open
   useEffect(() => {
@@ -93,7 +47,7 @@ export default function QuickSendModal({
       aria-label="Quick send payment"
     >
       {/* Modal panel */}
-      <div className="relative w-full max-w-md animate-slide-up">
+      <div ref={panelRef} tabIndex={-1} className="relative w-full max-w-md animate-slide-up focus:outline-none">
         {/* Close button */}
         <button
           onClick={onClose}

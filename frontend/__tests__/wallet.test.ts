@@ -318,6 +318,7 @@ describe("wallet.ts", () => {
 
       expect(clearJwtToken).toHaveBeenCalled();
     });
+
   });
 
   describe("performSEP0010Auth", () => {
