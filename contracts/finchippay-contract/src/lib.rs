@@ -376,6 +376,50 @@ pub struct EmergencyWithdrawal {
     pub status: EmergencyWithdrawalStatus,
 }
 
+// ─── Admin governance ──────────────────────────────────────────────────────────
+
+/// A governance operation gated behind the contract's M-of-N admin signer
+/// threshold. Carries whatever parameters the underlying operation needs so
+/// that a proposal fully specifies the action to be taken.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum AdminAction {
+    /// Pause all value-transferring operations.
+    Pause,
+    /// Resume all value-transferring operations.
+    Unpause,
+    /// Set (or clear, via the zero address convention is not used — always a
+    /// concrete address) the pauser role.
+    SetPauser(Address),
+    /// Upgrade the contract WASM. Carries the new WASM hash and the storage
+    /// layout version declared by the new WASM.
+    Upgrade(BytesN<32>, u32),
+    /// Sweep unlocked tokens held by the contract. Carries
+    /// (token_address, destination, amount).
+    RescueTokens(Address, Address, i128),
+}
+
+/// An admin governance proposal awaiting M-of-N approval.
+///
+/// The proposer's own approval is recorded at creation time, so a
+/// `threshold` of 1 auto-executes immediately on `propose_admin_action`.
+/// Otherwise, subsequent admin signers call `approve_admin_action` until the
+/// threshold is met, at which point the action executes automatically.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct AdminActionProposal {
+    pub id: u32,
+    /// Admin signer that created the proposal.
+    pub proposer: Address,
+    /// The governance operation this proposal will perform once approved.
+    pub action: AdminAction,
+    /// Subset of admin signers that have approved so far.
+    pub approvals: Vec<Address>,
+    /// True once the action has been executed. Executed proposals can no
+    /// longer be approved.
+    pub executed: bool,
+}
+
 // ─── Security bounds ──────────────────────────────────────────────────────────
 
 /// Maximum ledgers into the future an escrow can be created (≈ 30 days at 5 s).
@@ -490,9 +534,13 @@ pub enum DataKey {
     // Emergency withdrawal
     EmergencyWithdrawalCount,
     EmergencyWithdrawal(u32),
-    /// List of addresses authorised to approve emergency withdrawals.
+    /// List of addresses authorised to approve emergency withdrawals and
+    /// gated admin actions (pause, unpause, set_pauser, upgrade,
+    /// rescue_tokens). Configured at `initialize` and updatable via
+    /// `set_admin_signers`.
     AdminSigners,
-    /// Number of admin approvals required for emergency withdrawal execution.
+    /// Number of approvals required from `AdminSigners` for emergency
+    /// withdrawal execution and gated admin actions.
     AdminSignersThreshold,
     // Storage lifetime bookkeeping
     /// Ledger at which every key in a `TtlClass` was last guaranteed to have at
@@ -686,6 +734,29 @@ fn get_admin_signers(env: &Env) -> Vec<Address> {
         .expect("admin signers not configured");
     bump(env, &key);
     signers
+}
+
+/// Validate a proposed admin signer set + threshold. Shared by `initialize`
+/// and `set_admin_signers` so both enforce the same invariants: a non-empty,
+/// duplicate-free signer list no longer than `MAX_ADMIN_SIGNERS`, and a
+/// threshold in `1..=signers.len()`.
+fn validate_admin_signers(signers: &Vec<Address>, threshold: u32) {
+    if signers.len() == 0 {
+        panic!("signers list must not be empty");
+    }
+    if signers.len() > MAX_ADMIN_SIGNERS {
+        panic!("too many admin signers");
+    }
+    if threshold == 0 || threshold > signers.len() {
+        panic!("threshold must be between 1 and signers.len()");
+    }
+    for i in 0..signers.len() {
+        for j in (i + 1)..signers.len() {
+            if signers.get(i).unwrap() == signers.get(j).unwrap() {
+                panic!("duplicate admin signer");
+            }
+        }
+    }
 }
 
 fn get_admin_signers_threshold(env: &Env) -> u32 {
@@ -985,14 +1056,34 @@ pub struct FinchippayContract;
 impl FinchippayContract {
     // ─── Admin ────────────────────────────────────────────────────────────────
 
-    /// Initialise the contract with an `admin` address.
+    /// Initialise the contract with an N-of-M admin signer set.
+    ///
+    /// `admin_signers` must be non-empty, contain no duplicates, and have at
+    /// most `MAX_ADMIN_SIGNERS` entries. `threshold` must be between 1 and
+    /// `admin_signers.len()`. `pause`, `unpause`, `set_pauser`, `upgrade`,
+    /// and `rescue_tokens` all require `threshold` approvals from this
+    /// signer set (via `propose_admin_action` / `approve_admin_action`)
+    /// rather than a single admin signature.
+    ///
+    /// The first signer is also stored as the legacy single `Admin` address
+    /// for read-only convenience (`get_admin`) and for `transfer_admin`; it
+    /// carries no special authority over the multi-sig-gated operations.
+    ///
     /// Can only be called once; returns `AlreadyInitialized` on subsequent calls.
-    pub fn initialize(env: Env, admin: Address) -> Result<(), ContractError> {
+    pub fn initialize(env: Env, admin_signers: Vec<Address>, threshold: u32) -> Result<(), ContractError> {
         if env.storage().persistent().has(&DataKey::Admin) {
             return Err(ContractError::AlreadyInitialized);
         }
         env.storage().persistent().set(&DataKey::Admin, &admin);
         bump_to_floor(&env, &DataKey::Admin);
+        env.storage()
+            .persistent()
+            .set(&DataKey::AdminSigners, &admin_signers);
+        bump(&env, &DataKey::AdminSigners);
+        env.storage()
+            .persistent()
+            .set(&DataKey::AdminSignersThreshold, &threshold);
+        bump(&env, &DataKey::AdminSignersThreshold);
         env.storage()
             .persistent()
             .set(&DataKey::Version, &CONTRACT_VERSION);
@@ -1009,7 +1100,11 @@ impl FinchippayContract {
         Ok(())
     }
 
-    /// Transfer admin rights to `new_admin`. Only the current admin may call this.
+    /// Transfer the legacy single-admin pointer to `new_admin`. Only the
+    /// current legacy admin may call this. This does not change the
+    /// `AdminSigners` set used to gate `pause`/`unpause`/`set_pauser`/
+    /// `upgrade`/`rescue_tokens` — use `propose_admin_action` with
+    /// `set_admin_signers` for that.
     pub fn transfer_admin(env: Env, current_admin: Address, new_admin: Address) {
         current_admin.require_auth();
         let stored = get_admin(&env);
@@ -1022,9 +1117,25 @@ impl FinchippayContract {
             .publish((Symbol::new(&env, "admin_transfer"),), new_admin);
     }
 
-    /// Return the current admin address.
+    /// Return the legacy single-admin address (the first signer passed to
+    /// `initialize`, or whoever `transfer_admin` last set). Kept for
+    /// backward compatibility; carries no authority over `pause`, `unpause`,
+    /// `set_pauser`, `upgrade`, or `rescue_tokens` — use
+    /// `get_admin_signers` for the set that actually governs those.
     pub fn get_admin(env: Env) -> Address {
         get_admin(&env)
+    }
+
+    /// Return the current admin signer set that governs `pause`, `unpause`,
+    /// `set_pauser`, `upgrade`, and `rescue_tokens`.
+    pub fn get_admin_signers(env: Env) -> Vec<Address> {
+        get_admin_signers(&env)
+    }
+
+    /// Return the number of approvals currently required from
+    /// `get_admin_signers()` to execute a gated admin action.
+    pub fn get_admin_signers_threshold(env: Env) -> u32 {
+        get_admin_signers_threshold(&env)
     }
 
     /// Return `true` if the contract is currently paused (circuit breaker).
@@ -1035,9 +1146,14 @@ impl FinchippayContract {
         paused
     }
 
-    /// Admin: pause all value-transferring operations. Read-only functions remain
+    /// Pause all value-transferring operations. Read-only functions remain
     /// accessible so users can still inspect escrows, streams, and proposals.
-    /// Can be called by either the admin or the designated pauser.
+    ///
+    /// The designated pauser (if any) may call this directly as a fast
+    /// circuit breaker, retaining its existing single-signature behavior.
+    /// Admin-initiated pausing now requires the admin signer multi-sig —
+    /// call `propose_admin_action(AdminAction::Pause)` (and
+    /// `approve_admin_action` if the threshold is greater than 1) instead.
     pub fn pause(env: Env, caller: Address) {
         caller.require_auth();
         let stored_admin = get_admin(&env);
@@ -1054,8 +1170,11 @@ impl FinchippayContract {
         env.events().publish((Symbol::new(&env, "paused"),), ());
     }
 
-    /// Admin: resume all value-transferring operations.
-    /// Can be called by either the admin or the designated pauser.
+    /// Resume all value-transferring operations.
+    ///
+    /// The designated pauser (if any) may call this directly, mirroring
+    /// `pause`. Admin-initiated unpausing requires the admin signer
+    /// multi-sig via `propose_admin_action(AdminAction::Unpause)`.
     pub fn unpause(env: Env, caller: Address) {
         caller.require_auth();
         let stored_admin = get_admin(&env);
@@ -1072,13 +1191,19 @@ impl FinchippayContract {
         env.events().publish((Symbol::new(&env, "unpaused"),), ());
     }
 
-    /// Admin: set or clear the pauser address. Only the admin may call this.
-    /// The pauser can call pause/unpause but cannot upgrade or transfer admin.
-    pub fn set_pauser(env: Env, admin: Address, pauser: Address) {
-        admin.require_auth();
-        let stored = get_admin(&env);
-        if admin != stored {
-            panic!("Unauthorized");
+    /// Admin: approve a pending governance action proposal created by
+    /// `propose_admin_action`.
+    ///
+    /// `approver` must be one of the current admin signers and must not have
+    /// already approved this proposal. Once the number of distinct
+    /// approvals reaches the configured threshold, the action executes
+    /// automatically. Returns `true` if this call caused execution.
+    pub fn approve_admin_action(env: Env, proposal_id: u32, approver: Address) -> bool {
+        require_initialized(&env);
+        approver.require_auth();
+        let signers = get_admin_signers(&env);
+        if !signers.iter().any(|s| s == approver) {
+            panic!("not an admin signer");
         }
         env.storage().persistent().set(&DataKey::Pauser, &pauser);
         bump_to_floor(&env, &DataKey::Pauser);
@@ -1091,28 +1216,12 @@ impl FinchippayContract {
     /// `threshold` must be between 1 and `signers.len()`.
     pub fn set_admin_signers(env: Env, admin: Address, signers: Vec<Address>, threshold: u32) {
         admin.require_auth();
-        let stored = get_admin(&env);
-        if admin != stored {
+        let signers_set = get_admin_signers(&env);
+        if !signers_set.iter().any(|s| s == admin) {
             panic!("Unauthorized");
         }
-        if signers.len() == 0 {
-            panic!("signers list must not be empty");
-        }
-        if signers.len() > MAX_ADMIN_SIGNERS {
-            panic!("too many admin signers");
-        }
-        if threshold == 0 || threshold > signers.len() {
-            panic!("threshold must be between 1 and signers.len()");
-        }
-        // Prevent duplicates.
-        for i in 0..signers.len() {
-            for j in (i + 1)..signers.len() {
-                if signers.get(i).unwrap() == signers.get(j).unwrap() {
-                    panic!("duplicate admin signer");
-                }
-            }
-        }
-        // The admin itself must be among the signers.
+        validate_admin_signers(&signers, threshold);
+        // The calling admin must remain among the new signers.
         if !signers.iter().any(|s| s == admin) {
             panic!("admin must be in signers list");
         }
@@ -3986,11 +4095,28 @@ mod tests {
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
+    /// Deploy with a single admin signer and threshold 1, so
+    /// `propose_admin_action` auto-executes on the first call — the closest
+    /// equivalent to the old single-admin model, for tests that don't
+    /// specifically exercise N-of-M governance.
     fn deploy(env: &Env) -> (Address, FinchippayContractClient<'_>) {
         let id = env.register(FinchippayContract, ());
         let client = FinchippayContractClient::new(env, &id);
         let admin = Address::generate(env);
-        client.initialize(&admin);
+        client.initialize(&vec![env, admin.clone()], &1);
+        (id, client)
+    }
+
+    /// Deploy with an explicit N-of-M admin signer set and threshold, for
+    /// tests exercising multi-sig governance directly.
+    fn deploy_multisig<'a>(
+        env: &'a Env,
+        signers: &Vec<Address>,
+        threshold: u32,
+    ) -> (Address, FinchippayContractClient<'a>) {
+        let id = env.register(FinchippayContract, ());
+        let client = FinchippayContractClient::new(env, &id);
+        client.initialize(signers, &threshold);
         (id, client)
     }
 
@@ -4023,13 +4149,128 @@ mod tests {
         let id = env.register(FinchippayContract, ());
         let client = FinchippayContractClient::new(&env, &id);
         let admin = Address::generate(&env);
-        client.initialize(&admin);
-        let result = client.try_initialize(&admin);
+        let signers = vec![&env, admin.clone()];
+        client.initialize(&signers, &1);
+        let result = client.try_initialize(&signers, &1);
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().unwrap(),
             ContractError::AlreadyInitialized
         );
+    }
+
+    #[test]
+    fn test_initialize_rejects_empty_signers() {
+        let env = Env::default();
+        let id = env.register(FinchippayContract, ());
+        let client = FinchippayContractClient::new(&env, &id);
+        let result = client.try_initialize(&Vec::new(&env), &1);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_initialize_rejects_threshold_above_signer_count() {
+        let env = Env::default();
+        let id = env.register(FinchippayContract, ());
+        let client = FinchippayContractClient::new(&env, &id);
+        let signers = vec![&env, Address::generate(&env), Address::generate(&env)];
+        let result = client.try_initialize(&signers, &3);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_admin_signers_multisig_requires_threshold_approvals() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let signer_a = Address::generate(&env);
+        let signer_b = Address::generate(&env);
+        let signer_c = Address::generate(&env);
+        let signers = vec![&env, signer_a.clone(), signer_b.clone(), signer_c.clone()];
+        let (_id, client) = deploy_multisig(&env, &signers, 2);
+
+        assert_eq!(client.get_admin_signers(), signers);
+        assert_eq!(client.get_admin_signers_threshold(), 2);
+        assert!(!client.is_paused());
+
+        // A single proposal from one signer is not enough to execute at threshold 2.
+        let proposal_id = client.propose_admin_action(&signer_a, &AdminAction::Pause);
+        assert!(!client.get_admin_action_proposal(&proposal_id).executed);
+        assert!(!client.is_paused());
+
+        // A second signer's approval reaches the threshold and auto-executes.
+        let executed = client.approve_admin_action(&proposal_id, &signer_b);
+        assert!(executed);
+        assert!(client.is_paused());
+        assert!(client.get_admin_action_proposal(&proposal_id).executed);
+
+        // A third, unnecessary approval is rejected once the proposal has executed.
+        let result = client.try_approve_admin_action(&proposal_id, &signer_c);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_admin_action_single_signer_threshold_one_auto_executes() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_id, client) = deploy(&env);
+        let admin = client.get_admin();
+
+        let proposal_id = client.propose_admin_action(&admin, &AdminAction::Pause);
+        assert!(client.get_admin_action_proposal(&proposal_id).executed);
+        assert!(client.is_paused());
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_propose_admin_action_rejects_non_signer() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_id, client) = deploy(&env);
+        let stranger = Address::generate(&env);
+        client.propose_admin_action(&stranger, &AdminAction::Pause);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_approve_admin_action_rejects_duplicate_approval() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let signer_a = Address::generate(&env);
+        let signer_b = Address::generate(&env);
+        let signers = vec![&env, signer_a.clone(), signer_b.clone()];
+        let (_id, client) = deploy_multisig(&env, &signers, 2);
+        let proposal_id = client.propose_admin_action(&signer_a, &AdminAction::Pause);
+        client.approve_admin_action(&proposal_id, &signer_a);
+    }
+
+    #[test]
+    fn test_admin_action_set_pauser_via_multisig() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_id, client) = deploy(&env);
+        let admin = client.get_admin();
+        let pauser = Address::generate(&env);
+
+        client.propose_admin_action(&admin, &AdminAction::SetPauser(pauser.clone()));
+        assert_eq!(client.get_pauser(), Some(pauser.clone()));
+
+        // The pauser retains its fast single-signature pause/unpause path.
+        client.pause(&pauser);
+        assert!(client.is_paused());
+        client.unpause(&pauser);
+        assert!(!client.is_paused());
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_pause_by_non_pauser_requires_proposal() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_id, client) = deploy(&env);
+        let admin = client.get_admin();
+        // Admin can no longer pause directly; must go through
+        // propose_admin_action.
+        client.pause(&admin);
     }
 
     // ── Tips ───────────────────────────────────────────────────────────────────
@@ -4386,7 +4627,7 @@ mod tests {
         env.mock_all_auths();
         let token_id = create_token(&env, &admin, &from, 500);
         let memo = Symbol::new(&env, "test");
-        client.pause(&admin);
+        client.propose_admin_action(&admin, &AdminAction::Pause);
         client.send_tip(&token_id, &from, &to, &100, &memo);
     }
 
@@ -4400,7 +4641,7 @@ mod tests {
         let to = Address::generate(&env);
         env.mock_all_auths();
         let token_id = create_token(&env, &admin, &from, 2000);
-        client.pause(&admin);
+        client.propose_admin_action(&admin, &AdminAction::Pause);
         let release = env.ledger().sequence() + 10;
         let memo = Symbol::new(&env, "test");
         client.create_escrow(&token_id, &from, &to, &2000, &release, &memo);
@@ -4416,7 +4657,7 @@ mod tests {
         let recipient = Address::generate(&env);
         env.mock_all_auths();
         let token_id = create_token(&env, &admin, &payer, 1000);
-        client.pause(&admin);
+        client.propose_admin_action(&admin, &AdminAction::Pause);
         client.open_stream(&token_id, &payer, &recipient, &10, &500);
     }
 
@@ -4429,7 +4670,7 @@ mod tests {
         env.mock_all_auths();
 
         // Admin designates a separate pauser (hot-key) role.
-        client.set_pauser(&admin, &pauser);
+        client.propose_admin_action(&admin, &AdminAction::SetPauser(pauser.clone()));
         assert_eq!(client.get_pauser(), Some(pauser.clone()));
 
         // The pauser — not the admin — can trigger the circuit breaker.
@@ -4451,23 +4692,23 @@ mod tests {
         let stranger = Address::generate(&env);
         env.mock_all_auths();
 
-        client.set_pauser(&admin, &pauser);
+        client.propose_admin_action(&admin, &AdminAction::SetPauser(pauser.clone()));
         // A random address that is neither admin nor the designated pauser
         // must be rejected even with a valid auth signature.
         client.pause(&stranger);
     }
 
     #[test]
-    #[should_panic(expected = "Unauthorized")]
-    fn test_set_pauser_requires_admin() {
+    #[should_panic(expected = "not an admin signer")]
+    fn test_set_pauser_requires_admin_signer() {
         let env = Env::default();
         let (_, client) = deploy(&env);
         let stranger = Address::generate(&env);
         let pauser = Address::generate(&env);
         env.mock_all_auths();
 
-        // Only the admin may assign the pauser role.
-        client.set_pauser(&stranger, &pauser);
+        // Only an admin signer may propose assigning the pauser role.
+        client.propose_admin_action(&stranger, &AdminAction::SetPauser(pauser));
     }
 
     #[test]
@@ -4480,14 +4721,14 @@ mod tests {
         let new_admin = Address::generate(&env);
         env.mock_all_auths();
 
-        client.set_pauser(&admin, &pauser);
+        client.propose_admin_action(&admin, &AdminAction::SetPauser(pauser.clone()));
         // The pauser role is pause-only; it must not be able to seize admin
         // rights by transferring them away.
         client.transfer_admin(&pauser, &new_admin);
     }
 
     #[test]
-    #[should_panic(expected = "Unauthorized")]
+    #[should_panic(expected = "not an admin signer")]
     fn test_pauser_cannot_upgrade() {
         let env = Env::default();
         let (_, client) = deploy(&env);
@@ -4495,10 +4736,11 @@ mod tests {
         let pauser = Address::generate(&env);
         env.mock_all_auths();
 
-        client.set_pauser(&admin, &pauser);
-        // The pauser must not be able to swap the contract WASM.
+        client.propose_admin_action(&admin, &AdminAction::SetPauser(pauser.clone()));
+        // The pauser must not be able to propose swapping the contract WASM
+        // — it is not part of the admin signer set.
         let dummy_hash = BytesN::from_array(&env, &[0u8; 32]);
-        client.upgrade(&pauser, &dummy_hash, &1);
+        client.propose_admin_action(&pauser, &AdminAction::Upgrade(dummy_hash, 1));
     }
 
     // ── Batch send ─────────────────────────────────────────────────────────
@@ -5440,7 +5682,10 @@ mod tests {
         let to = Address::generate(&env);
         env.mock_all_auths();
         let token_id = create_token(&env, &admin, &contract_id, 400);
-        client.rescue_tokens(&admin, &token_id, &400, &to);
+        client.propose_admin_action(
+            &admin,
+            &AdminAction::RescueTokens(token_id.clone(), to.clone(), 400),
+        );
 
         let events = env.events().all().filter_by_contract(&contract_id);
         assert_eq!(
@@ -5449,8 +5694,18 @@ mod tests {
                 &env,
                 (
                     contract_id.clone(),
+                    (Symbol::new(&env, "admin_action_propose"), 0u32).into_val(&env),
+                    admin.into_val(&env),
+                ),
+                (
+                    contract_id.clone(),
                     (Symbol::new(&env, "rescue_tokens"),).into_val(&env),
                     (token_id, 400i128, to).into_val(&env),
+                ),
+                (
+                    contract_id.clone(),
+                    (Symbol::new(&env, "admin_action_executed"), 0u32).into_val(&env),
+                    ().into_val(&env),
                 ),
             ]
         );
@@ -6104,7 +6359,7 @@ mod tests {
         env.mock_all_auths();
 
         let dummy_hash = BytesN::from_array(&env, &[1u8; 32]);
-        client.upgrade(&admin, &dummy_hash, &0);
+        client.propose_admin_action(&admin, &AdminAction::Upgrade(dummy_hash, 0));
     }
 
     // ==================== Storage TTL Tests ====================
