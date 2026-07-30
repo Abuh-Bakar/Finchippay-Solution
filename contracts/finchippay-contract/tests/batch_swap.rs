@@ -24,10 +24,11 @@ fn test_estimate_batch_swap_totals() {
     let env = Env::default();
     let (_id, client) = deploy(&env);
     let admin = client.get_admin();
+    env.mock_all_auths();
 
     // Create two tokens and mint to addresses so addresses exist in ledger.
-    let alice = Address::random(&env);
-    let bob = Address::random(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
     let t1 = create_token(&env, &admin, &alice, 1000);
     let t2 = create_token(&env, &admin, &bob, 500);
 
