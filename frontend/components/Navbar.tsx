@@ -23,6 +23,7 @@ import AccountSwitcher from "@/components/AccountSwitcher";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import { NavStarIcon } from "@/components/icons";
 import { loadAlerts, PRICE_ALERTS_STORAGE_KEY } from "@/lib/priceAlerts";
+import { getQueueCount, processQueue, registerBackgroundSync } from "@/lib/offlineQueue";
 
 /** Prop interface allowing _app.tsx to wire the tour launcher. */
 export interface NavbarProps {
@@ -87,6 +88,49 @@ export default function Navbar({ onTakeTour }: NavbarProps) {
       window.clearInterval(intervalId);
     };
   }, []);
+
+  // ── Offline queue badge ──────────────────────────────────────────────────
+  /** Number of transactions waiting to be submitted while offline. */
+  const [queueBadgeCount, setQueueBadgeCount] = useState(0);
+
+  useEffect(() => {
+    const refreshCount = async () => {
+      try {
+        setQueueBadgeCount(await getQueueCount());
+      } catch {
+        // IndexedDB unavailable — keep previous value.
+      }
+    };
+
+    void refreshCount();
+
+    // Re-check every 30 s (matches the price-alert polling interval).
+    const intervalId = window.setInterval(() => void refreshCount(), 30_000);
+
+    // Also update immediately when the service worker finishes processing.
+    const handleSwMessage = (event: MessageEvent) => {
+      if (event.data?.type === "QUEUE_PROCESSED") {
+        void refreshCount();
+      }
+    };
+    navigator.serviceWorker?.addEventListener("message", handleSwMessage);
+
+    return () => {
+      window.clearInterval(intervalId);
+      navigator.serviceWorker?.removeEventListener("message", handleSwMessage);
+    };
+  }, []);
+
+  const handleQueueRetry = async () => {
+    try {
+      await registerBackgroundSync();
+    } catch {
+      void processQueue();
+    }
+    try {
+      setQueueBadgeCount(await getQueueCount());
+    } catch { /* ignore */ }
+  };
 
   const config = getNetworkConfig();
   const isMainnet = config.network === "mainnet";
@@ -281,6 +325,40 @@ export default function Navbar({ onTakeTour }: NavbarProps) {
             )}
           </Link>
 
+          {/* ── Offline queue badge ── */}
+          {queueBadgeCount > 0 && (
+            <button
+              onClick={() => void handleQueueRetry()}
+              title={`${queueBadgeCount} transaction${queueBadgeCount > 1 ? "s" : ""} queued offline — click to retry`}
+              aria-label={`${queueBadgeCount} queued offline transaction${queueBadgeCount > 1 ? "s" : ""}. Click to retry submission.`}
+              className="relative flex items-center justify-center rounded-lg p-2 text-amber-500 transition-all duration-150 hover:bg-amber-50 hover:text-amber-600 dark:text-amber-400 dark:hover:bg-amber-400/10"
+              data-testid="offline-queue-badge-btn"
+            >
+              {/* Cloud-upload icon */}
+              <svg
+                className="h-5 w-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                />
+              </svg>
+              <span
+                className="absolute top-0.5 right-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-amber-500 px-0.5 text-[10px] font-bold text-white leading-none"
+                aria-hidden="true"
+                data-testid="offline-queue-badge"
+              >
+                {queueBadgeCount > 9 ? "9+" : queueBadgeCount}
+              </span>
+            </button>
+          )}
+
           {/* ── Help menu (contains "Take a Tour") ── */}
           <div className="relative hidden md:block" ref={helpMenuRef}>
             <button
@@ -435,6 +513,5 @@ export default function Navbar({ onTakeTour }: NavbarProps) {
         </div>
       )}
     </nav>
-    </>
   );
 }
