@@ -835,6 +835,9 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
   const handleToggleNotifications = async () => {
     // --- Disable ---
     if (notificationEnabled) {
+      if (publicKey) {
+        await unsubscribePush(publicKey);
+      }
       localStorage.setItem('notificationOptIn', 'false');
       setNotificationEnabled(false);
 
@@ -864,25 +867,22 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
     }
 
     try {
-      const subscribed = await subscribeToPush();
+      if (!publicKey) return;
+      const subscribed = await subscribeToPush(publicKey);
       if (!subscribed) return;
 
       localStorage.setItem('notificationOptIn', 'true');
       setNotificationEnabled(true);
       showToast('Payment notifications enabled');
 
-      // Confirm with an immediate notification so the user sees it working.
-      // Use showNotification() via the service worker registration —
-      // this is the Push API-correct method, not new Notification().
       const registration = await navigator.serviceWorker.ready;
-      await registration.showNotification('Stellar Pay', {
+      await registration.showNotification('Finchippay', {
         body: 'You will now receive notifications for incoming payments.',
         icon: '/favicon.svg',
         badge: '/favicon.svg',
       });
     } catch (err) {
-      console.error('Failed to enable push notifications:', err);
-      showToast('Could not enable notifications. Please try again.');
+      showToast('Error enabling notifications');
     }
   };
 

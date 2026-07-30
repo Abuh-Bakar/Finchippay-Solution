@@ -69,7 +69,7 @@ async function registerWebhook(publicKey, url, secret) {
   await knex("webhooks").insert({ id, public_key: publicKey, url, secret: encryptedSecret, created_at: createdAt });
   const webhook = { id, publicKey, url, secret: encryptedSecret, createdAt };
   webhooks.set(id, webhook);
-  startMonitoring(webhook);
+  startMonitoring(publicKey);
   logger.info({ type: "webhook_registered", id, publicKey, url });
   return { id, publicKey, url, createdAt };
 }
@@ -276,7 +276,7 @@ function startMonitoring(webhook) {
   });
   activeStreams.set(webhook.publicKey, closeStream);
   metrics.activeWebhookStreams.set(activeStreams.size);
-  logger.info({ type: "horizon_monitoring_started", publicKey: webhook.publicKey });
+  logger.info({ type: "horizon_monitoring_started", publicKey: publicKey });
 }
 
 // ─── Graceful Shutdown ────────────────────────────────────────────────────────
