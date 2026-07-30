@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { AssetInfo } from "@/lib/assetDiscovery";
 
 interface TokenCardProps {
@@ -9,8 +10,15 @@ export default function TokenCard({ asset, onAddTrustline }: TokenCardProps) {
   const truncatedIssuer = `${asset.issuer.slice(0, 8)}...${asset.issuer.slice(-4)}`;
 
   const imageElement = asset.image ? (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src={asset.image} alt={asset.code} className="h-10 w-10 rounded-full" />
+    <Image
+      src={asset.image}
+      alt={asset.code}
+      width={40}
+      height={40}
+      className="h-10 w-10 rounded-full object-cover"
+      loading="lazy"
+      unoptimized
+    />
   ) : null;
 
   return (
