@@ -92,44 +92,54 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download SBOM bundle
-        uses: actions/download-artifact@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          name: sbom-release-${{ github.ref_name }}
-          path: sbom/
+          node-version-file: ".nvmrc"
 
-      - name: Create GitHub Release with SBOM assets
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Install Syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+            | sh -s -- -b /usr/local/bin v1.18.1
+
+      - name: Generate SBOMs (SPDX + CycloneDX)
+        run: |
+          mkdir -p sbom
+          syft dir:frontend                      -o spdx-json=sbom/frontend.spdx.json -o cyclonedx-json=sbom/frontend.cdx.json
+          syft dir:backend                       -o spdx-json=sbom/backend.spdx.json  -o cyclonedx-json=sbom/backend.cdx.json
+          syft dir:contracts/finchippay-contract -o spdx-json=sbom/contract.spdx.json -o cyclonedx-json=sbom/contract.cdx.json
+
+      - name: Prepare SBOM release note
+        run: |
+          {
+            echo ""
+            echo "## Software Bill of Materials (SBOM)"
+            echo ""
+            echo "SPDX and CycloneDX SBOMs for the frontend, backend, and Soroban"
+            echo "contract are attached to this release as assets:"
+            echo ""
+            echo "- \`frontend.spdx.json\` / \`frontend.cdx.json\`"
+            echo "- \`backend.spdx.json\` / \`backend.cdx.json\`"
+            echo "- \`contract.spdx.json\` / \`contract.cdx.json\`"
+          } > sbom-notes.md
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: "Release ${{ github.ref_name }}"
           draft: false
           prerelease: false
           generate_release_notes: true
-          body_suffix: |
-
-            ---
-
-            ## 📦 Software Bill of Materials (SBOM)
-
-            SBOMs for this release are attached below in both CycloneDX and SPDX formats.
-
-            | Component | CycloneDX (JSON) | SPDX (JSON) |
-            |-----------|-----------------|-------------|
-            | Frontend  | `sbom-frontend-cdx.json` | `sbom-frontend-spdx.json` |
-            | Backend   | `sbom-backend-cdx.json`  | `sbom-backend-spdx.json`  |
-            | Contracts | `sbom-contract-cdx.json` | `sbom-contract-spdx.json` |
-
-            To scan a downloaded SBOM for known vulnerabilities:
-            ```bash
-            # Install Grype: https://github.com/anchore/grype
-            grype sbom:sbom-frontend-cdx.json
-            ```
-          files: |
-            sbom/frontend.cdx.json
-            sbom/frontend.spdx.json
-            sbom/backend.cdx.json
-            sbom/backend.spdx.json
-            sbom/contract.cdx.json
-            sbom/contract.spdx.json
+          append_body: true
+          body_path: sbom-notes.md
+          files: sbom/*.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
