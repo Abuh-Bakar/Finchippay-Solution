@@ -15,7 +15,7 @@ import {
   PaymentHistoryResponse,
 } from "@/lib/stellar";
 import { formatAsset, timeAgo, copyToClipboard } from "@/utils/format";
-import { loadAddressBookContacts, upsertAddressBookContact } from "@/lib/addressBook";
+import { useContacts } from "@/hooks/useContacts";
 import {
   HistoryIcon,
   ArrowUpIcon,
@@ -140,6 +140,7 @@ function TransactionList({
   onSendAgain,
 }: TransactionListProps) {
   const { t } = useTranslation("common");
+  const { contacts, add: addContact, update: updateContact } = useContacts();
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -341,15 +342,19 @@ function TransactionList({
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleSaveContact = (address: string) => {
-    const existing = loadAddressBookContacts().find((contact) => contact.address === address);
+  const handleSaveContact = async (address: string) => {
+    const existing = contacts.find((contact) => contact.publicKey === address);
     const nickname = window.prompt(
       existing ? "Update contact nickname:" : "Nickname for this contact:",
-      existing?.nickname || address.slice(0, 8)
+      existing?.name || address.slice(0, 8)
     );
 
     if (!nickname) return;
-    upsertAddressBookContact({ nickname, address });
+    if (existing?.id !== undefined) {
+      await updateContact(existing.id, { name: nickname });
+    } else {
+      await addContact({ name: nickname, publicKey: address });
+    }
   };
 
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -610,16 +615,14 @@ function TransactionList({
                 setFocusedIndex((prev) => Math.max(prev - 1, 0));
               } else if (e.key === 'Enter' && focusedIndex === index) {
                 e.preventDefault();
-                const address = tx.type === "sent" ? tx.to : tx.from;
-                copyToClipboard(address);
-                setCopiedId(tx.id);
-                setTimeout(() => setCopiedId(null), 2000);
+                router.push(`/tx/${tx.transactionHash}`);
               }
             }}
             onBlur={() => setFocusedIndex(-1)}
             onFocus={() => setFocusedIndex(index)}
+            onClick={() => router.push(`/tx/${tx.transactionHash}`)}
             className={clsx(
-              "flex items-center gap-3 p-3 rounded-xl bg-slate-50 rtl:flex-row-reverse dark:bg-white/3 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors group relative",
+              "flex items-center gap-3 p-3 rounded-xl bg-slate-50 rtl:flex-row-reverse dark:bg-white/3 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors group relative cursor-pointer",
               focusedIndex === index && "outline-none ring-2 ring-stellar-500 ring-offset-2"
             )}
             aria-label={`${tx.type === "sent" ? "Sent" : "Received"} ${formatAsset(tx.amount, tx.asset)} ${tx.type === "sent" ? "to" : "from"} ${tx.type === "sent" ? tx.to : tx.from}`}
@@ -653,12 +656,13 @@ function TransactionList({
                   </span>
                 )}
                 <button
-                  onClick={() =>
+                  onClick={(e) => {
+                    e.stopPropagation();
                     handleCopy(
                       tx.type === "sent" ? tx.to : tx.from,
                       tx.id
-                    )
-                  }
+                    );
+                  }}
                   aria-label={`Copy ${tx.type === "sent" ? "recipient" : "sender"} address`}
                   className="address-pill hover:border-stellar-500/40 transition-colors text-xs dark:hover:border-stellar-300/60"
                 >
@@ -703,9 +707,10 @@ function TransactionList({
               {/* Send Again — only for sent transactions */}
               {tx.type === "sent" && (
                 <button
-                  onClick={() =>
-                    router.push(`/dashboard?to=${encodeURIComponent(tx.to)}&amount=${encodeURIComponent(tx.amount)}`)
-                  }
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    router.push(`/dashboard?to=${encodeURIComponent(tx.to)}&amount=${encodeURIComponent(tx.amount)}`);
+                  }}
                   className="opacity-0 group-hover:opacity-100 transition-opacity text-xs text-stellar-700 dark:text-stellar-400 hover:text-stellar-600 dark:hover:text-stellar-300 font-medium whitespace-nowrap"
                   title={t("transactions.prefillSendForm")}
                   aria-label={t("transactions.sendAgainToRecipient")}
@@ -718,6 +723,7 @@ function TransactionList({
                 href={explorerUrl(tx.transactionHash) ?? undefined}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
                 className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-600 dark:text-slate-400 hover:text-stellar-700 dark:hover:text-stellar-400"
                 title={t("transactions.viewOnExpert")}
                 aria-label={t("transactions.viewOnExpert")}

@@ -25,6 +25,8 @@ jest.mock("@stellar/stellar-sdk", () => ({
   },
 }));
 
+process.env.WEBHOOK_ENCRYPTION_KEY = "aaabbbcccdddeeefff000111222333444555666777888999000aaabbbcccdddee";
+
 // Mock the database module
 jest.mock("../src/db", () => {
   const deliveries = new Map();
@@ -161,6 +163,7 @@ jest.mock("../src/utils/webhookSignature", () => ({
 }));
 
 const knex = require("../src/db/connection");
+
 const webhookService = require("../src/services/webhookService");
 
 const ACCOUNT_A = "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUWDA";
@@ -178,6 +181,10 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await webhookService.closeAllStreams();
+});
+
+afterAll(async () => {
+  await knex.destroy();
 });
 
 describe("webhook registry", () => {
@@ -303,5 +310,21 @@ describe("dead letter queue", () => {
   it("resets dead deliveries for retry", async () => {
     const result = await webhookService.retryDeadDeliveries(ACCOUNT_A);
     expect(result).toHaveProperty("reset");
+  });
+
+  it("encrypts the secret at rest and returns [protected] via listWebhooks", async () => {
+    await webhookService.registerWebhook(
+      ACCOUNT_B,
+      "https://x.test/protected",
+      "my-raw-secret"
+    );
+
+    const list = await webhookService.getWebhooksByPublicKey(ACCOUNT_B);
+    expect(list.length).toBeGreaterThanOrEqual(1);
+    list.forEach((w) => expect(w.secret).toBe("[protected]"));
+
+    const signature = webhookService.signPayload("my-raw-secret", { foo: "bar" });
+    expect(signature).toBeTruthy();
+    expect(typeof signature).toBe("string");
   });
 });

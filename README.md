@@ -59,6 +59,8 @@ The `FinchippayContract` (in `contracts/finchippay-contract/`) exposes:
 | `approve_multisig(proposal_id, signer)` | Sign; auto-executes at threshold |
 | `cancel_multisig(proposal_id, proposer)` | Cancel and refund |
 | `batch_send(token, from, recipients[], amounts[])` | Fan-out to many recipients |
+| `bump_all_ttls(admin, max_keys)` | Admin sweep that extends storage TTLs in resumable batches |
+| `get_min_ttl()` | Lowest guaranteed storage lifetime, for off-chain monitoring |
 
 ### Streaming payment maths
 
@@ -134,8 +136,16 @@ Swagger docs: http://localhost:4000/api/docs
 
 ```bash
 cd contracts/finchippay-contract
-cargo test
+cargo test                    # unit tests
+cargo test --test integration # end-to-end sandbox integration tests
 cargo build --release --target wasm32v1-none
+```
+
+The integration tests deploy the contract in a simulated Soroban sandbox and verify full workflows (Tip, Escrow, Stream, MultiSig, Receipt, Batch Send, Vesting, Emergency Withdrawal) including event emission, pagination, circuit-breaker pausing, and view function `NotFound` error handling. Each test starts with a fresh `Env` and deploys a clean contract instance.
+
+From the project root:
+```bash
+make test-integration
 ```
 
 ### Generate TypeScript contract bindings
@@ -233,6 +243,7 @@ Key backend variables:
 - **Upgradability**: deployed contract WASM can be hot-patched by admin without state migration.
 - **Bounded inputs**: escrow timelocks, stream deposits/rates, and multi-sig amounts are capped to prevent griefing and permanent fund lock-up.
 - **Checked arithmetic**: all Soroban math uses `checked_add`/`checked_sub`/`checked_mul` — overflows panic, never silently wrap.
+- **Storage lifetime**: every persistent entry is created at a ~31-day TTL floor and refreshed whenever it is read or updated, so live escrows, streams, and proposals cannot expire out from under their owners. Cold entries nobody touches are covered by `bump_all_ttls`, an admin sweep that resumes across calls to stay inside one transaction's resource budget; `get_min_ttl` reports the lowest guaranteed lifetime so an off-chain job knows when to sweep.
 - **Horizon timeout + retry**: backend Horizon requests use a 10 s timeout with exponential back-off (3 retries).
 
 ## Contributing

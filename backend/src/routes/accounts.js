@@ -8,6 +8,7 @@
 const express = require("express");
 const router = express.Router();
 const { strictLimiter, sensitiveLimiter } = require("../middleware/rateLimit");
+const { userLimiter } = require("../middleware/userRateLimit");
 const {
   sanitizePublicKey,
   sanitizeUsername,
@@ -68,6 +69,7 @@ router.get(
 router.get(
   "/:publicKey",
   sensitiveLimiter,
+  userLimiter,
   verifyJWT,
   sanitizePublicKey,
   validate(publicKeyParamSchema, "params"),
@@ -82,6 +84,7 @@ router.get(
 router.get(
   "/:publicKey/balance",
   sensitiveLimiter,
+  userLimiter,
   verifyJWT,
   sanitizePublicKey,
   validate(publicKeyParamSchema, "params"),
@@ -115,6 +118,36 @@ router.post(
   strictLimiter,
   validate(registerUsernameSchema),
   accountController.registerUsername,
+);
+
+/**
+ * POST /api/accounts/:publicKey/gdpr-delete
+ * Anonymize stored off-chain data for the account (GDPR/CCPA #76).
+ */
+router.post(
+  "/:publicKey/gdpr-delete",
+  sensitiveLimiter,
+  userLimiter,
+  verifyJWT,
+  sanitizePublicKey,
+  validate(publicKeyParamSchema, "params"),
+  requireOwnAccount,
+  accountController.gdprDelete,
+);
+
+/**
+ * GET /api/accounts/:publicKey/gdpr-export
+ * Return all stored off-chain data for the account as JSON (GDPR/CCPA #76).
+ */
+router.get(
+  "/:publicKey/gdpr-export",
+  sensitiveLimiter,
+  userLimiter,
+  verifyJWT,
+  sanitizePublicKey,
+  validate(publicKeyParamSchema, "params"),
+  requireOwnAccount,
+  accountController.gdprExport,
 );
 
 module.exports = router;

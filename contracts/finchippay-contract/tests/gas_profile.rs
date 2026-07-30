@@ -1,10 +1,7 @@
 #![cfg(test)]
 
 use finchippay_contract::{FinchippayContract, FinchippayContractClient};
-use soroban_sdk::{
-    testutils::Address as _,
-    token, Address, Env, Symbol, Vec,
-};
+use soroban_sdk::{testutils::Address as _, token, Address, Env, Symbol, Vec};
 use std::fs::File;
 use std::io::Write;
 
@@ -12,7 +9,7 @@ fn deploy(env: &Env) -> (Address, FinchippayContractClient<'_>) {
     let id = env.register(FinchippayContract, ());
     let client = FinchippayContractClient::new(env, &id);
     let admin = Address::generate(env);
-    client.initialize(&admin);
+    client.initialize(&Vec::from_array(env, [admin.clone()]), &1);
     (id, client)
 }
 
@@ -143,8 +140,14 @@ fn generate_gas_report() {
         json_data.push_str("  {\n");
         json_data.push_str(&format!("    \"function\": \"{}\",\n", entry.function));
         json_data.push_str(&format!("    \"scenario\": \"{}\",\n", entry.scenario));
-        json_data.push_str(&format!("    \"cpu_instructions\": {},\n", entry.cpu_instructions));
-        json_data.push_str(&format!("    \"memory_allocation\": {}\n", entry.memory_allocation));
+        json_data.push_str(&format!(
+            "    \"cpu_instructions\": {},\n",
+            entry.cpu_instructions
+        ));
+        json_data.push_str(&format!(
+            "    \"memory_allocation\": {}\n",
+            entry.memory_allocation
+        ));
         if i == entries.len() - 1 {
             json_data.push_str("  }\n");
         } else {
