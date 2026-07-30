@@ -4,7 +4,6 @@
  */
 
 "use strict";
-const crypto = require("crypto");
 
 // ─── Environment ─────────────────────────────────────────────────────────────
 // dotenv must load before the tracing module so OTEL_EXPORTER_OTLP_ENDPOINT
@@ -60,10 +59,6 @@ const {
   startRetryWorker,
   closeAllStreams: closeWebhookStreams,
 } = require("./services/webhookSubscriptionService");
-const {
-  startCleanupWorker,
-  stopCleanupWorker,
-} = require("./services/eventCleanupService");
 const logger = require("./utils/logger");
 const { validateEnv, parseAllowedOrigins } = require("./config/validateEnv");
 const { requireJsonContentType } = require("./middleware/bodyParsing");
@@ -71,7 +66,6 @@ const { trackHttpMetrics } = require("./middleware/metrics");
 const metricsRoutes = require("./routes/metrics");
 const {
   correlationMiddleware,
-  getRequestId,
 } = require("./utils/correlationId");
 const { errorLogFields } = require("./utils/errorResponse");
 const { initRedis, closeRedis } = require("./services/cacheService");

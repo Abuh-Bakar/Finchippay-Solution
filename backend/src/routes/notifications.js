@@ -18,7 +18,6 @@ const {
   registerEmailSchema,
   updateEmailSchema,
   publicKeyParamSchema,
-  emailEventsQuerySchema,
 } = require("../validation/schemas");
 const logger = require("../utils/logger");
 
