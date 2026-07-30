@@ -253,6 +253,24 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
+// Versioned API (v1) plus legacy /api/* aliases with Deprecation header (#83).
+
+const apiRouteMounts = [
+  { path: "/auth", router: authRoutes },
+  { path: "/accounts", router: accountRoutes },
+  { path: "/payments", router: paymentRoutes },
+  { path: "/webhooks", router: webhookRoutes },
+  { path: "/analytics", router: analyticsRoutes },
+  { path: "/turrets", router: turretsRoutes },
+  { path: "/tips", router: tipsRoutes },
+  { path: "/parse-payment", router: parsePaymentRoutes },
+  { path: "/scheduled-txns", router: scheduledTransactionRoutes },
+  { path: "/sep24", router: sep24Routes },
+];
+
+for (const { path, router } of apiRouteMounts) {
+  app.use(`/api/v1${path}`, router);
+}
 
 app.use("/api/auth", authRoutes);
 app.use("/api/accounts", accountRoutes);
