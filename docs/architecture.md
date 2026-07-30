@@ -53,7 +53,7 @@ Key design decisions:
 - **Auth first**: every mutating function calls `require_auth()` before touching state.
 - **Checked arithmetic**: all additions, subtractions, and multiplications use `checked_*` methods.
 - **Event emission**: every state change emits a structured Soroban event for off-chain indexers.
-- **Storage TTL**: persistent entries are bumped to 500,000 ledgers (~1 year) to prevent expiry.
+- **Storage TTL**: persistent entries are created at a floor of 535,680 ledgers (~31 days) and refreshed by any read or update that finds them below 100,000 ledgers, so in-use state cannot expire. Cold entries are covered by `bump_all_ttls(admin, max_keys)`, an admin sweep that resumes across calls via a stored cursor; `get_min_ttl()` returns the lowest guaranteed lifetime and the class holding it, so an off-chain job knows when a sweep is due.
 - **Emergency pause**: the admin *or* a designated pauser can call `pause()`/`unpause()` to freeze all value-transferring operations (circuit breaker). Read-only queries remain accessible during pause.
 - **Upgradability**: admin can call `upgrade(new_wasm_hash)` to deploy security patches without state migration. Version counter is incremented on each upgrade.
 - **Bounded inputs**: escrow timelocks, stream deposits/rates, and multi-sig amounts are capped to prevent griefing, overflow, and permanent fund lock-up.

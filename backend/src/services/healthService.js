@@ -1,6 +1,17 @@
 /**
  * src/services/healthService.js
- * Health, readiness, startup, and dependency probes for operational endpoints.
+ * Dependency probes backing the liveness, readiness, startup, and
+ * dependency-status endpoints in ../routes/health.js.
+ *
+ * Every check* function resolves to the same shape:
+ *   { status: 'healthy'|'degraded'|'unhealthy', latency: number, message: string }
+ * so callers can aggregate them uniformly regardless of what's being probed.
+ * "latency" is always in milliseconds. Checks never throw — a failed probe
+ * (timeout, connection error, missing config) is reported as 'unhealthy'
+ * rather than rejecting, so Promise.all() over the whole set never short-circuits.
+ *
+ * Thresholds are configurable via env vars so ops can tune sensitivity per
+ * deployment without a code change (e.g. a slower staging DB shouldn't page).
  */
 
 "use strict";
@@ -8,6 +19,11 @@
 const fs = require("fs");
 const https = require("https");
 const http = require("http");
+const fsp = require("fs/promises");
+const knex = require("../db");
+const cacheService = require("./cacheService");
+const scheduledExecutor = require("./scheduledExecutor");
+const eventIndexer = require("./eventIndexer");
 const logger = require("../utils/logger");
 
 const HEALTH_TIMEOUT_MS = parseInt(process.env.HEALTH_TIMEOUT_MS, 10) || 5_000;
@@ -55,9 +71,83 @@ function getLivenessState() {
   };
 }
 
+const POSTGRES_DEGRADED_LATENCY_MS =
+  parseInt(process.env.POSTGRES_DEGRADED_LATENCY_MS, 10) || 200;
+const REDIS_DEGRADED_LATENCY_MS =
+  parseInt(process.env.REDIS_DEGRADED_LATENCY_MS, 10) || 100;
+const HORIZON_DEGRADED_LATENCY_MS =
+  parseInt(process.env.HORIZON_DEGRADED_LATENCY_MS, 10) || 1_000;
+const SOROBAN_DEGRADED_LATENCY_MS =
+  parseInt(process.env.SOROBAN_DEGRADED_LATENCY_MS, 10) || 1_000;
+
+const DISK_USAGE_DEGRADED_PERCENT =
+  parseInt(process.env.DISK_USAGE_DEGRADED_PERCENT, 10) || 80;
+const DISK_USAGE_UNHEALTHY_PERCENT =
+  parseInt(process.env.DISK_USAGE_UNHEALTHY_PERCENT, 10) || 90;
+const HEALTH_DISK_PATH = process.env.HEALTH_DISK_PATH || process.cwd();
+
+const MEMORY_RSS_DEGRADED_MB =
+  parseInt(process.env.MEMORY_RSS_DEGRADED_MB, 10) || 400;
+const MEMORY_RSS_UNHEALTHY_MB =
+  parseInt(process.env.MEMORY_RSS_UNHEALTHY_MB, 10) || 500;
+
+const EVENT_LOOP_LAG_DEGRADED_MS =
+  parseInt(process.env.EVENT_LOOP_LAG_DEGRADED_MS, 10) || 50;
+const EVENT_LOOP_LAG_UNHEALTHY_MS =
+  parseInt(process.env.EVENT_LOOP_LAG_UNHEALTHY_MS, 10) || 100;
+
+// ─── Shared helpers ───────────────────────────────────────────────────────────
+
 /**
- * Issue a plain HTTP(S) GET to `url` and resolve with { latencyMs, ok }.
- * Does not throw; failures are returned as { ok: false, error }.
+ * Reject with a timeout error if `promise` doesn't settle within `ms`.
+ * Leaves `promise` itself running — callers only care about the race outcome.
+ *
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {number} ms
+ * @param {string} label
+ * @returns {Promise<T>}
+ */
+function withTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${ms} ms`));
+    }, ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+/**
+ * Classify a successful probe as 'healthy' or 'degraded' based on latency.
+ *
+ * @param {number} latencyMs
+ * @param {number} degradedThresholdMs
+ * @param {string} okMessage
+ * @returns {{ status: 'healthy'|'degraded', latency: number, message: string }}
+ */
+function classifyLatency(latencyMs, degradedThresholdMs, okMessage) {
+  if (latencyMs > degradedThresholdMs) {
+    return {
+      status: "degraded",
+      latency: latencyMs,
+      message: `${okMessage} (elevated latency: ${latencyMs} ms)`,
+    };
+  }
+  return { status: "healthy", latency: latencyMs, message: okMessage };
+}
+
+/**
+ * Issue a plain HTTP(S) GET to `url` and resolve with { ok, latencyMs, error? }.
+ * Does not throw — failures are returned as { ok: false, error }.
  *
  * @param {string} url
  * @returns {Promise<{ ok: boolean, latencyMs: number, error?: string }>}
@@ -84,11 +174,7 @@ function probeGet(url) {
     });
 
     req.on("error", (err) => {
-      resolve({
-        ok: false,
-        latencyMs: Date.now() - start,
-        error: err.message,
-      });
+      resolve({ ok: false, latencyMs: Date.now() - start, error: err.message });
     });
   });
 }
@@ -139,11 +225,7 @@ function probeSorobanRpc(url) {
     });
 
     req.on("error", (err) => {
-      resolve({
-        ok: false,
-        latencyMs: Date.now() - start,
-        error: err.message,
-      });
+      resolve({ ok: false, latencyMs: Date.now() - start, error: err.message });
     });
 
     req.write(body);
@@ -151,188 +233,254 @@ function probeSorobanRpc(url) {
   });
 }
 
+// ─── Individual dependency checks ────────────────────────────────────────────
+
+/**
+ * Ping PostgreSQL (via the app's Knex connection — SQLite in dev/test,
+ * PostgreSQL in production) and measure round-trip latency.
+ *
+ * @returns {Promise<{ status: string, latency: number, message: string }>}
+ */
 async function checkPostgres() {
   const start = Date.now();
   try {
-    const db = require("../db");
-    await db.raw("select 1");
-    return {
-      status: "healthy",
-      latency: Date.now() - start,
-      message: "PostgreSQL query succeeded",
-    };
+    await withTimeout(knex.raw("SELECT 1"), HEALTH_TIMEOUT_MS, "PostgreSQL");
+    const latency = Date.now() - start;
+    return classifyLatency(
+      latency,
+      POSTGRES_DEGRADED_LATENCY_MS,
+      "PostgreSQL is reachable",
+    );
   } catch (err) {
-    return {
-      status: "unhealthy",
-      latency: Date.now() - start,
-      message: err.message,
-    };
+    logger.warn({ err }, "health: PostgreSQL check failed");
+    return { status: "unhealthy", latency: Date.now() - start, message: err.message };
   }
 }
 
+/**
+ * PING Redis directly (bypassing the LRU fallback) and measure latency.
+ * Reports 'healthy' when REDIS_URL is not configured — the app is designed
+ * to run on the in-memory LRU cache alone, so an absent Redis is not a fault.
+ *
+ * @returns {Promise<{ status: string, latency: number, message: string }>}
+ */
 async function checkRedis() {
   const start = Date.now();
   try {
-    const { getRedisStatus } = require("./cacheService");
-    const redisStatus = getRedisStatus();
-    const required = Boolean(process.env.REDIS_URL);
-    const healthy = redisStatus === "connected" || (!required && redisStatus === "disabled");
-    return {
-      status: normalizeStatus(healthy, !required),
-      latency: Date.now() - start,
-      message: required
-        ? `Redis status is ${redisStatus}`
-        : "Redis is not configured; LRU cache fallback is active",
-    };
+    const result = await withTimeout(
+      cacheService.ping(),
+      HEALTH_TIMEOUT_MS,
+      "Redis",
+    );
+    const latency = Date.now() - start;
+    if (result === null) {
+      return {
+        status: "healthy",
+        latency,
+        message: "REDIS_URL not configured; using in-memory cache fallback",
+      };
+    }
+    return classifyLatency(latency, REDIS_DEGRADED_LATENCY_MS, "Redis is reachable");
   } catch (err) {
-    return {
-      status: "unhealthy",
-      latency: Date.now() - start,
-      message: err.message,
-    };
+    logger.warn({ err }, "health: Redis check failed");
+    return { status: "unhealthy", latency: Date.now() - start, message: err.message };
   }
 }
 
+/**
+ * Call the Horizon root endpoint and check response time.
+ *
+ * @returns {Promise<{ status: string, latency: number, message: string }>}
+ */
 async function checkHorizon() {
-  const horizonUrl =
-    process.env.HORIZON_URL || "https://horizon-testnet.stellar.org";
+  const horizonUrl = process.env.HORIZON_URL || "https://horizon-testnet.stellar.org";
   const result = await probeGet(horizonUrl);
   if (!result.ok) {
     logger.warn({ error: result.error }, "health: Horizon unreachable");
+    return {
+      status: "unhealthy",
+      latency: result.latencyMs,
+      message: result.error || "Horizon returned a server error",
+    };
   }
-  return {
-    status: normalizeStatus(result.ok),
-    latency: result.latencyMs,
-    message: result.ok ? "Horizon root endpoint responded" : result.error,
-  };
+  return classifyLatency(
+    result.latencyMs,
+    HORIZON_DEGRADED_LATENCY_MS,
+    "Horizon is reachable",
+  );
 }
 
+/**
+ * Call the Soroban RPC getHealth method. Reports 'healthy' (skipped) when
+ * SOROBAN_RPC_URL is not configured, matching checkRedis's opt-in behaviour.
+ *
+ * @returns {Promise<{ status: string, latency: number, message: string }>}
+ */
 async function checkSorobanRpc() {
   const sorobanRpcUrl = process.env.SOROBAN_RPC_URL || null;
   if (!sorobanRpcUrl) {
     return {
-      status: "degraded",
+      status: "healthy",
       latency: 0,
-      message: "SOROBAN_RPC_URL is not configured",
+      message: "SOROBAN_RPC_URL not configured; check skipped",
     };
   }
 
   const result = await probeSorobanRpc(sorobanRpcUrl);
   if (!result.ok) {
     logger.warn({ error: result.error }, "health: Soroban RPC unreachable");
-  }
-  return {
-    status: normalizeStatus(result.ok),
-    latency: result.latencyMs,
-    message: result.ok ? "Soroban RPC getHealth responded" : result.error,
-  };
-}
-
-function checkDiskSpace() {
-  try {
-    if (typeof fs.statfsSync !== "function") {
-      return {
-        status: "degraded",
-        latency: 0,
-        message: "Disk usage probe is unavailable on this Node.js runtime",
-      };
-    }
-    const start = Date.now();
-    const stats = fs.statfsSync(process.cwd());
-    const total = Number(stats.blocks) * Number(stats.bsize);
-    const free = Number(stats.bavail) * Number(stats.bsize);
-    const usedRatio = total > 0 ? (total - free) / total : 0;
     return {
-      status: normalizeStatus(usedRatio < HEALTH_DISK_USED_RATIO),
-      latency: Date.now() - start,
-      message: `Disk usage ${(usedRatio * 100).toFixed(1)}%`,
+      status: "unhealthy",
+      latency: result.latencyMs,
+      message: result.error || "Soroban RPC returned a server error",
     };
+  }
+  return classifyLatency(
+    result.latencyMs,
+    SOROBAN_DEGRADED_LATENCY_MS,
+    "Soroban RPC is reachable",
+  );
+}
+
+/**
+ * Check available disk space at HEALTH_DISK_PATH (default: process cwd).
+ *
+ * @returns {Promise<{ status: string, latency: number, message: string }>}
+ */
+async function checkDiskSpace() {
+  const start = Date.now();
+  try {
+    const stats = await fsp.statfs(HEALTH_DISK_PATH);
+    const latency = Date.now() - start;
+    const totalBytes = stats.blocks * stats.bsize;
+    const freeBytes = stats.bavail * stats.bsize;
+    const usedPercent = totalBytes > 0 ? ((totalBytes - freeBytes) / totalBytes) * 100 : 0;
+    const message = `Disk usage ${usedPercent.toFixed(1)}% at ${HEALTH_DISK_PATH}`;
+
+    if (usedPercent >= DISK_USAGE_UNHEALTHY_PERCENT) {
+      return { status: "unhealthy", latency, message };
+    }
+    if (usedPercent >= DISK_USAGE_DEGRADED_PERCENT) {
+      return { status: "degraded", latency, message };
+    }
+    return { status: "healthy", latency, message };
   } catch (err) {
-    return { status: "degraded", latency: 0, message: err.message };
+    logger.warn({ err }, "health: disk space check failed");
+    return { status: "unhealthy", latency: Date.now() - start, message: err.message };
   }
 }
 
-function checkMemoryUsage() {
-  const rss = process.memoryUsage().rss;
-  return {
-    status: normalizeStatus(rss < HEALTH_MEMORY_RSS_BYTES),
-    latency: 0,
-    message: `RSS memory ${rss} bytes`,
-  };
+/**
+ * Check the process's resident set size (RSS) against configured thresholds.
+ *
+ * @returns {Promise<{ status: string, latency: number, message: string }>}
+ */
+async function checkMemoryUsage() {
+  const start = Date.now();
+  const rssMb = process.memoryUsage().rss / (1024 * 1024);
+  const latency = Date.now() - start;
+  const message = `Process RSS ${rssMb.toFixed(1)} MB`;
+
+  if (rssMb >= MEMORY_RSS_UNHEALTHY_MB) {
+    return { status: "unhealthy", latency, message };
+  }
+  if (rssMb >= MEMORY_RSS_DEGRADED_MB) {
+    return { status: "degraded", latency, message };
+  }
+  return { status: "healthy", latency, message };
 }
 
+/**
+ * Measure event loop lag on demand: how long it takes a setImmediate
+ * callback to run after being scheduled. A busy event loop delays it.
+ *
+ * @returns {Promise<{ status: string, latency: number, message: string }>}
+ */
 function checkEventLoop() {
   return new Promise((resolve) => {
     const start = process.hrtime.bigint();
     setImmediate(() => {
-      const latency = Number(process.hrtime.bigint() - start) / 1_000_000;
-      resolve({
-        status: normalizeStatus(latency < HEALTH_EVENT_LOOP_LAG_MS),
-        latency: Math.round(latency),
-        message: `Event loop lag ${latency.toFixed(1)} ms`,
-      });
+      const lagMs = Number(process.hrtime.bigint() - start) / 1e6;
+      const message = `Event loop lag ${lagMs.toFixed(1)} ms`;
+
+      if (lagMs >= EVENT_LOOP_LAG_UNHEALTHY_MS) {
+        resolve({ status: "unhealthy", latency: lagMs, message });
+      } else if (lagMs >= EVENT_LOOP_LAG_DEGRADED_MS) {
+        resolve({ status: "degraded", latency: lagMs, message });
+      } else {
+        resolve({ status: "healthy", latency: lagMs, message });
+      }
     });
   });
 }
 
+// ─── Aggregation ──────────────────────────────────────────────────────────────
+
 /**
- * Run all dependency probes in parallel.
+ * Run every dependency probe concurrently.
  *
- * @returns {Promise<{
- *   healthy: boolean,
- *   summary: string,
- *   dependencies: Record<string, { status: string, latency?: number, message?: string }>
- * }>}
+ * @returns {Promise<Record<string, { status: string, latency: number, message: string }>>}
  */
-async function checkDependencies() {
-  const [postgres, redis, horizon, sorobanRpc, diskSpace, memory, eventLoop] =
+async function runAllChecks() {
+  const [postgres, redis, horizon, sorobanRpc, diskSpace, memoryUsage, eventLoop] =
     await Promise.all([
       checkPostgres(),
       checkRedis(),
       checkHorizon(),
       checkSorobanRpc(),
-      Promise.resolve(checkDiskSpace()),
-      Promise.resolve(checkMemoryUsage()),
+      checkDiskSpace(),
+      checkMemoryUsage(),
       checkEventLoop(),
     ]);
 
-  const dependencies = {
+  return {
     postgres,
     redis,
     horizon,
     soroban_rpc: sorobanRpc,
     disk_space: diskSpace,
-    memory,
+    memory_usage: memoryUsage,
     event_loop: eventLoop,
   };
+}
 
-  if (shuttingDown) {
-    dependencies.shutdown = {
-      status: "unhealthy",
-      latency: 0,
-      message: "Process is draining connections for shutdown",
-    };
+/**
+ * Check whether server initialisation has completed: migrations applied,
+ * the scheduled-transaction executor running, and the event indexer running
+ * (or intentionally disabled because no CONTRACT_ID is configured).
+ *
+ * @returns {Promise<{ started: boolean, checks: Record<string, boolean> }>}
+ */
+async function checkStartupComplete() {
+  let migrationsComplete = false;
+  try {
+    const [, pending] = await withTimeout(
+      knex.migrate.list(),
+      HEALTH_TIMEOUT_MS,
+      "Migration status check",
+    );
+    migrationsComplete = pending.length === 0;
+  } catch (err) {
+    logger.warn({ err }, "health: migration status check failed");
   }
 
-  const critical = [dependencies.postgres, dependencies.redis, dependencies.horizon];
-  const criticalHealthy = critical.every((d) => d.status !== "unhealthy");
-  const anyDegraded = Object.values(dependencies).some(
-    (d) => d.status === "degraded",
-  );
-  const healthy = criticalHealthy && !shuttingDown;
-  const summary = !criticalHealthy || shuttingDown
-    ? "critical_failure"
-    : anyDegraded
-      ? "degraded"
-      : "all_healthy";
+  const checks = {
+    migrations: migrationsComplete,
+    executor: scheduledExecutor.isStarted(),
+    indexer: eventIndexer.isRunning(),
+  };
 
-  return { healthy, summary, dependencies };
+  return { started: Object.values(checks).every(Boolean), checks };
 }
 
 module.exports = {
-  checkDependencies,
-  getLivenessState,
-  getStartupState,
-  markShuttingDown,
-  markStartupComplete,
+  checkPostgres,
+  checkRedis,
+  checkHorizon,
+  checkSorobanRpc,
+  checkDiskSpace,
+  checkMemoryUsage,
+  checkEventLoop,
+  runAllChecks,
+  checkStartupComplete,
 };

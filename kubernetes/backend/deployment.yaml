@@ -39,18 +39,18 @@ spec:
                 secretKeyRef:
                   name: finchippay-secrets
                   key: DB_URL
-          readinessProbe:
-            httpGet:
-              path: /api/health/ready
-              port: 4000
-            initialDelaySeconds: 10
-            periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /api/health/live
               port: 4000
             initialDelaySeconds: 30
             periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /api/health/ready
+              port: 4000
+            initialDelaySeconds: 10
+            periodSeconds: 10
           startupProbe:
             httpGet:
               path: /api/health/started
