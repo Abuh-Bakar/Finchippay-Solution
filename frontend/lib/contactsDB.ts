@@ -59,7 +59,6 @@ function openDB(): Promise<IDBDatabase> {
         }
       }
     };
-    };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
@@ -116,6 +115,16 @@ export async function deleteContact(id: number): Promise<void> {
     const tx = db.transaction(CONTACTS_STORE, "readwrite");
     const store = tx.objectStore(CONTACTS_STORE);
     store.delete(id);
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function clearAllContacts(): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(CONTACTS_STORE, "readwrite");
+    tx.objectStore(CONTACTS_STORE).clear();
     tx.oncomplete = () => { db.close(); resolve(); };
     tx.onerror = () => reject(tx.error);
   });

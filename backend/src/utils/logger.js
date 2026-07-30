@@ -35,7 +35,7 @@ function redactStellarKeys(obj) {
       if (STELLAR_SECRET_KEY_PATTERN.test(str)) {
         return JSON.parse(str.replace(STELLAR_SECRET_KEY_PATTERN, REDACTED_STELLAR));
       }
-    } catch {}
+    } catch { /* ignore */ }
   }
   return obj;
 }
@@ -71,8 +71,6 @@ const logger = pino({
     censor: "[REDACTED]",
   },
   transport: transportConfig,
-    level: (label) => ({ level: label.toUpperCase() }),
-  },
   mixin() {
     const { getRequestId } = require("./correlationId");
     const correlationId = getRequestId();

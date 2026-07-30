@@ -32,6 +32,7 @@ import {
 } from "@/lib/pathFinder";
 import { useContractSwap } from "@/hooks/useContractSwap";
 import { SwapIcon, AlertCircleIcon, Spinner } from "@/components/icons";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -123,6 +124,10 @@ export default function TradeForm({
   // ── Transaction state ────────────────────────────────────────────────────
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const confirmModalRef = useFocusTrap<HTMLDivElement>({
+    active: showConfirmModal,
+    onEscape: () => setShowConfirmModal(false),
+  });
 
   // Debounce timer ref
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -672,7 +677,7 @@ export default function TradeForm({
           aria-labelledby="confirm-swap-title"
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
         >
-          <div className="w-full max-w-md bg-white dark:bg-cosmos-900 rounded-2xl shadow-xl p-6 space-y-5">
+          <div ref={confirmModalRef} tabIndex={-1} className="w-full max-w-md bg-white dark:bg-cosmos-900 rounded-2xl shadow-xl p-6 space-y-5 outline-none">
             <h2
               id="confirm-swap-title"
               className="text-xl font-semibold text-slate-900 dark:text-white"
