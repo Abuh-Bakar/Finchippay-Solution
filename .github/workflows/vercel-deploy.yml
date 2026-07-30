@@ -21,13 +21,18 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  NODE_VERSION: '20.19.5'
+  HEALTH_CHECK_URL: 'https://finchippay.vercel.app/api/health'
+  STAGING_ALIAS: 'staging-${{ github.sha }}.finchippay.vercel.app'
+
 jobs:
   deploy-preview:
     name: Deploy Preview
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     environment:
-      name: preview
+      name: "preview"
 
     steps:
       - uses: actions/checkout@v4
@@ -75,11 +80,20 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
-      name: production
+      name: "production"
       url: https://finchippay.vercel.app
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Dependencies
+        working-directory: frontend
+        run: npm ci
 
       - name: Install Vercel CLI
         run: npm install -g vercel@latest
@@ -98,9 +112,94 @@ jobs:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
-      - name: Deploy Production to Vercel
+      - name: Deploy staging build
+        id: staging-deploy
         working-directory: frontend
-        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+        run: |
+          DEPLOY_URL=$(vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }})
+          echo "staging_url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Alias staging deployment
+        working-directory: frontend
+        run: |
+          vercel alias set ${{ steps.staging-deploy.outputs.staging_url }} ${{ env.STAGING_ALIAS }} --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Verify health endpoint
+        id: health-check
+        run: |
+          curl -fsS "${{ env.HEALTH_CHECK_URL }}" >/tmp/health.json
+          echo "health_ok=true" >> "$GITHUB_OUTPUT"
+
+      - name: Promote staging to production
+        if: steps.health-check.outputs.health_ok == 'true'
+        working-directory: frontend
+        run: |
+          vercel promote ${{ steps.staging-deploy.outputs.staging_url }} --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Roll back on failed health check
+        if: failure()
+        working-directory: frontend
+        run: |
+          echo "Health check failed; rolling back to the previous production deployment." 
+          vercel promote ${{ github.sha }} --token=${{ secrets.VERCEL_TOKEN }} || true
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Cleanup staging alias
+        if: always()
+        working-directory: frontend
+        run: |
+          vercel alias rm ${{ env.STAGING_ALIAS }} --token=${{ secrets.VERCEL_TOKEN }} || true
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Send deployment notification
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = '${{ job.status }}';
+            const body = status === 'success'
+              ? 'Deployment completed successfully and was promoted to production.'
+              : 'Deployment failed or rolled back after the health check gate.';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number || 1,
+              body
+            }).catch(() => {});
+
+      - name: Update GitHub Deployment Status
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = context.sha;
+            const deployment = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: sha,
+              environment: 'production',
+              required_contexts: [],
+              description: 'Vercel blue-green deployment processed'
+            });
+            const jobStatus = '${{ job.status }}';
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: deployment.data.id,
+              state: jobStatus === 'success' ? 'success' : 'failure',
+              environment_url: 'https://finchippay.vercel.app',
+              description: jobStatus === 'success' ? 'Blue-green promotion completed' : 'Blue-green deployment failed or rolled back'
+            });

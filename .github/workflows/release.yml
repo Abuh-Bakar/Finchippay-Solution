@@ -25,6 +25,45 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Install Syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+            | sh -s -- -b /usr/local/bin v1.18.1
+
+      - name: Generate SBOMs (SPDX + CycloneDX)
+        run: |
+          mkdir -p sbom
+          syft dir:frontend                      -o spdx-json=sbom/frontend.spdx.json -o cyclonedx-json=sbom/frontend.cdx.json
+          syft dir:backend                       -o spdx-json=sbom/backend.spdx.json  -o cyclonedx-json=sbom/backend.cdx.json
+          syft dir:contracts/finchippay-contract -o spdx-json=sbom/contract.spdx.json -o cyclonedx-json=sbom/contract.cdx.json
+
+      - name: Prepare SBOM release note
+        run: |
+          {
+            echo ""
+            echo "## Software Bill of Materials (SBOM)"
+            echo ""
+            echo "SPDX and CycloneDX SBOMs for the frontend, backend, and Soroban"
+            echo "contract are attached to this release as assets:"
+            echo ""
+            echo "- \`frontend.spdx.json\` / \`frontend.cdx.json\`"
+            echo "- \`backend.spdx.json\` / \`backend.cdx.json\`"
+            echo "- \`contract.spdx.json\` / \`contract.cdx.json\`"
+          } > sbom-notes.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -32,5 +71,8 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
+          append_body: true
+          body_path: sbom-notes.md
+          files: sbom/*.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
