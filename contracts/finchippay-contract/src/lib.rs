@@ -167,6 +167,23 @@ const MAX_USER_ESCROWS: u32 = 100;
 const MAX_USER_STREAMS: u32 = 100;
 const MAX_PAGE_SIZE: u32 = 50;
 
+// ─── Batch swap helper types ─────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct SwapItem {
+    pub token: Address,
+    pub amount: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct TokenTotal {
+    pub token: Address,
+    pub total: i128,
+}
+
+
 // ─── Streaming payments ───────────────────────────────────────────────────────
 
 /// A continuous per-ledger payment stream from `payer` to `recipient`.
@@ -3116,6 +3133,33 @@ impl FinchippayContract {
             (from, recipients.len(), total_amount),
         );
         Ok(())
+    }
+
+    /// Estimate total amounts per token for a batch of swap items.
+    ///
+    /// Useful for off-chain clients to validate totals before submitting a
+    /// composite transaction. This function is pure (reads no mutable state)
+    /// and returns aggregated totals for each token present in `swaps`.
+    pub fn estimate_batch_swap_totals(env: Env, swaps: Vec<SwapItem>) -> Vec<TokenTotal> {
+        require_initialized(&env);
+        let mut totals: soroban_sdk::Map<Address, i128> = soroban_sdk::Map::new(&env);
+        for i in 0..swaps.len() {
+            let s = swaps.get(i).unwrap();
+            if s.amount <= 0 {
+                panic!("Non-positive amount in swap item");
+            }
+            let prev = match totals.get(s.token.clone()) {
+                Some(v) => v,
+                None => 0,
+            };
+            let new_total = prev.checked_add(s.amount).expect("overflow");
+            totals.set(s.token.clone(), new_total);
+        }
+        let mut out: Vec<TokenTotal> = Vec::new(&env);
+        for (tok, tot) in totals.iter() {
+            out.push_back(TokenTotal { token: tok, total: tot });
+        }
+        out
     }
 
     pub fn create_vesting(
