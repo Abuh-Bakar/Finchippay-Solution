@@ -345,6 +345,7 @@ app.use((err, req, res, next) => {
 const SHUTDOWN_DRAIN_MS = parseInt(process.env.SHUTDOWN_DRAIN_MS, 10) || 10_000;
 
 async function gracefulShutdown(signal, server, otelSdk) {
+  markShuttingDown();
   logger.info({ signal }, "Received shutdown signal — draining…");
 
   // Fail readiness immediately so /api/health/ready starts returning 503
