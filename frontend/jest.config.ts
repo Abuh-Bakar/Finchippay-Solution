@@ -7,6 +7,9 @@ const config: Config = {
     "^@/(.*)$": "<rootDir>/$1",
     "^@stellar/stellar-sdk$": "<rootDir>/../node_modules/@stellar/stellar-sdk/lib/index.js",
   },
+  // jest.setup.ts imports @testing-library/jest-dom (which needs `expect`), so
+  // it must run after the framework is installed — setupFilesAfterEnv, not
+  // setupFiles.
   setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
   testPathIgnorePatterns: ["<rootDir>/e2e/"],
   collectCoverageFrom: [

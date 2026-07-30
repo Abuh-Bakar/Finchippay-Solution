@@ -1,9 +1,13 @@
 import { isValidStellarAddress } from "@/lib/stellar";
+import { createEncryptedStore } from "@/lib/encryptedStorage";
 
 const FEDERATION_CACHE_KEY = "finchippay:federation-cache";
+const FEDERATION_CACHE_UPDATED_EVENT = "finchippay:federation-cache-updated";
 const FEDERATION_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-interface FederationCacheEntry {
+export interface FederationCacheEntry {
+  /** Normalised (trimmed, lowercased) federation address, e.g. `bob*stellar.org`. */
+  federationAddress: string;
   address: string;
   resolvedAt: number;
 }
@@ -21,27 +25,57 @@ function getFederationCache(): Record<string, FederationCacheEntry> {
   }
 }
 
-function saveFederationCache(cache: Record<string, FederationCacheEntry>) {
-  try {
-    window.localStorage.setItem(FEDERATION_CACHE_KEY, JSON.stringify(cache));
-  } catch {}
+function makeFederationEntry(input: unknown): FederationCacheEntry | null {
+  const entry = (input ?? {}) as Partial<FederationCacheEntry>;
+  const federationAddress =
+    typeof entry.federationAddress === "string" ? normaliseFederationAddress(entry.federationAddress) : "";
+  const address = typeof entry.address === "string" ? entry.address.trim() : "";
+
+  if (!federationAddress || !isValidStellarAddress(address)) return null;
+
+  return {
+    federationAddress,
+    address,
+    resolvedAt: typeof entry.resolvedAt === "number" ? entry.resolvedAt : now(),
+  };
 }
 
+/** Keep the first (most recently written) entry per federation address. */
+function dedupeFederationEntries(entries: FederationCacheEntry[]) {
+  const seen = new Set<string>();
+  return entries.filter((entry) => {
+    if (seen.has(entry.federationAddress)) return false;
+    seen.add(entry.federationAddress);
+    return true;
+  });
+}
+
+const federationStore = createEncryptedStore<FederationCacheEntry>({
+  storageKey: FEDERATION_CACHE_KEY,
+  eventName: FEDERATION_CACHE_UPDATED_EVENT,
+  revive: makeFederationEntry,
+  dedupe: dedupeFederationEntries,
+});
+
 export function getCachedFederationAddress(federationAddress: string): string | null {
-  const cache = getFederationCache();
-  const entry = cache[federationAddress.trim().toLowerCase()];
+  const key = normaliseFederationAddress(federationAddress);
+  const entry = federationStore.load().find((item) => item.federationAddress === key);
   if (!entry) return null;
   if (now() - entry.resolvedAt > FEDERATION_CACHE_TTL_MS) return null;
   return entry.address;
 }
 
 export function setCachedFederationAddress(federationAddress: string, stellarAddress: string) {
-  const cache = getFederationCache();
-  cache[federationAddress.trim().toLowerCase()] = {
+  const key = normaliseFederationAddress(federationAddress);
+  const entry = makeFederationEntry({
+    federationAddress: key,
     address: stellarAddress,
     resolvedAt: now(),
-  };
-  saveFederationCache(cache);
+  });
+  if (!entry) return;
+
+  const existing = federationStore.load().filter((item) => item.federationAddress !== key);
+  federationStore.save([entry, ...existing]);
 }
 
 export async function resolveFederationWithCache(
@@ -67,7 +101,42 @@ export async function resolveFederationWithCache(
 }
 
 export function clearFederationCache() {
-  try {
-    window.localStorage.removeItem(FEDERATION_CACHE_KEY);
-  } catch {}
+  federationStore.clear();
+}
+
+// ─── Session lifecycle (called from the wallet layer) ───────────────────────
+
+/** Decrypt the address book into memory for the given wallet session. */
+export function unlockAddressBook(key: CryptoKey, owner: string) {
+  return store.unlock(key, owner);
+}
+
+/** Re-encrypt the in-memory contacts under a new wallet key (rotation). */
+export function reEncryptAddressBook(key: CryptoKey, owner: string) {
+  return store.reEncrypt(key, owner);
+}
+
+/** Drop the decrypted contacts from memory (on disconnect). */
+export function lockAddressBook() {
+  store.lock();
+}
+
+/** True when the stored contacts were encrypted for a different wallet. */
+export function addressBookNeedsReEncryption(owner: string) {
+  return store.needsReEncryption(owner);
+}
+
+/** Decrypt the federation cache into memory for the given wallet session. */
+export function unlockFederationCache(key: CryptoKey, owner: string) {
+  return federationStore.unlock(key, owner);
+}
+
+/** Re-encrypt the cached federation resolutions under a new wallet key. */
+export function reEncryptFederationCache(key: CryptoKey, owner: string) {
+  return federationStore.reEncrypt(key, owner);
+}
+
+/** Drop the decrypted federation cache from memory (on disconnect). */
+export function lockFederationCache() {
+  federationStore.lock();
 }

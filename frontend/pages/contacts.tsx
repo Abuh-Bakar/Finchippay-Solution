@@ -9,6 +9,7 @@ import {
   resolveFederationWithCache,
   getCachedFederationAddress,
 } from "@/lib/addressBook";
+import { reEncryptLocalData } from "@/lib/wallet";
 import {
   exportContactsCSV,
   exportContactsVCard,
@@ -44,6 +45,23 @@ function GroupBadge({ name, color }: { name: string; color: string }) {
   );
 }
 
+function LockIcon({ className, "aria-label": ariaLabel }: { className?: string; "aria-label"?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      role={ariaLabel ? "img" : undefined}
+      aria-label={ariaLabel}
+      aria-hidden={ariaLabel ? undefined : true}
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 0h10.5a2.25 2.25 0 012.25 2.25v6.75a2.25 2.25 0 01-2.25 2.25H6.75a2.25 2.25 0 01-2.25-2.25v-6.75a2.25 2.25 0 012.25-2.25z" />
+    </svg>
+  );
+}
+
 export default function Contacts() {
   const { publicKey } = useWallet();
   const router = useRouter();
@@ -63,6 +81,24 @@ export default function Contacts() {
   const [newGroupName, setNewGroupName] = useState("");
   const [newGroupColor, setNewGroupColor] = useState("#6366f1");
   const [dragContact, setDragContact] = useState<number | null>(null);
+
+  useEffect(() => {
+    setNeedsReEncryption(publicKey ? addressBookNeedsReEncryption(publicKey) : false);
+  }, [publicKey, contacts]);
+
+  // Re-encrypt the in-memory contacts under the active wallet's key.
+  const handleReEncrypt = async () => {
+    setReEncrypting(true);
+    try {
+      await reEncryptLocalData();
+      setNeedsReEncryption(publicKey ? addressBookNeedsReEncryption(publicKey) : false);
+      showToast("Contacts re-encrypted for this wallet");
+    } catch {
+      showToast("Failed to re-encrypt contacts");
+    } finally {
+      setReEncrypting(false);
+    }
+  };
 
   // Resolve federation address when adding a contact that looks like a federation address
   const tryResolveFederation = useCallback(async (addr: string) => {
@@ -273,7 +309,8 @@ export default function Contacts() {
         <h1 className="font-display text-3xl font-bold text-slate-900 dark:text-white mb-1">Contacts</h1>
         <p className="text-slate-600 dark:text-slate-400">Save and manage Stellar addresses</p>
 
-        <div className="mt-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+        {/* Encryption notice */}
+        <div className="mt-4 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
           <div className="flex items-start gap-2">
             <svg className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
@@ -281,6 +318,30 @@ export default function Contacts() {
             <p className="text-sm text-amber-800 dark:text-amber-200">Your contacts are stored locally in this browser and persist across sessions. Avoid using this feature on shared or public computers.</p>
           </div>
         </div>
+
+        {/* Re-encryption prompt shown after switching wallets */}
+        {needsReEncryption && (
+          <div className="mt-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+            <div className="flex items-start gap-2">
+              <svg className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              <div className="flex-1">
+                <p className="text-sm text-amber-800 dark:text-amber-200">
+                  Your stored contacts were encrypted for a different wallet. Re-encrypt them for the wallet you have connected now.
+                </p>
+                <button
+                  onClick={handleReEncrypt}
+                  disabled={reEncrypting}
+                  className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium text-amber-900 dark:text-amber-100 bg-amber-500/20 border border-amber-500/30 hover:bg-amber-500/30 transition-colors disabled:opacity-50"
+                >
+                  <LockIcon className="w-4 h-4" />
+                  {reEncrypting ? "Re-encrypting…" : "Re-encrypt for this wallet"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-wrap gap-2 mt-4">
           <button onClick={() => setShowImportModal(true)} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-stellar-700 dark:text-stellar-300 bg-stellar-50 dark:bg-stellar-500/10 border border-stellar-500/20 hover:bg-stellar-500/20 hover:border-stellar-500/30 transition-colors">
@@ -502,6 +563,10 @@ export default function Contacts() {
             <h2 className="font-display text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
               <svg className="w-5 h-5 text-stellar-700 dark:text-stellar-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" /></svg>
               {selectedGroupId ? groups.find((g) => g.id === selectedGroupId)?.name || "Contacts" : "All Contacts"}
+              <LockIcon
+                className="w-4 h-4 text-emerald-600 dark:text-emerald-400"
+                aria-label="Contacts are encrypted at rest"
+              />
               <span className="ml-auto text-sm font-normal text-slate-600 dark:text-slate-400">{filteredContacts.length} contact{filteredContacts.length !== 1 ? "s" : ""}</span>
             </h2>
 
