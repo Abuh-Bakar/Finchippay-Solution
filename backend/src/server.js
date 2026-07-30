@@ -39,6 +39,7 @@ const federationRoutes = require("./routes/federation");
 const turretsRoutes = require("./routes/turrets");
 const tipsRoutes = require("./routes/tips");
 const webhookRoutes = require("./routes/webhooks");
+const { restoreWebhooks } = require("./services/webhookService");
 const parsePaymentRoutes = require("./routes/parsePayment");
 const { strictLimiter } = require("./middleware/rateLimit");
 const scheduledTransactionRoutes = require("./routes/scheduledTransactions");
@@ -469,12 +470,10 @@ if (require.main === module) {
     initRedis().catch((err) => {
       logger.error({ err }, "Redis initialisation failed");
     });
-    require("./services/scheduledTransactionService")
-      .loadActiveSchedules()
-      .catch((err) => {
-        logger.error({ err }, "Failed to load active scheduled transactions");
-      });
-    // Start scheduled transaction executor
+    require("./services/scheduledTransactionService").loadActiveSchedules().catch((err) => {
+      logger.error({ err }, "Failed to load active scheduled transactions");
+    });
+    // Start scheduled transaction executor and data retention cron
     require("./services/scheduledExecutor").start();
     require("./services/dataRetentionService").startRetentionCron();
 
@@ -521,11 +520,14 @@ if (require.main === module) {
  🚀 Server running at http://localhost:${PORT}
  🌐 Network: ${process.env.STELLAR_NETWORK || "testnet"}
  `);
+      // Reload persisted webhook registrations and re-establish Horizon SSE
+      // streams. Must run after the server is bound so the port is guaranteed
+      // ready before any incoming payment events trigger deliveries.
+      await restoreWebhooks();
+      startTurretsServer();
+      eventIndexer.start();
+      startRetryWorker();
     });
-
-    startTurretsServer();
-    eventIndexer.start();
-    startRetryWorker();
 
     process.on("SIGTERM", () => {
       eventIndexer.stop();
