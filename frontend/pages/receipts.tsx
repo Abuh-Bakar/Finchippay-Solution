@@ -122,7 +122,7 @@ export default function ReceiptsPage() {
           </div>
           <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">No receipts minted yet.</h2>
           <p className="text-slate-500 dark:text-slate-400 max-w-sm mx-auto">
-            You can mint NFT receipts when sending payments. Check the "Mint NFT Receipt" option next time you send XLM!
+            You can mint NFT receipts when sending payments. Check the &quot;Mint NFT Receipt&quot; option next time you send XLM!
           </p>
         </div>
       ) : (

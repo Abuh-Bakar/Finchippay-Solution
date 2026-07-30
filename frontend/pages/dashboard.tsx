@@ -18,9 +18,22 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import Head from "next/head";
 import { useTranslation } from "react-i18next";
+import {
+  isPushSupported,
+  requestPermission,
+  unsubscribeUser,
+} from "@/lib/pushNotifications";
 
 // Dynamic imports for large components to improve initial load (Lighthouse Performance)
 import Skeleton from "@/components/Skeleton";
+import AnimatedCounter from "@/components/AnimatedCounter";
+import { FadeIn, StaggerContainer } from "@/components/FadeIn";
+
+// Browser-only: reads Notification.permission and localStorage on mount.
+const PushNotificationPrompt = dynamic(
+  () => import("../components/PushNotificationPrompt"),
+  { ssr: false },
+);
 
 const PaymentLinkGenerator = dynamic(() => import("../components/PaymentLinkGenerator"), { ssr: false });
 const WalletConnect = dynamic(() => import("../components/WalletConnect"), { ssr: false });
@@ -34,6 +47,7 @@ const MultiSigFlow = dynamic(() => import("../components/MultiSigFlow"), {
   loading: () => <Skeleton height="h-64" />,
 });
 const OnboardingTour = dynamic(() => import("../components/OnboardingTour"), { ssr: false });
+const FeatureTour = dynamic(() => import("../components/FeatureTour"), { ssr: false });
 const BatchPaymentForm = dynamic(() => import("../components/BatchPaymentForm"), {
   ssr: false,
   loading: () => <Skeleton height="h-64" />,
@@ -46,6 +60,10 @@ const CreatorTipsDashboard = dynamic(() => import("../components/CreatorTipsDash
 const AIPaymentAssistant = dynamic(() => import("../components/AIPaymentAssistant"), { ssr: false });
 const RecurringPayments = dynamic(() => import("../components/RecurringPayments"), { ssr: false });
 const StreamingPayments = dynamic(() => import("../components/StreamingPayments"), { ssr: false });
+const PriceAlertsPanel = dynamic(() => import("../components/PriceAlertsPanel"), {
+  ssr: false,
+  loading: () => <Skeleton height="h-48" />,
+});
 
 import {
   ResponsiveContainer,
@@ -82,7 +100,10 @@ import { useToastContext } from "@/lib/ToastContext";
 import { getJwtToken } from "@/lib/auth";
 import { URIParseResult, uriToPrefillData } from "@/lib/sep0007";
 import { useWallet } from "@/lib/useWallet";
-import { subscribeToPush, unsubscribePush } from "@/lib/notifications";
+import DashboardPortfolioWidget from "@/components/DashboardPortfolioWidget";
+import { useBalanceStream } from "@/lib/useBalanceStream";
+import FeatureAnnouncement from "@/components/FeatureAnnouncement";
+import type { Step } from "react-joyride";
 
 interface DashboardProps {
   stellarURI?: URIParseResult | null;
@@ -161,10 +182,34 @@ function formatSnapshotTime(savedAt: number) {
   });
 }
 
+const BATCH_PAYMENTS_FEATURE_ID = "batch-payments-v1";
+
+const BATCH_PAYMENTS_TOUR_STEPS: Step[] = [
+  {
+    target: '[data-tour="batch-send-tab"]',
+    title: "Batch Payments",
+    content: "Switch to this tab to send XLM to multiple recipients in a single transaction.",
+    placement: "bottom",
+    disableBeacon: true,
+  },
+  {
+    target: '[data-tour="batch-payment-form"]',
+    title: "Add recipients",
+    content: "Add each recipient's address and amount, then review and sign once to send them all together.",
+    placement: "right",
+    disableBeacon: true,
+  },
+];
+
 export default function Dashboard({ stellarURI }: DashboardProps) {
   const { publicKey } = useWallet();
   const { t } = useTranslation("common");
-  const AUTO_REFRESH_SECONDS = 30;
+  // Balance arrives over SSE, falling back to polling automatically (#157).
+  const {
+    xlmBalance: streamedXlmBalance,
+    isLive: isBalanceLive,
+    lastUpdatedAt: balanceUpdatedAt,
+  } = useBalanceStream(publicKey);
   // Move focus to the dashboard heading once a wallet is connected, so keyboard
   // and screen-reader focus follows the content instead of staying on the
   // now-hidden Connect control (#252).
@@ -185,7 +230,6 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
   const [addressExpanded, setAddressExpanded] = useState(false);
   const [balanceFlash, setBalanceFlash] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [refreshCountdown, setRefreshCountdown] = useState(AUTO_REFRESH_SECONDS);
   const [isRefreshingBalance, setIsRefreshingBalance] = useState(false);
   const { addToast } = useToastContext();
   const showToast = useCallback((msg: string) => addToast(msg, "info"), [addToast]);
@@ -198,6 +242,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
 
   const router = useRouter();
   const [activePaymentTab, setActivePaymentTab] = useState<"single" | "batch">("single");
+  const [showBatchFeatureTour, setShowBatchFeatureTour] = useState(false);
 
   // Build prefill object from query parameters.
   // Supports legacy ?prefillDestination= (contacts page) and
@@ -219,6 +264,8 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
   const [paymentStats, setPaymentStats] = useState<PaymentStats | null>(null);
   const [paymentStatsLoading, setPaymentStatsLoading] = useState(false);
   const [paymentStatsError, setPaymentStatsError] = useState<string | null>(null);
+  const [contractEventCount, setContractEventCount] = useState<number>(0);
+  const [contractEventCountLoading, setContractEventCountLoading] = useState(false);
   const [incomingPayment, setIncomingPayment] = useState<PaymentRecord | null>(null);
   const [showExternalBanner, setShowExternalBanner] = useState(true);
 
@@ -273,7 +320,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
     const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "";
     try {
       const response = await fetch(
-        `${apiBase}/api/accounts/resolve/${encodeURIComponent(publicKey)}`
+        `${apiBase}/api/v1/accounts/resolve/${encodeURIComponent(publicKey)}`
       );
       if (response.ok) {
         const payload = await response.json();
@@ -361,7 +408,6 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
   const refreshBalance = useCallback(async () => {
     if (!publicKey) return;
     setIsRefreshingBalance(true);
-    setRefreshCountdown(AUTO_REFRESH_SECONDS);
     try {
       await fetchBalance();
     } finally {
@@ -385,7 +431,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
       }
 
       const response = await fetch(
-        `${apiBase}/api/payments/${encodeURIComponent(publicKey)}/stats`,
+        `${apiBase}/api/v1/payments/${encodeURIComponent(publicKey)}/stats`,
         { headers }
       );
 
@@ -419,6 +465,36 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
       setPaymentStatsError("Could not load your payment stats.");
     } finally {
       setPaymentStatsLoading(false);
+    }
+  }, [publicKey]);
+
+  const fetchContractEventCount = useCallback(async () => {
+    if (!publicKey) return;
+
+    const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "";
+    setContractEventCountLoading(true);
+
+    try {
+      const headers: HeadersInit = {};
+      const token = getJwtToken();
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(
+        `${apiBase}/api/events/${encodeURIComponent(publicKey)}/stats`,
+        { headers }
+      );
+
+      if (response.ok) {
+        const payload = await response.json();
+        setContractEventCount(payload?.data?.totalEvents ?? 0);
+      }
+    } catch {
+      // Swallow — contract events are an enhancement; failure is non-blocking.
+      setContractEventCount(0);
+    } finally {
+      setContractEventCountLoading(false);
     }
   }, [publicKey]);
 
@@ -531,7 +607,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
       const token = getJwtToken();
       if (token) headers["Authorization"] = `Bearer ${token}`;
       const res = await fetch(
-        `${apiBase}/api/analytics/${encodeURIComponent(publicKey)}/top-recipients`,
+        `${apiBase}/api/v1/analytics/${encodeURIComponent(publicKey)}/top-recipients`,
         { headers }
       );
       if (res.ok) {
@@ -604,21 +680,34 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
     fetchBalance();
   }, [fetchBalance, refreshKey]);
 
+  // Render the streamed balance immediately, then pull the rest of the account
+  // (USDC, other assets, reserve) so every figure on the card agrees. The very
+  // first delivery is skipped: the initial fetchBalance already covers it.
+  const seenFirstStreamedBalanceRef = useRef(false);
+
   useEffect(() => {
-    if (!publicKey) return;
+    seenFirstStreamedBalanceRef.current = false;
+  }, [publicKey]);
 
-    const intervalId = window.setInterval(() => {
-      setRefreshCountdown((current) => {
-        if (current <= 1) {
-          void refreshBalance();
-          return AUTO_REFRESH_SECONDS;
-        }
-        return current - 1;
-      });
-    }, 1000);
+  useEffect(() => {
+    if (!publicKey || balanceUpdatedAt === null) return;
 
-    return () => window.clearInterval(intervalId);
-  }, [publicKey, refreshBalance]);
+    setXlmBalance((prev) => {
+      if (prev !== null && prev !== streamedXlmBalance) {
+        setBalanceFlash(true);
+        setTimeout(() => setBalanceFlash(false), 800);
+      }
+      return streamedXlmBalance;
+    });
+    setStaleBalanceAt(null);
+
+    if (!seenFirstStreamedBalanceRef.current) {
+      seenFirstStreamedBalanceRef.current = true;
+      return;
+    }
+
+    void fetchBalance();
+  }, [publicKey, streamedXlmBalance, balanceUpdatedAt, fetchBalance]);
 
   useEffect(() => {
     setFriendbotSuccessMessage(null);
@@ -627,6 +716,10 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
   useEffect(() => {
     fetchPaymentStats();
   }, [fetchPaymentStats, refreshKey]);
+
+  useEffect(() => {
+    fetchContractEventCount();
+  }, [fetchContractEventCount, refreshKey]);
 
   useEffect(() => {
     fetchSparklineData();
@@ -672,7 +765,6 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
   };
 
   const handleManualRefresh = () => {
-    setRefreshCountdown(30);
     fetchBalance();
   };
 
@@ -703,6 +795,43 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
     }, 2000);
   };
 
+  /**
+   * Ask for permission and register this device, via lib/pushNotifications.
+   *
+   * The flow itself (service worker registration, VAPID key resolution,
+   * PushManager.subscribe, authenticated server registration) lives in the lib
+   * so this page and PushNotificationPrompt cannot drift apart.
+   *
+   * Reference: https://developer.mozilla.org/en-US/docs/Web/API/Push_API
+   */
+  const subscribeToPush = async (): Promise<boolean> => {
+    if (!isPushSupported()) {
+      showToast('Push notifications are not supported in this browser.');
+      return false;
+    }
+
+    // requestPermission() must run inside the user gesture: async work before
+    // it breaks the gesture context and some browsers reject silently.
+    const { permission, subscribed } = await requestPermission(
+      publicKey ?? undefined,
+    );
+    setNotificationPermission(permission);
+
+    if (permission !== 'granted') {
+      showToast('Notification permission was not granted.');
+      return false;
+    }
+
+    if (!subscribed) {
+      // Permission is granted but the device is not registered server-side —
+      // no VAPID key, or the session is not authenticated yet. Local
+      // notifications still work, so this is a warning rather than a failure.
+      console.warn('Notifications allowed, but this device was not registered for server push.');
+    }
+
+    return true;
+  };
+
   const handleToggleNotifications = async () => {
     // --- Disable ---
     if (notificationEnabled) {
@@ -711,6 +840,17 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
       }
       localStorage.setItem('notificationOptIn', 'false');
       setNotificationEnabled(false);
+
+      // Drop the server-side subscription too, otherwise the backend keeps
+      // pushing to a device the user just switched off.
+      if (publicKey) {
+        try {
+          await unsubscribeUser(publicKey);
+        } catch (err) {
+          console.warn('Could not remove push subscription:', err);
+        }
+      }
+
       showToast('Payment notifications disabled');
       return;
     }
@@ -842,7 +982,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 animate-fade-in cursor-default select-none">
+    <StaggerContainer className="max-w-6xl mx-auto px-4 sm:px-6 py-10 cursor-default select-none">
       <Head>
         <title>Dashboard | Finchippay-Solution</title>
         <meta name="description" content="Manage your Stellar account, view balances, send payments, and monitor streaming, escrow, and multi-sig activity. Real-time dashboard with analytics and wallet summary." />
@@ -859,6 +999,16 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
           {t("dashboard.title")}
         </h1>
         <p className="text-slate-600 dark:text-slate-400 text-sm">{t("dashboard.subtitle")}</p>
+
+        {/* Opt-in prompt: self-hides unless a wallet is connected, the browser
+            permission is undecided, and the server can actually send pushes. */}
+        <div className="mt-4">
+          <PushNotificationPrompt
+            publicKey={publicKey}
+            onResolved={(enabled) => setNotificationEnabled(enabled)}
+          />
+        </div>
+
         <div className="mt-4">
           <button
             onClick={handleToggleNotifications}
@@ -889,20 +1039,32 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
         </div>
       </div>
 
-      <PaymentStatsWidget
+      <FadeIn>
+        <PaymentStatsWidget
         stats={paymentStats}
         loading={paymentStatsLoading}
         error={paymentStatsError}
         onRetry={fetchPaymentStats}
         t={t}
       />
+      </FadeIn>
 
-      <MonthlySpendingChart 
+      <FadeIn>
+        <ContractEventStatsWidget
+        count={contractEventCount}
+        loading={contractEventCountLoading}
+        t={t}
+      />
+      </FadeIn>
+
+      <FadeIn>
+        <MonthlySpendingChart
         data={spendingData} 
         loading={spendingLoading}
         onBarClick={setSelectedMonth}
         t={t}
       />
+      </FadeIn>
 
       {selectedMonth && (
         <div className="mb-8 p-4 rounded-xl bg-stellar-500/5 border border-stellar-500/10 flex items-center justify-between animate-fade-in">
@@ -1005,10 +1167,11 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
             ) : xlmBalance !== null ? (
               <div>
                 <div className={`font-display text-3xl font-bold text-slate-900 dark:text-white ${balanceFlash ? "balance-flash" : ""}`}>
-                  {parseFloat(xlmBalance).toLocaleString("en-US", {
-                    maximumFractionDigits: 4,
-                  })}
-                  <span className="text-stellar-700 dark:text-stellar-400 text-xl ml-2">XLM</span>
+                  <AnimatedCounter
+                    value={parseFloat(xlmBalance) || 0}
+                    decimals={4}
+                    suffix={<span className="text-stellar-700 dark:text-stellar-400 text-xl ml-2">XLM</span>}
+                  />
                 </div>
                 {xlmPrice !== null && (
                   <p className="text-sm text-slate-600 dark:text-slate-400 mt-0.5">
@@ -1033,8 +1196,14 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
                   <RefreshIcon className={`w-3 h-3 ${isRefreshingBalance ? "animate-spin" : ""}`} />
                   {isRefreshingBalance ? t("dashboard.refreshing") : t("dashboard.refresh")}
                 </button>
-                <p className="mt-1 text-[11px] text-slate-600 dark:text-slate-400 sm:text-right">
-                  {t("dashboard.refreshingIn")} {refreshCountdown}s
+                <p className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-400 sm:justify-end">
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      isBalanceLive ? "animate-pulse bg-emerald-400" : "bg-amber-400"
+                    }`}
+                    aria-hidden="true"
+                  />
+                  {isBalanceLive ? t("dashboard.balanceLive") : t("dashboard.balancePolling")}
                 </p>
               </div>
             ) : accountNotFound && isTestnet ? (
@@ -1077,6 +1246,10 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
           </div>
         )}
       </div>
+
+      {/* Portfolio dashboard widget (#482): total value, 24h change, P&L,
+          asset allocation, and historical value chart. */}
+      <DashboardPortfolioWidget publicKey={publicKey} />
 
       {/* Reserve warning (#164). Amber when balance is within 2 XLM of the
           minimum reserve, red when at or below it. Suppressed when the
@@ -1177,9 +1350,38 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
         </div>
       ))}
 
+      <Link
+        href="/portfolio"
+        className="card mb-6 flex items-center justify-between gap-4 bg-gradient-to-br from-stellar-500/10 to-blue-500/5 dark:from-stellar-500/5 dark:to-blue-500/10 border-stellar-500/20 hover:border-stellar-500/40 transition-colors group"
+      >
+        <div>
+          <p className="font-semibold text-slate-900 dark:text-white">{t("portfolio.title")}</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+            {t("portfolio.totalValue")}:{" "}
+            {xlmPrice !== null && xlmBalance !== null
+              ? formatUSD(parseFloat(xlmBalance) * xlmPrice)
+              : "—"}
+          </p>
+        </div>
+        <span className="text-stellar-600 dark:text-stellar-400 group-hover:translate-x-0.5 transition-transform">
+          {t("dashboard.viewPortfolio")}
+        </span>
+      </Link>
+
       <FeatureGate flag="streaming_payments">
         <StreamingPayments publicKey={publicKey} />
       </FeatureGate>
+
+      {/* Price Alerts — Issue #80 */}
+      <PriceAlertsPanel
+        onTriggered={(alert, priceUsd) => {
+          setBubbleMessage(
+            `${alert.asset} hit $${priceUsd.toFixed(alert.threshold < 1 ? 6 : 4)} — your price alert triggered!`
+          );
+          setShowBubble(true);
+          setTimeout(() => setShowBubble(false), 5000);
+        }}
+      />
 
       {/* Creator Tips Dashboard */}
       <CreatorTipsDashboard
@@ -1214,6 +1416,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
               </button>
               <button
                 type="button"
+                data-tour="batch-send-tab"
                 onClick={() => setActivePaymentTab("batch")}
                 className={`rounded-3xl px-4 py-2 text-sm font-semibold transition ${
                   activePaymentTab === "batch"
@@ -1243,11 +1446,13 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
               }
             />
           ) : (
-            <BatchPaymentForm
-              publicKey={publicKey}
-              xlmBalance={xlmBalance || "0"}
-              onBatchSuccess={handlePaymentSuccess}
-            />
+            <div data-tour="batch-payment-form">
+              <BatchPaymentForm
+                publicKey={publicKey}
+                xlmBalance={xlmBalance || "0"}
+                onBatchSuccess={handlePaymentSuccess}
+              />
+            </div>
           )}
         </div>
 
@@ -1296,7 +1501,24 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
         onComplete={handleTourComplete}
         onSkip={handleTourSkip}
       />
-    </div>
+      {!showOnboardingTour && !showBatchFeatureTour && (
+        <FeatureAnnouncement
+          featureId={BATCH_PAYMENTS_FEATURE_ID}
+          title="New: Batch Payments!"
+          description="Send XLM to multiple recipients at once, in a single transaction."
+          onStartTour={() => {
+            setActivePaymentTab("batch");
+            setShowBatchFeatureTour(true);
+          }}
+        />
+      )}
+      <FeatureTour
+        featureId={BATCH_PAYMENTS_FEATURE_ID}
+        steps={BATCH_PAYMENTS_TOUR_STEPS}
+        isVisible={showBatchFeatureTour}
+        onClose={() => setShowBatchFeatureTour(false)}
+      />
+    </StaggerContainer>
   );
 }
 
@@ -1553,6 +1775,53 @@ function StatsCard({
   );
 }
 
+function ContractEventStatsWidget({
+  count,
+  loading,
+  t,
+}: {
+  count: number;
+  loading: boolean;
+  t: (key: string, opts?: any) => string;
+}) {
+  if (loading) {
+    return (
+      <section className="mb-6">
+        <div className="card border-white/10 bg-white/[0.03] animate-pulse">
+          <div className="h-3 w-36 rounded bg-white/10 mb-3" />
+          <div className="h-8 w-24 rounded bg-white/10 mb-2" />
+          <div className="h-3 w-32 rounded bg-white/10" />
+        </div>
+      </section>
+    );
+  }
+
+  if (count === 0) return null;
+
+  return (
+    <section className="mb-6">
+      <div className="card border-stellar-500/20 bg-gradient-to-br from-stellar-500/5 to-transparent">
+        <div className="flex items-center gap-3">
+          <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-stellar-500/10 flex items-center justify-center">
+            <svg className="w-5 h-5 text-stellar-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+            </svg>
+          </div>
+          <div>
+            <p className="label">{t("dashboard.contractEvents", "Contract Events")}</p>
+            <p className="font-display text-2xl font-bold text-stellar-400">
+              {count.toLocaleString("en-US")}
+            </p>
+            <p className="text-xs text-slate-400 mt-1">
+              {t("dashboard.contractEventsHelper", "Streaming, escrow & multi-sig events indexed from the Soroban contract")}
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function formatStatsXLM(amount: string, suffix = "sent") {
   const value = parseFloat(amount);
 
@@ -1781,15 +2050,5 @@ function TestIcon({ className }: { className?: string }) {
   );
 }
 
-function urlBase64ToUint8Array(base64String: string) {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
-}
+// urlBase64ToUint8Array moved to lib/pushNotifications.ts, which is now the
+// only place that calls PushManager.subscribe().

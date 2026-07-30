@@ -32,14 +32,11 @@ import {
 } from "@/lib/stellar";
 import { MULTISIG_THRESHOLD_XLM } from "@/components/MultiSigFlow";
 import { signTransactionWithWallet } from "@/lib/wallet";
-import {
-  type AddressBookContact,
-  loadAddressBookContacts,
-  saveAddressBookContacts,
-  subscribeToAddressBookContacts,
-  upsertAddressBookContact,
-} from "@/lib/addressBook";
+import FeeEstimator from "@/components/FeeEstimator";
+import { Transaction } from "@stellar/stellar-sdk";
+import { useContacts } from "@/hooks/useContacts";
 import { formatXLM, shortenAddress } from "@/utils/format";
+import ContactPicker from "@/components/ContactPicker";
 import {
   SendIcon,
   CheckIcon,
@@ -53,6 +50,7 @@ import clsx from "clsx";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useToastContext } from "@/lib/ToastContext";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 
 interface SendPaymentFormProps {
   publicKey: string;
@@ -157,8 +155,15 @@ function SendPaymentForm({
   const [isScannerSupported, setIsScannerSupported] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scannerError, setScannerError] = useState<string | null>(null);
+  const scannerPanelRef = useFocusTrap<HTMLDivElement>({
+    active: isScannerOpen,
+    onEscape: () => closeScanner(),
+  });
   const [destAccountWarning, setDestAccountWarning] = useState<string | null>(null);
   const [isCheckingDest, setIsCheckingDest] = useState(false);
+  const [selectedFeeStroops, setSelectedFeeStroops] = useState<number>(100);
+  const [selectedFeeTier, setSelectedFeeTier] = useState<"economy" | "standard" | "fast">("standard");
+  const [previewTx, setPreviewTx] = useState<Transaction | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -287,19 +292,14 @@ function SendPaymentForm({
     }
   });
 
-  const [contacts, setContacts] = useState<AddressBookContact[]>(loadAddressBookContacts);
+  const { contacts, add: addContact, remove: removeContact } = useContacts();
   const [isContactsDropdownOpen, setIsContactsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => subscribeToAddressBookContacts(setContacts), []);
-
-  const saveContacts = (items: AddressBookContact[]) => {
-    setContacts(items);
-    saveAddressBookContacts(items);
-  };
+  const [isContactPickerOpen, setIsContactPickerOpen] = useState(false);
 
   const deleteContactByAddress = (address: string) => {
-    saveContacts(contacts.filter((contact) => contact.address !== address));
+    const existing = contacts.find((contact) => contact.publicKey === address);
+    if (existing?.id !== undefined) void removeContact(existing.id);
   };
 
   useEffect(() => {
@@ -506,6 +506,74 @@ function SendPaymentForm({
     trimmedDestination !== publicKey &&
     isMemoValid;
 
+  useEffect(() => {
+    let active = true;
+    const updatePreview = async () => {
+      const paymentDestination = isValidDest
+        ? trimmedDestination
+        : resolvedPaymentDestination;
+
+      if (!paymentDestination || paymentDestination === publicKey || !isValidAmt || !isMemoValid) {
+        setPreviewTx(null);
+        return;
+      }
+
+      try {
+        const customAssetEntry = accountBalances.find((b) => b.code === selectedAsset);
+        const assetParam: "XLM" | "USDC" | { code: string; issuer: string } =
+          selectedAsset === "XLM"
+            ? "XLM"
+            : selectedAsset === "USDC"
+            ? "USDC"
+            : customAssetEntry
+            ? { code: customAssetEntry.code, issuer: customAssetEntry.issuer }
+            : "XLM";
+
+        const tx = isTipOnChain
+          ? await buildSorobanTipTransaction({
+              fromPublicKey: publicKey,
+              toPublicKey: paymentDestination,
+              amount: amountNum.toFixed(7),
+              baseFee: String(selectedFeeStroops),
+            })
+          : await buildPaymentTransaction({
+              fromPublicKey: publicKey,
+              toPublicKey: paymentDestination,
+              amount: amountNum.toFixed(7),
+              memo: memo.trim() || undefined,
+              asset: assetParam,
+              baseFee: String(selectedFeeStroops),
+            });
+
+        if (active) {
+          setPreviewTx(tx);
+        }
+      } catch (e) {
+        if (active) {
+          setPreviewTx(null);
+        }
+      }
+    };
+
+    updatePreview();
+    return () => {
+      active = false;
+    };
+  }, [
+    trimmedDestination,
+    isValidDest,
+    resolvedPaymentDestination,
+    publicKey,
+    amountNum,
+    isValidAmt,
+    isMemoValid,
+    memo,
+    selectedAsset,
+    isTipOnChain,
+    selectedFeeStroops,
+    accountBalances,
+  ]);
+
   const resolveUsername = async (username: string): Promise<string> => {
     const cleanUsername = username.replace(/^@/, "").toLowerCase();
     if (!/^[a-zA-Z0-9]{3,20}$/.test(cleanUsername)) {
@@ -513,7 +581,7 @@ function SendPaymentForm({
     }
 
     const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "";
-    const response = await fetch(`${apiBase}/api/accounts/resolve/${encodeURIComponent(cleanUsername)}`);
+    const response = await fetch(`${apiBase}/api/v1/accounts/resolve/${encodeURIComponent(cleanUsername)}`);
     const payload = await response.json().catch(() => null);
 
     if (!response.ok) {
@@ -558,8 +626,8 @@ function SendPaymentForm({
     const query = destination.trim().toLowerCase();
     if (!query) return true;
     return (
-      contact.nickname.toLowerCase().includes(query) ||
-      contact.address.toLowerCase().includes(query)
+      contact.name.toLowerCase().includes(query) ||
+      contact.publicKey.toLowerCase().includes(query)
     );
   });
 
@@ -642,6 +710,7 @@ function SendPaymentForm({
     if (!canSubmit) return;
     startTracker();
     let activeStep: PaymentStepId = "building";
+    let pendingId: string | null = null;
     try {
       markStepStarted("building");
       setStatus("building");
@@ -666,6 +735,7 @@ function SendPaymentForm({
           fromPublicKey: publicKey,
           toPublicKey: paymentDestination,
           amount: amountNum.toFixed(7),
+          baseFee: String(selectedFeeStroops),
         })
         : await buildPaymentTransaction({
             fromPublicKey: publicKey,
@@ -673,6 +743,7 @@ function SendPaymentForm({
             amount: amountNum.toFixed(7),
             memo: memo.trim() || undefined,
             asset: assetParam,
+            baseFee: String(selectedFeeStroops),
           });
       markStepCompleted("building");
 
@@ -683,18 +754,41 @@ function SendPaymentForm({
       if (signError || !signedXDR) throw new Error(signError || "Signing failed");
       markStepCompleted("signing");
 
+      pendingId = "pending-" + Date.now();
+      const pendingTx = {
+        id: pendingId,
+        type: "sent" as const,
+        amount: amountNum.toFixed(7),
+        asset: typeof assetParam === "string" ? assetParam : assetParam.code,
+        from: publicKey,
+        to: paymentDestination,
+        memo: memo.trim() || undefined,
+        createdAt: new Date().toISOString(),
+        transactionHash: pendingId,
+        isPending: true,
+      };
+      
+      const prevPending = JSON.parse(sessionStorage.getItem("finchippay:pending-txs") || "[]");
+      sessionStorage.setItem("finchippay:pending-txs", JSON.stringify([pendingTx, ...prevPending]));
+      window.dispatchEvent(new CustomEvent("finchippay:pending-tx", { detail: pendingTx }));
+
       activeStep = "submitting";
       markStepStarted("submitting");
       setStatus("submitting");
       const result = await submitTransaction(signedXDR);
       setTxHash(result.hash);
-      markStepCompleted("submitting");
 
       activeStep = "confirming";
       markStepStarted("confirming");
       setStatus("confirming");
       await waitForTransactionConfirmation(result.hash);
       markStepCompleted("confirming");
+      
+      const resolvedTx = { ...pendingTx, transactionHash: result.hash, isPending: false };
+      const updatedPending = JSON.parse(sessionStorage.getItem("finchippay:pending-txs") || "[]").filter((t: any) => t.id !== pendingId);
+      sessionStorage.setItem("finchippay:pending-txs", JSON.stringify(updatedPending));
+      window.dispatchEvent(new CustomEvent("finchippay:resolved-tx", { detail: { pendingId, resolvedTx } }));
+      markStepCompleted("submitting");
 
       setStatus("success");
       saveRecipient(trimmedDestination);
@@ -707,6 +801,11 @@ function SendPaymentForm({
 
       onSuccess?.(result.hash);
     } catch (err: unknown) {
+      if (pendingId) {
+        const updatedPending = JSON.parse(sessionStorage.getItem("finchippay:pending-txs") || "[]").filter((t: any) => t.id !== pendingId);
+        sessionStorage.setItem("finchippay:pending-txs", JSON.stringify(updatedPending));
+        window.dispatchEvent(new CustomEvent("finchippay:failed-tx", { detail: { pendingId } }));
+      }
       const message = err instanceof Error ? err.message : "An unexpected error occurred";
       setError(message);
       markStepFailed(activeStep, message);
@@ -864,7 +963,7 @@ function SendPaymentForm({
         {!hideDestinationField && (
           <div className="relative" ref={dropdownRef}>
             <div className="mb-2 flex items-center justify-between">
-              <label className="label mb-0">{t("sendPayment.destination")}</label>
+              <label className="label mb-0 rtl:text-right">{t("sendPayment.destination")}</label>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -873,22 +972,37 @@ function SendPaymentForm({
                 >
                   {isContactsDropdownOpen ? t("sendPayment.close") : t("sendPayment.contacts")}
                 </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsContactPickerOpen(true)}
+                  className="text-xs text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  title={t("sendPayment.selectContact")}
+                >
+                  {t("sendPayment.select") ?? "Select"}
+                </button>
                 {isValidDest && (
                   <button
                     type="button"
-                    onClick={() => {
-                      const existing = contacts.find((contact) => contact.address === destination);
+                    onClick={async () => {
+                      const existing = contacts.find((contact) => contact.publicKey === destination);
                       if (existing) deleteContactByAddress(destination);
                       else {
                         const nickname = prompt("Nickname for this contact:", destination.slice(0, 8));
-                        if (nickname) setContacts(upsertAddressBookContact({ nickname, address: destination }));
+                        if (nickname) {
+                          try {
+                            await addContact({ name: nickname, publicKey: destination });
+                          } catch (err) {
+                            addToast(err instanceof Error ? err.message : "Failed to save contact", "error");
+                          }
+                        }
                       }
                     }}
                     className="text-stellar-700 dark:text-stellar-400 hover:text-stellar-600 dark:hover:text-stellar-300"
-                    title={contacts.some((contact) => contact.address === destination) ? t("sendPayment.removeContact") : t("sendPayment.saveContact")}
-                    aria-label={contacts.some((contact) => contact.address === destination) ? "Remove address from contacts" : "Save address as contact"}
+                    title={contacts.some((contact) => contact.publicKey === destination) ? t("sendPayment.removeContact") : t("sendPayment.saveContact")}
+                    aria-label={contacts.some((contact) => contact.publicKey === destination) ? "Remove address from contacts" : "Save address as contact"}
                   >
-                    <StarIcon className="h-5 w-5" filled={contacts.some((contact) => contact.address === destination)} />
+                    <StarIcon className="h-5 w-5" filled={contacts.some((contact) => contact.publicKey === destination)} />
                   </button>
                 )}
                 {isScannerSupported && status === "idle" && (
@@ -919,7 +1033,7 @@ function SendPaymentForm({
               onFocus={() => setIsContactsDropdownOpen(true)}
               placeholder="G..., alice*domain.com, or @username"
               className={clsx(
-                "input-field font-mono text-sm",
+                "input-field font-mono text-sm rtl:text-left",
                 destination &&
                   !isValidDest &&
                   !isFederationDestination &&
@@ -931,6 +1045,10 @@ function SendPaymentForm({
 
             {destinationResolutionError && (
               <p className="mt-2 text-xs text-red-400">{destinationResolutionError}</p>
+            )}
+
+            {scannerError && !isScannerOpen && (
+              <p className="mt-2 text-xs text-red-400">{scannerError}</p>
             )}
 
             {/* Destination account existence warning (#294) */}
@@ -947,11 +1065,11 @@ function SendPaymentForm({
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => handleSelectContact(item.address)}
-                    className="flex w-full flex-col items-start rounded-lg px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-white/5"
+                    onClick={() => handleSelectContact(item.publicKey)}
+                    className="flex w-full flex-col items-start rounded-lg px-3 py-2 text-left rtl:items-end rtl:text-right hover:bg-slate-50 dark:hover:bg-white/5"
                   >
-                    <span className="text-sm font-medium text-slate-900 dark:text-slate-200">{item.nickname}</span>
-                    <span className="text-xs text-slate-600 dark:text-slate-400">{shortenAddress(item.address, 8)}</span>
+                    <span className="text-sm font-medium text-slate-900 dark:text-slate-200">{item.name}</span>
+                    <span className="text-xs text-slate-600 dark:text-slate-400">{shortenAddress(item.publicKey, 8)}</span>
                   </button>
                 ))}
               </div>
@@ -962,7 +1080,7 @@ function SendPaymentForm({
         {!hideAmountField && (
           <div>
             <div className="mb-2 flex items-center justify-between">
-              <label className="label mb-0">{t("sendPayment.amount")} ({selectedAsset})</label>
+              <label className="label mb-0 rtl:text-right">{t("sendPayment.amount")} ({selectedAsset})</label>
               <button type="button" onClick={setMaxAmount} className="text-xs text-stellar-700 dark:text-stellar-400 hover:text-stellar-600 dark:hover:text-stellar-300" disabled={status !== "idle"}>
                 {t("sendPayment.max")}: {formatXLM(maxSend)}
               </button>
@@ -984,7 +1102,7 @@ function SendPaymentForm({
         {!hideMemoField && (
           <div>
             <div className="mb-2 flex items-center justify-between">
-              <label className="label mb-0">{t("sendPayment.memo")}</label>
+              <label className="label mb-0 rtl:text-right">{t("sendPayment.memo")}</label>
               <span className={clsx("text-xs transition-colors", memoBytes > 28 ? "text-red-400 font-bold" : "text-slate-600 dark:text-slate-400")}>
                 {memoBytes}/28 {t("sendPayment.bytes")}
               </span>
@@ -1022,6 +1140,16 @@ function SendPaymentForm({
           </div>
         </div>
 
+        <FeeEstimator
+          transaction={previewTx}
+          amount={amount}
+          asset={selectedAsset}
+          onFeeSelected={(fee, tier) => {
+            setSelectedFeeStroops(fee);
+            setSelectedFeeTier(tier);
+          }}
+        />
+
         <button
           onClick={openConfirmation}
           disabled={!canSubmit || status !== "idle"}
@@ -1050,7 +1178,11 @@ function SendPaymentForm({
         amount={amountNum}
         asset={selectedAsset}
         memo={memo}
-        estimatedFee={ESTIMATED_NETWORK_FEE}
+        estimatedFee={
+          previewTx
+            ? `${(parseInt(previewTx.fee, 10) / 10_000_000).toFixed(7)} XLM`
+            : `${(selectedFeeStroops / 10_000_000).toFixed(7)} XLM`
+        }
         isTipOnChain={isTipOnChain}
         t={t as any}
         onCancel={() => setIsConfirmOpen(false)}
@@ -1059,7 +1191,7 @@ function SendPaymentForm({
 
       {isScannerOpen && (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 p-4" role="dialog" aria-modal="true" aria-label="QR code scanner">
-          <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 shadow-2xl overflow-hidden">
+          <div ref={scannerPanelRef} tabIndex={-1} className="w-full max-w-sm rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 shadow-2xl overflow-hidden outline-none">
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-white/5">
               <h3 className="font-display text-sm font-semibold text-slate-900 dark:text-white">Scan QR Code</h3>
               <button onClick={closeScanner} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors p-1 rounded-lg hover:bg-slate-50 dark:hover:bg-white/5" aria-label="Close scanner">
@@ -1092,6 +1224,18 @@ function SendPaymentForm({
         timeoutSeconds={60}
         onClose={closeStatusModal}
       />
+
+      {isContactPickerOpen && (
+        <ContactPicker
+          isOpen={isContactPickerOpen}
+          onClose={() => setIsContactPickerOpen(false)}
+          onSelect={(publicKey: string, name: string, memo?: string) => {
+            setDestination(publicKey);
+            if (memo) setMemo(memo);
+            setIsContactPickerOpen(false);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -1110,11 +1254,12 @@ interface SendConfirmationModalProps {
 }
 
 function SendConfirmationModal({ isOpen, destination, amount, asset, memo, estimatedFee, isTipOnChain, onCancel, onConfirm, t }: SendConfirmationModalProps) {
+  const panelRef = useFocusTrap<HTMLDivElement>({ active: isOpen, onEscape: onCancel });
   if (!isOpen) return null;
   const shortened = shortenAddress(destination, 8);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="confirm-payment-title">
-      <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 p-6 border border-slate-200 dark:border-white/10 shadow-2xl">
+      <div ref={panelRef} tabIndex={-1} className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 p-6 border border-slate-200 dark:border-white/10 shadow-2xl outline-none">
         <h3 id="confirm-payment-title" className="text-xl font-bold text-slate-900 dark:text-white mb-4">{t("sendPayment.confirmPayment")}</h3>
         <div className="space-y-4">
           <div>
@@ -1145,7 +1290,7 @@ function SendConfirmationModal({ isOpen, destination, amount, asset, memo, estim
         </div>
       </div>
     </div>
-  );
+  )
 }
-
+ 
 export default withErrorBoundary(SendPaymentForm, "SendPaymentForm");
