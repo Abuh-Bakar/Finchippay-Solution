@@ -161,8 +161,7 @@ async function registerWebhook(publicKey, url, secret) {
   // Keep the plaintext secret in-memory for signed delivery this session
   const webhook = { id, publicKey, url, secret, createdAt };
   webhooks.set(id, webhook);
-
-  startMonitoring(webhook);
+  startMonitoring(publicKey);
   logger.info({ type: "webhook_registered", id, publicKey, url });
   return { id, publicKey, url, createdAt };
 }
@@ -626,64 +625,20 @@ async function retryDeadDeliveries(publicKey) {
 function startMonitoring(webhook) {
   metrics.horizonRequestsTotal.inc({ operation: "startSSE", status: "success" });
   if (activeStreams.has(webhook.publicKey)) return;
-
-  const closeStream = server
-    .payments()
-    .forAccount(webhook.publicKey)
-    .cursor("now")
-    .stream({
-      onmessage: async (payment) => {
-        if (payment.type !== "payment" || payment.to !== webhook.publicKey) return;
-
-        // Invalidate account & payment cache for the receiving account
-        try {
-          const cache = getCache();
-          if (cache) {
-            await cache.del(`account:${webhook.publicKey}`);
-            await cache.delPattern(`payments:${webhook.publicKey}:*`);
-          }
-        } catch {
-          // cache invalidation is best-effort
-        }
-
-        const payload = {
-          event: "payment.received",
-          publicKey: webhook.publicKey,
-          payment: {
-            id: payment.id,
-            from: payment.from,
-            to: payment.to,
-            amount: payment.amount,
-            asset: payment.asset_type === "native" ? "XLM" : payment.asset_code,
-            createdAt: payment.created_at,
-          },
-        };
-
-        const hooks = await getWebhooksByPublicKey(webhook.publicKey);
-        const deliveries = hooks.map((h) => {
-          const promise = deliverWebhook(h, payload, "payment.received").finally(
-            () => pendingDeliveries.delete(promise),
-          );
-          pendingDeliveries.add(promise);
-          return promise;
-        });
-        await Promise.allSettled(deliveries);
-      },
-      onerror: (err) => {
-        logger.error({
-          type: "horizon_sse_error",
-          publicKey: webhook.publicKey,
-          error: err.message,
-        });
-        metrics.horizonRequestsTotal.inc({ operation: "sse", status: "error" });
-        activeStreams.delete(webhook.publicKey);
-        metrics.activeWebhookStreams.set(activeStreams.size);
-      },
-    });
-
+  const closeStream = server.payments().forAccount(webhook.publicKey).cursor("now").stream({
+    onmessage: async (payment) => {
+      if (payment.type !== "payment" || payment.to !== webhook.publicKey) return;
+      try { const cache = getCache(); if (cache) { await cache.del(`account:${webhook.publicKey}`); await cache.delPattern(`payments:${webhook.publicKey}:*`); } } catch { /* cache clear failure is non-critical */ }
+      const payload = { event: "payment.received", publicKey: webhook.publicKey, payment: { id: payment.id, from: payment.from, to: payment.to, amount: payment.amount, asset: payment.asset_type === "native" ? "XLM" : payment.asset_code, createdAt: payment.created_at } };
+      const hooks = await getWebhooksByPublicKey(webhook.publicKey);
+      const deliveries = hooks.map((h) => { const promise = deliverWebhook(h, payload, "payment.received").finally(() => pendingDeliveries.delete(promise)); pendingDeliveries.add(promise); return promise; });
+      await Promise.allSettled(deliveries);
+    },
+    onerror: (err) => { logger.error({ type: "horizon_sse_error", publicKey: webhook.publicKey, error: err.message }); metrics.horizonRequestsTotal.inc({ operation: "sse", status: "error" }); activeStreams.delete(webhook.publicKey); metrics.activeWebhookStreams.set(activeStreams.size); },
+  });
   activeStreams.set(webhook.publicKey, closeStream);
   metrics.activeWebhookStreams.set(activeStreams.size);
-  logger.info({ type: "horizon_monitoring_started", publicKey: webhook.publicKey });
+  logger.info({ type: "horizon_monitoring_started", publicKey: publicKey });
 }
 
 // ─── Graceful Shutdown ────────────────────────────────────────────────────────
@@ -802,24 +757,4 @@ async function getDeliveryById(publicKey, id) {
   return delivery || null;
 }
 
-module.exports = {
-  registerWebhook,
-  getWebhooksByPublicKey,
-  deleteWebhook,
-  restoreWebhooks,
-  signPayload,
-  deliverWebhook,
-  getDeadDeliveries,
-  retryDeadDeliveries,
-  startRetryWorker,
-  stopRetryWorker,
-  closeAllStreams,
-  getEvents,
-  replayEvents,
-  getEventStats,
-  processRetryQueue,
-  getDeliveries,
-  getDeliveryById,
-  MAX_RETRIES,
-  RETRY_INTERVALS_SECONDS,
-};
+module.exports = { registerWebhook, getWebhooksByPublicKey, deleteWebhook, signPayload, deliverWebhook, getDeadDeliveries, retryDeadDeliveries, startRetryWorker, stopRetryWorker, closeAllStreams, getEvents, replayEvents, getEventStats, processRetryQueue, getDeliveries, getDeliveryById, MAX_RETRIES, RETRY_INTERVALS_SECONDS };
