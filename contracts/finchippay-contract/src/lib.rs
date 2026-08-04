@@ -571,6 +571,10 @@ pub enum DataKey {
     TtlWatermark(TtlClass),
     /// Resume position of a partial sweep, as `(class_index, key_index)`.
     TtlSweepCursor,
+    Airdrop(u32),
+    AirdropCount,
+    AirdropClaimed(u32, Address),
+								
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
