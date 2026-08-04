@@ -26,6 +26,15 @@ const {
  * Register a webhook for a Stellar account.
  *
  * Body: { publicKey: "G...", url: "https://...", secret: "whsec_...", topics?: string[] }
+ *
+ * Validation:
+ *   - publicKey must be a valid 56-char Stellar address.
+ *   - url must be an HTTPS endpoint (reject http:// in production).
+ *   - secret must be at least 8 characters (HMAC-SHA256 signing secret).
+ *
+ * Secrets are stored encrypted (AES-256-GCM) and a keyed HMAC-SHA256 hash
+ * is also persisted for verification. The server restores all webhooks on
+ * startup — re-registration is not required after a restart.
  */
 router.post("/", validate(registerWebhookSchema), async (req, res, next) => {
   try {
@@ -38,7 +47,9 @@ router.post("/", validate(registerWebhookSchema), async (req, res, next) => {
     );
     return res.status(201).json({ success: true, webhook });
   } catch (err) {
-    next(err);
+    return res
+      .status(ERROR_CODES.SRV_INTERNAL.httpStatus)
+      .json(formatErrorResponse("SRV_INTERNAL", { reason: err.message }));
   }
 });
 
@@ -148,6 +159,53 @@ router.post(
       const { publicKey } = req.validated;
       const result = await webhookService.retryDeadDeliveries(publicKey);
       return res.json({ success: true, ...result });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * GET /api/webhooks/:publicKey/deliveries
+ * Paginated delivery history, optionally filtered by status.
+ */
+router.get(
+  "/:publicKey/deliveries",
+  validate(publicKeyParamSchema, "params"),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validated;
+      const { status, page, limit } = req.query;
+      const result = await webhookService.getDeliveries(publicKey, {
+        status,
+        page: page ? parseInt(page, 10) : 1,
+        limit: limit ? parseInt(limit, 10) : 20,
+      });
+      return res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * GET /api/webhooks/:publicKey/deliveries/:id
+ * Single delivery detail with retry timeline (attempts, last status, error).
+ */
+router.get(
+  "/:publicKey/deliveries/:id",
+  validate(publicKeyParamSchema, "params"),
+  async (req, res, next) => {
+    try {
+      const { publicKey } = req.validated;
+      const { id } = req.params;
+      const delivery = await webhookService.getDeliveryById(publicKey, id);
+      if (!delivery) {
+        return res.status(ERROR_CODES.RES_NOT_FOUND.httpStatus).json(
+          formatErrorResponse("RES_NOT_FOUND", { resourceType: "delivery", id }),
+        );
+      }
+      return res.json({ delivery });
     } catch (err) {
       next(err);
     }

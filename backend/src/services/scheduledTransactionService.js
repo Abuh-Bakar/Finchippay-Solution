@@ -355,4 +355,6 @@ module.exports = {
   listPendingExecutions,
   submitPendingExecution,
   loadActiveSchedules,
+  buildUnsignedPaymentXDR,
+  estimateNextRun,
 };

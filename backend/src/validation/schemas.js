@@ -216,22 +216,28 @@ const registerWebhookSchema = z.object({
     .min(8, "Secret must be at least 8 characters for HMAC-SHA256 security"),
 });
 
-
 const getEventsQuerySchema = z.object({
   since: z.string().datetime().optional(),
   until: z.string().datetime().optional(),
   type: z.string().optional(),
-  limit: z.preprocess((val) => parseInt(val, 10), z.number().int().min(1).max(100).optional()).optional(),
+  limit: z
+    .preprocess(
+      (val) => parseInt(val, 10),
+      z.number().int().min(1).max(100).optional(),
+    )
+    .optional(),
   cursor: z.string().optional(),
 });
 
-const replayEventsBodySchema = z.object({
-  eventIds: z.array(z.string()).optional(),
-  since: z.string().datetime().optional(),
-  until: z.string().datetime().optional(),
-}).refine(data => (data.eventIds && data.eventIds.length > 0) || data.since, {
-  message: "Either eventIds or since must be provided",
-});
+const replayEventsBodySchema = z
+  .object({
+    eventIds: z.array(z.string()).optional(),
+    since: z.string().datetime().optional(),
+    until: z.string().datetime().optional(),
+  })
+  .refine((data) => (data.eventIds && data.eventIds.length > 0) || data.since, {
+    message: "Either eventIds or since must be provided",
+  });
 
 // ─── parse-payment (AI intent parser) ─────────────────────────────────────────
 
@@ -253,7 +259,9 @@ const ipfsUploadSchema = z.object({
 });
 
 const ipfsFetchSchema = z.object({
-  cid: z.string({ required_error: "cid is required" }).min(1, "cid is required"),
+  cid: z
+    .string({ required_error: "cid is required" })
+    .min(1, "cid is required"),
 });
 
 const mintWithIpfsSchema = z.object({
@@ -329,6 +337,28 @@ const federationQuerySchema = z.object({
     required_error: "Missing required parameters: q and type",
     message: "Invalid type parameter. Must be 'name' or 'id'",
   }),
+});
+
+// ─── contacts ─────────────────────────────────────────────────────────────────
+
+const contactGroupSchema = z.object({
+  name: z.string().min(1, "Group name is required"),
+  color: z.string().optional(),
+  icon: z.string().optional(),
+});
+
+const contactItemSchema = z.object({
+  name: z.string().min(1, "Contact name is required"),
+  stellar_address: z.string().min(1, "Stellar address is required"),
+  federation_address: z.string().optional().nullable(),
+  memo: z.string().optional().nullable(),
+  tags: z.array(z.string()).optional(),
+  groups: z.array(z.string()).optional(),
+});
+
+const contactSyncSchema = z.object({
+  groups: z.array(contactGroupSchema).optional().default([]),
+  contacts: z.array(contactItemSchema).optional().default([]),
 });
 
 // ─── events ───────────────────────────────────────────────────────────────────
@@ -408,6 +438,40 @@ const tokenPriceHistoryQuerySchema = z.object({
   range: z.enum(["7d", "30d", "90d"]).default("30d"),
 });
 
+// ─── notifications ───────────────────────────────────────────────────────────
+
+const NOTIF_EVENT_TYPES = [
+  "payment_received",
+  "escrow_released",
+  "stream_depleted",
+  "multisig_executed",
+  "tip_received",
+];
+
+/** POST /api/notifications/email */
+const registerEmailSchema = z.object({
+  publicKey: z
+    .string({ required_error: "publicKey is required" })
+    .regex(/^G[A-Z2-7]{55}$/, "Invalid Stellar public key format"),
+  email: z
+    .string({ required_error: "email is required" })
+    .email("Invalid email address format"),
+  events: z
+    .array(z.enum(NOTIF_EVENT_TYPES))
+    .optional()
+    .default(NOTIF_EVENT_TYPES),
+});
+
+/** PUT /api/notifications/email/:publicKey */
+const updateEmailSchema = z.object({
+  email: z.string().email("Invalid email address format").optional(),
+  events: z.array(z.enum(NOTIF_EVENT_TYPES)).optional(),
+});
+
+const emailEventsQuerySchema = z.object({
+  events: z.array(z.enum(NOTIF_EVENT_TYPES)).optional(),
+});
+
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -463,4 +527,10 @@ module.exports = {
   // tokens
   tokenContractIdParamSchema,
   tokenPriceHistoryQuerySchema,
+  // notifications
+  registerEmailSchema,
+  updateEmailSchema,
+  emailEventsQuerySchema,
+  // contacts
+  contactSyncSchema,
 };

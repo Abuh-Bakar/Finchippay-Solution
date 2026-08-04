@@ -16,6 +16,7 @@
 "use strict";
 
 const tipsService = require("../services/tipsService");
+const pushNotifier = require("../services/pushNotifier");
 const { buildPage, setPaginationHeaders } = require("../utils/paginate");
 
 // Extract the keyset cursor fields from a mapped tip record. `timestamp` holds
@@ -63,6 +64,19 @@ async function recordTip(req, res, next) {
       }
     } catch {
       // cache invalidation is best-effort
+    }
+
+    // Notify the creator's registered devices. Best-effort for the same reason
+    // as the cache invalidation above: the tip is already recorded, and a push
+    // failure must not turn a successful tip into an error for the sender.
+    try {
+      await pushNotifier.notifyTipReceived({
+        creatorPublicKey,
+        amount,
+        asset,
+      });
+    } catch {
+      // push delivery is best-effort
     }
 
     return res.status(201).json({
