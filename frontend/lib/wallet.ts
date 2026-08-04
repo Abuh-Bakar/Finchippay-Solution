@@ -56,32 +56,22 @@ export interface WalletState {
 
 export type SupportedBrowser = "chrome" | "firefox" | "other";
 
-/**
- * Detect the user's browser to surface the correct extension store link.
- */
 export function detectBrowser(): SupportedBrowser {
   if (typeof navigator === "undefined") return "other";
   const ua = navigator.userAgent;
   if (ua.includes("Firefox")) return "firefox";
-  // Chrome, Edge, Brave, Arc all include "Chrome" in UA
   if (ua.includes("Chrome")) return "chrome";
   return "other";
 }
 
 export const EXTENSION_URLS: Record<SupportedBrowser, string> = {
-  chrome:
-    "https://chrome.google.com/webstore/detail/freighter/bcacfldlkkdogcmkkibnjlakofdplcbk",
-  firefox:
-    "https://addons.mozilla.org/en-US/firefox/addon/freighter/",
+  chrome: "https://chrome.google.com/webstore/detail/freighter/bcacfldlkkdogcmkkibnjlakofdplcbk",
+  firefox: "https://addons.mozilla.org/en-US/firefox/addon/freighter/",
   other: "https://freighter.app",
 };
 
 // ─── Wallet detection ─────────────────────────────────────────────────────────
 
-/**
- * Check whether the Freighter extension is installed in the browser.
- * Returns false during SSR where `window` is undefined (#198).
- */
 export async function isFreighterInstalled(): Promise<boolean> {
   if (typeof window === "undefined") return false;
   try {
@@ -92,10 +82,6 @@ export async function isFreighterInstalled(): Promise<boolean> {
   }
 }
 
-/**
- * Check if this site has already been granted access by the user.
- * Returns false during SSR where `window` is undefined (#198).
- */
 export async function hasSiteAccess(): Promise<boolean> {
   if (typeof window === "undefined") return false;
   try {
@@ -108,29 +94,20 @@ export async function hasSiteAccess(): Promise<boolean> {
 
 // ─── Connect / Disconnect ────────────────────────────────────────────────────
 
-/**
- * Prompt the user to connect their Freighter wallet.
- * Returns the user's public key on success.
- */
 export async function connectWallet(): Promise<{
   publicKey: string | null;
   error: string | null;
 }> {
-  // 1. Check extension is installed
   const installed = await isFreighterInstalled();
   if (!installed) {
     return {
       publicKey: null,
-      error:
-        "Freighter wallet is not installed. Visit https://freighter.app to install it.",
+      error: "Freighter wallet is not installed. Visit https://freighter.app to install it.",
     };
   }
 
   try {
-    // 2. Request access from the user
     const access = await requestAccess();
-
-    // #199: check error field — denial does not throw, it returns {error}
     if (access.error) {
       return {
         publicKey: null,
@@ -138,9 +115,7 @@ export async function connectWallet(): Promise<{
       };
     }
 
-    // 3. Get the public key
     const publicKey = access.address || (await getAddress()).address;
-
     if (!publicKey) {
       return { publicKey: null, error: "No public key returned from Freighter." };
     }
@@ -148,27 +123,20 @@ export async function connectWallet(): Promise<{
     return { publicKey, error: null };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-
-    // User rejected the connection
     if (message.includes("User declined")) {
       return {
         publicKey: null,
         error: "Connection rejected. Please approve the connection in Freighter.",
       };
     }
-
     return { publicKey: null, error: `Wallet connection failed: ${message}` };
   }
 }
 
-/**
- * Get the currently connected public key (if any) without prompting.
- */
 export async function getConnectedPublicKey(): Promise<string | null> {
   try {
     const allowed = await hasSiteAccess();
     if (!allowed) return null;
-
     const { address } = await getAddress();
     return address || null;
   } catch {
@@ -178,12 +146,6 @@ export async function getConnectedPublicKey(): Promise<string | null> {
 
 // ─── SEP-0010 auth flow ──────────────────────────────────────────────────────
 
-/**
- * Full SEP-0010 authentication flow:
- * 1. Request a challenge transaction from the backend
- * 2. Sign it with Freighter
- * 3. Submit the signed transaction to receive a JWT
- */
 export async function performSEP0010Auth(
   publicKey: string
 ): Promise<{ token: string | null; error: string | null }> {
@@ -208,10 +170,6 @@ export async function performSEP0010Auth(
 
 // ─── Signing ─────────────────────────────────────────────────────────────────
 
-/**
- * Ask Freighter to sign a transaction XDR.
- * Returns the signed XDR string.
- */
 export async function signTransactionWithWallet(
   transactionXDR: string
 ): Promise<{ signedXDR: string | null; error: string | null }> {
@@ -222,34 +180,24 @@ export async function signTransactionWithWallet(
     const signed = await signTransaction(transactionXDR, {
       networkPassphrase: getNetworkPassphrase(),
     });
-
     if (signed.error) {
       throw new Error(signed.error.message || "Freighter signing failed");
     }
-
     return { signedXDR: signed.signedTxXdr, error: null };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-
     if (message.includes("User declined") || message.includes("rejected")) {
       return {
         signedXDR: null,
         error: "Transaction signing was rejected by the user.",
       };
     }
-
     return { signedXDR: null, error: `Signing failed: ${message}` };
   }
 }
 
 // ─── Encrypted local-data session ────────────────────────────────────────────
 
-/**
- * Derive the AES-GCM session key from the connected public key (+ stored salt)
- * and decrypt the local encrypted stores (contacts, payment templates) into
- * memory. Silent — no wallet prompt. Safe to call on every account change; a
- * different public key derives a different key, which drives key rotation.
- */
 export async function initEncryptionSession(publicKey: string): Promise<void> {
   if (typeof window === "undefined" || !publicKey) return;
   try {
@@ -266,10 +214,6 @@ export async function initEncryptionSession(publicKey: string): Promise<void> {
   }
 }
 
-/**
- * Re-encrypt the currently-decrypted local data under the active session key.
- * Used after a wallet switch to migrate ciphertext from the previous key.
- */
 export async function reEncryptLocalData(): Promise<void> {
   const key = getSessionKey();
   const owner = getSessionOwner();
@@ -281,14 +225,7 @@ export async function reEncryptLocalData(): Promise<void> {
   ]);
 }
 
-/**
- * Disconnect the wallet. Since Freighter doesn't provide a disconnect API,
- * this clears the local connection state. The actual disconnect happens
- * when the app's state is updated.
- */
 export function disconnectWallet(): void {
-  // Freighter doesn't expose an explicit disconnect API, so the app clears
-  // any local auth state and lets React own the connected wallet lifecycle.
   const rToken = typeof window !== "undefined" ? localStorage.getItem("finchippay_refresh_token") : null;
   const aToken = getJwtToken();
 
@@ -310,21 +247,4 @@ export function disconnectWallet(): void {
   clearAuthToken();
 }
 
-/**
- * Placeholder for Ledger support (not implemented in this version).
- */
-export const isLedgerSupported = async () => false;
-
-/**
- * Placeholder for Ledger signing.
- */
-export async function signTransactionWithLedger(xdr: string): Promise<{ signedXDR: string | null; error: string | null }> {
-  return { signedXDR: null, error: "Ledger support not implemented." };
-}
-
-/**
- * Placeholder for fetching Ledger public key.
- */
-export async function getLedgerPublicKey(): Promise<{ publicKey: string | null; error: string | null }> {
-  return { publicKey: null, error: "Ledger support not implemented." };
-}
+export { isLedgerSupported, signTransactionWithLedger, getLedgerPublicKey, connectLedger, disconnectLedger } from "./ledger";
