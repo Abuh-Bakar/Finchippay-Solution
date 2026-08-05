@@ -20,5 +20,8 @@
     "sdk",
     "api-client"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5"
+  }
 }

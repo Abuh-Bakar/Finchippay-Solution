@@ -13,8 +13,9 @@ if (process.env.npm_lifecycle_event !== "lint") {
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // Required for the production Docker image (copies only what's needed)
-  output: "export",
+  // Use static export for Docker/nginx deployments (set NEXT_OUTPUT=export).
+  // For Vercel, leave unset so SSR/ISR/API routes work.
+  ...(process.env.NEXT_OUTPUT === "export" ? { output: "export" } : {}),
   images: {
     deviceSizes: [640, 750, 828, 1080, 1200, 1920],
     imageSizes: [16, 32, 48, 64, 96, 128],

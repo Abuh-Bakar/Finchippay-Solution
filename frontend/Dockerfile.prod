@@ -9,6 +9,7 @@ RUN npm ci
 
 # Copy source code and build
 COPY . .
+ENV NEXT_OUTPUT=export
 RUN npm run build
 
 # Stage 2: Serve stage

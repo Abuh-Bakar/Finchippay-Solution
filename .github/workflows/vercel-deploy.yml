@@ -5,12 +5,13 @@
 #   1. Install Vercel CLI: npm i -g vercel
 #   2. Link project: vercel link
 #   3. Add secrets to GitHub:
-#      - VERCEL_TOKEN        (from https://vercel.com/account/tokens)
-#      - VERCEL_ORG_ID       (from .vercel/project.json)
-#      - VERCEL_PROJECT_ID   (from .vercel/project.json)
+#      - VERCEL_TOKEN           (from https://vercel.com/account/tokens)
+#      - VERCEL_ORG_ID          (from .vercel/project.json)
+#      - VERCEL_PROJECT_ID      (from .vercel/project.json)
+#      - NEXT_PUBLIC_SENTRY_DSN (optional, enables Sentry error reporting)
 #
 # This workflow deploys:
-#   - Production on push to main
+#   - Production on push to main (with health-gated promotion)
 #   - Preview on pull requests (comment with preview URL)
 
 name: Vercel Deploy
@@ -23,10 +24,9 @@ on:
 
 env:
   NODE_VERSION: '20.19.5'
-  HEALTH_CHECK_URL: 'https://finchippay.vercel.app/api/health'
-  STAGING_ALIAS: 'staging-${{ github.sha }}.finchippay.vercel.app'
 
 jobs:
+  # ─── Preview Deploy (on PR) ────────────────────────────────────────────────
   deploy-preview:
     name: Deploy Preview
     if: github.event_name == 'pull_request'
@@ -36,6 +36,20 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build SDK (workspace dependency)
+        run: npm run build:sdk
 
       - name: Install Vercel CLI
         run: npm install -g vercel@latest
@@ -53,6 +67,7 @@ jobs:
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.NEXT_PUBLIC_SENTRY_DSN || '' }}
 
       - name: Deploy Preview to Vercel
         id: deploy
@@ -75,6 +90,7 @@ jobs:
             > This preview will update automatically on new commits.
           comment-tag: vercel-preview
 
+  # ─── Production Deploy (on push to main) ────────────────────────────────────
   deploy-production:
     name: Deploy Production
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -86,14 +102,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
 
-      - name: Install Dependencies
+      - name: Install dependencies
         working-directory: frontend
         run: npm ci
+
+      - name: Build SDK (workspace dependency)
+        run: npm run build:sdk
 
       - name: Install Vercel CLI
         run: npm install -g vercel@latest
@@ -111,6 +132,7 @@ jobs:
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.NEXT_PUBLIC_SENTRY_DSN || '' }}
 
       - name: Deploy staging build
         id: staging-deploy
@@ -122,44 +144,34 @@ jobs:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
-      - name: Alias staging deployment
-        working-directory: frontend
-        run: |
-          vercel alias set ${{ steps.staging-deploy.outputs.staging_url }} ${{ env.STAGING_ALIAS }} --token=${{ secrets.VERCEL_TOKEN }}
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-
-      - name: Verify health endpoint
+      - name: Verify health endpoint on staging deployment
         id: health-check
         run: |
-          curl -fsS "${{ env.HEALTH_CHECK_URL }}" >/tmp/health.json
-          echo "health_ok=true" >> "$GITHUB_OUTPUT"
+          STAGING_URL="${{ steps.staging-deploy.outputs.staging_url }}"
+          echo "Checking health at ${STAGING_URL}/api/health ..."
+          HEALTH_OK=false
+          for i in $(seq 1 12); do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${STAGING_URL}/api/health")
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Health check passed (HTTP $HTTP_CODE)"
+              HEALTH_OK=true
+              break
+            fi
+            echo "Attempt $i/12: HTTP $HTTP_CODE — retrying in 5s..."
+            sleep 5
+          done
+          echo "health_ok=$HEALTH_OK" >> "$GITHUB_OUTPUT"
+          if [ "$HEALTH_OK" != "true" ]; then
+            echo "❌ Health check failed after 12 attempts"
+            echo "::warning::Staging deployment is live but was NOT promoted. Previous production deployment is still active."
+            exit 1
+          fi
 
       - name: Promote staging to production
         if: steps.health-check.outputs.health_ok == 'true'
         working-directory: frontend
         run: |
           vercel promote ${{ steps.staging-deploy.outputs.staging_url }} --token=${{ secrets.VERCEL_TOKEN }}
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-
-      - name: Roll back on failed health check
-        if: failure()
-        working-directory: frontend
-        run: |
-          echo "Health check failed; rolling back to the previous production deployment." 
-          vercel promote ${{ github.sha }} --token=${{ secrets.VERCEL_TOKEN }} || true
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-
-      - name: Cleanup staging alias
-        if: always()
-        working-directory: frontend
-        run: |
-          vercel alias rm ${{ env.STAGING_ALIAS }} --token=${{ secrets.VERCEL_TOKEN }} || true
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -171,14 +183,18 @@ jobs:
           script: |
             const status = '${{ job.status }}';
             const body = status === 'success'
-              ? 'Deployment completed successfully and was promoted to production.'
-              : 'Deployment failed or rolled back after the health check gate.';
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number || 1,
-              body
-            }).catch(() => {});
+              ? '✅ Deployment completed successfully and was promoted to production.'
+              : '❌ Deployment failed or was rolled back after the health check gate.';
+
+            // Only post if there's an associated PR
+            if (context.payload && context.payload.pull_request) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body,
+              });
+            }
 
       - name: Update GitHub Deployment Status
         if: always()

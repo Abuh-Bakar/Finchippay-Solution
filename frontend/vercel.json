@@ -42,6 +42,5 @@
       "destination": "/api/$1"
     }
   ],
-  "redirects": [],
-  "cleanUrls": true
+  "redirects": []
 }
