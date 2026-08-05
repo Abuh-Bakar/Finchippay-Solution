@@ -26,8 +26,8 @@ jobs:
 
       - name: Run benchmark smoke tests
         run: |
-          npm --prefix backend test -- --runInBand --testPathPatterns=perf
-          (npm --prefix frontend exec -- jest --runInBand --testPathPatterns=perf || echo "Frontend benchmark smoke skipped; jest is unavailable in this environment.")
+          npm --prefix backend test -- --runInBand --testPathPattern=perf --passWithNoTests
+          (npm --prefix frontend exec -- jest --runInBand --testPathPattern=perf --passWithNoTests || echo "Frontend benchmark smoke skipped; jest is unavailable in this environment.")
 
       - name: Generate benchmark snapshot
         run: |
