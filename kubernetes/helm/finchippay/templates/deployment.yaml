@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: {{ $name }}
-          image: {{ $cfg.image }}
+          image: "{{ $cfg.image.repository }}:{{ $cfg.image.tag }}"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: {{ $cfg.service.port }}

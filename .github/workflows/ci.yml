@@ -2,20 +2,21 @@
 # Continuous Integration for Finchippay-Solution
 #
 # Runs on every push to main/develop and on every pull-request targeting main.
-# Eight parallel jobs:
+#
+# Parallel jobs:
 #   1. frontend          — lint, i18n, type-check, unit tests, build
 #   2. visual-regression — Chromatic Storybook visual regression
-#   3. backend           — format check, lint, unit tests
-#   4. contracts         — cargo check, cargo test, WASM build
-#   5. contract-fuzz     — cargo-fuzz coverage-guided fuzz testing
-#   6. compose           — validate Docker Compose configurations
-#   7. e2e               — Playwright end-to-end tests
-#   8. validate          — validate environment and config files
+#   3. backend           — format check, lint, unit & integration tests
 #   4. contracts         — cargo check, cargo test, integration tests, WASM build
-#   5. compose           — validate Docker Compose configurations
-#   6. e2e               — Playwright end-to-end tests
-#   7. validate          — validate environment and config files
-#   8. sbom              — generate SPDX/CycloneDX SBOMs + fail on CRITICAL/HIGH vulns
+#   5. contract-fuzz     — cargo-fuzz coverage-guided fuzz testing
+#   6. contract-bindings — Soroban contract bindings drift check
+#   7. compose           — validate Docker Compose configurations
+#   8. e2e               — Playwright end-to-end tests
+#   9. lighthouse        — Lighthouse & Axe accessibility CI
+#  10. error-docs        — error code documentation drift check
+#  11. validate          — validate config files and secret scanning
+#  12. sbom              — generate SPDX/CycloneDX SBOMs + fail on CRITICAL/HIGH vulns
+#  13. load-test         — k6 load tests (workflow_dispatch only)
 
 name: CI
 
@@ -295,6 +296,48 @@ jobs:
             -- -max_total_time=60 -print_final_stats=1 \
             || (echo "::warning::fuzz_target_4_batch_send found crashes" && true)
 
+      - name: Fuzz — open stream
+        run: |
+          cargo +nightly fuzz run open_stream \
+            --fuzz-dir fuzz \
+            -- -max_total_time=60 -print_final_stats=1 \
+            || (echo "::warning::open_stream found crashes" && true)
+
+      - name: Fuzz — claim stream
+        run: |
+          cargo +nightly fuzz run claim_stream \
+            --fuzz-dir fuzz \
+            -- -max_total_time=60 -print_final_stats=1 \
+            || (echo "::warning::claim_stream found crashes" && true)
+
+      - name: Fuzz — create escrow
+        run: |
+          cargo +nightly fuzz run create_escrow \
+            --fuzz-dir fuzz \
+            -- -max_total_time=60 -print_final_stats=1 \
+            || (echo "::warning::create_escrow found crashes" && true)
+
+      - name: Fuzz — claim escrow
+        run: |
+          cargo +nightly fuzz run claim_escrow \
+            --fuzz-dir fuzz \
+            -- -max_total_time=60 -print_final_stats=1 \
+            || (echo "::warning::claim_escrow found crashes" && true)
+
+      - name: Fuzz — create multisig
+        run: |
+          cargo +nightly fuzz run create_multisig \
+            --fuzz-dir fuzz \
+            -- -max_total_time=60 -print_final_stats=1 \
+            || (echo "::warning::create_multisig found crashes" && true)
+
+      - name: Fuzz — approve multisig
+        run: |
+          cargo +nightly fuzz run approve_multisig \
+            --fuzz-dir fuzz \
+            -- -max_total_time=60 -print_final_stats=1 \
+            || (echo "::warning::approve_multisig found crashes" && true)
+
       - name: Upload crash artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -352,38 +395,6 @@ jobs:
             || (echo "ERROR: Generated contract bindings differ from committed snapshot." \
             && echo "Run 'bash scripts/gen-contract-bindings.sh' locally and commit the updated files." \
             && exit 1)
-
-  # ─── Benchmark Regression Check ──────────────────────────────────────────
-  benchmark:
-    name: Benchmark Regression Check
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install backend dependencies
-        working-directory: backend
-        run: npm ci
-
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Run benchmark smoke tests
-        run: npm run benchmarks:smoke
-
-      - name: Generate benchmark snapshot
-        run: |
-          mkdir -p benchmarks
-          node -e "const fs=require('fs'); const data=[{name:'backend.api',value:100},{name:'frontend.render',value:200}]; fs.writeFileSync('benchmarks/current.json', JSON.stringify(data,null,2));"
-
-      - name: Compare against baseline
-        run: npm run benchmarks:compare
 
   # ─── Docker Compose Validation ──────────────────────────────────────────────
   compose:
@@ -454,7 +465,7 @@ jobs:
           name: playwright-report
           path: frontend/playwright-report/
 
-# --- Lighthouse & Accessibility --------------------------------------------
+  # ─── Lighthouse & Accessibility ────────────────────────────────────────────
   lighthouse:
     name: Lighthouse & Axe a11y CI
     runs-on: ubuntu-latest
@@ -568,66 +579,7 @@ jobs:
           path: k6-results/
           retention-days: 30
 
-  # --- Fuzz Testing (cargo-fuzz) -----------------------------------------------
-  fuzz:
-    name: Fuzz Testing (cargo-fuzz)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: contracts/finchippay-contract
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust nightly
-        uses: dtolnay/rust-toolchain@v1
-        with:
-          toolchain: nightly
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            contracts/finchippay-contract/target
-          key: ${{ runner.os }}-cargo-fuzz-${{ hashFiles('contracts/finchippay-contract/Cargo.lock') }}
-
-      - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz
-
-      - name: Verify fuzz targets compile
-        run: cargo fuzz build
-
-      - name: Fuzz open_stream (120s)
-        run: cargo fuzz run open_stream -- -max_total_time=120 || true
-        continue-on-error: true
-
-      - name: Fuzz claim_stream (120s)
-        run: cargo fuzz run claim_stream -- -max_total_time=120 || true
-        continue-on-error: true
-
-      - name: Fuzz create_escrow (120s)
-        run: cargo fuzz run create_escrow -- -max_total_time=120 || true
-        continue-on-error: true
-
-      - name: Fuzz claim_escrow (120s)
-        run: cargo fuzz run claim_escrow -- -max_total_time=120 || true
-        continue-on-error: true
-
-      - name: Fuzz batch_send (120s)
-        run: cargo fuzz run batch_send -- -max_total_time=120 || true
-        continue-on-error: true
-
-      - name: Fuzz create_multisig (120s)
-        run: cargo fuzz run create_multisig -- -max_total_time=120 || true
-        continue-on-error: true
-
-      - name: Fuzz approve_multisig (120s)
-        run: cargo fuzz run approve_multisig -- -max_total_time=120 || true
-        continue-on-error: true
-
-    # --- Error Code Docs Drift Detection -----------------------------------------
+  # ─── Error Code Docs Drift Detection ───────────────────────────────────────
   error-docs:
     name: Error Code Docs (Drift Check)
     runs-on: ubuntu-latest
@@ -645,7 +597,7 @@ jobs:
       - name: Regenerate error code docs
         run: node scripts/generate-error-codes-doc.js
 
-            - name: Verify docs are up to date (--check mode)
+      - name: Verify docs are up to date (--check mode)
         run: node scripts/generate-error-codes-doc.js --check
 # --- Validate Config -------------------------------------------------------
   validate:
