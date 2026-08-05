@@ -22,7 +22,7 @@ name: Greptile AI Code Review
 
 on:
   pull_request:
-    types: [opened, ready_for_review, reopened]
+    types: [opened, ready_for_review, reopened, synchronize]
     branches: [main, develop]
   issues:
     types: [opened]
