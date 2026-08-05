@@ -1,0 +1,39 @@
+# CODEOWNERS — Auto-assign reviewers by project area
+#
+# When a PR modifies files in these paths, the listed owners are
+# automatically requested for review.
+#
+# Last matched pattern takes precedence.
+
+# ─── Smart Contracts ─────────────────────────────────────────────────────────
+contracts/**                              @FinChippay/contract-reviewers
+
+# ─── Backend ─────────────────────────────────────────────────────────────────
+backend/src/**                            @FinChippay/backend-reviewers
+backend/migrations/**                     @FinChippay/backend-reviewers
+
+# ─── Frontend ─────────────────────────────────────────────────────────────────
+frontend/pages/**                         @FinChippay/frontend-reviewers
+frontend/components/**                    @FinChippay/frontend-reviewers
+frontend/lib/**                           @FinChippay/frontend-reviewers
+
+# ─── Infrastructure & DevOps ─────────────────────────────────────────────────
+terraform/**                              @FinChippay/infra-reviewers
+kubernetes/**                             @FinChippay/infra-reviewers
+.github/workflows/**                      @FinChippay/infra-reviewers
+docker-compose*.yml                       @FinChippay/infra-reviewers
+nginx/**                                  @FinChippay/infra-reviewers
+
+# ─── SDK ────────────────────────────────────────────────────────────────────
+sdk/**                                    @FinChippay/backend-reviewers
+
+# ─── Shared ─────────────────────────────────────────────────────────────────
+shared/**                                 @FinChippay/backend-reviewers
+
+# ─── Documentation ───────────────────────────────────────────────────────────
+docs/**                                   @FinChippay/frontend-reviewers @FinChippay/backend-reviewers
+*.md                                      @FinChippay/frontend-reviewers @FinChippay/backend-reviewers
+
+# ─── Security (all areas) ───────────────────────────────────────────────────
+SECURITY.md                               @FinChippay/infra-reviewers
+.greptile/**                              @FinChippay/infra-reviewers

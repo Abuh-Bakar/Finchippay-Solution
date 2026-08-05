@@ -22,10 +22,23 @@
     "lint": "npm run lint --workspace=frontend",
     "type-check": "npm run type-check --workspace=sdk --workspace=frontend",
     "test": "npm run test --workspace=frontend",
-    "docs:errors": "node scripts/generate-error-codes-doc.js",
-    "docs:errors:check": "node scripts/generate-error-codes-doc.js --check"
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx}": [
+      "npx prettier --write",
+      "npx eslint --fix --max-warnings 0"
+    ],
+    "*.{json,md,yaml,yml}": [
+      "npx prettier --write"
+    ],
+    "*.rs": [
+      "rustfmt --edition 2021"
+    ]
   },
   "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^17.3.0",
     "openapi-typescript": "^7.0.0"
   },
   "dependencies": {
