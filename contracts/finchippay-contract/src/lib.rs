@@ -760,7 +760,8 @@ pub(crate) fn get_admin_signers(env: &Env) -> Vec<Address> {
 }
 
 /// Validate a proposed admin signer set + threshold. Shared by `initialize`
-/// and `set_admin_signers` so both enforce the same invariants: a non-empty,
+/// and the `set_admin_signers` admin action so both enforce the same
+/// invariants: a non-empty,
 /// duplicate-free signer list no longer than `MAX_ADMIN_SIGNERS`, and a
 /// threshold in `1..=signers.len()`.
 pub(crate) fn validate_admin_signers(signers: &Vec<Address>, threshold: u32) {
