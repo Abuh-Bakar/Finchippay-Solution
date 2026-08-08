@@ -3430,11 +3430,72 @@ mod tests {
         let pauser = Address::generate(&env);
         env.mock_all_auths();
 
-        client.propose_admin_action(&admin, &AdminAction::SetPauser(pauser.clone()));
+        let data: Vec<Val> = Vec::from_array(&env, [pauser.clone().into_val(&env)]);
+        client.propose_admin_action(&admin, &Symbol::new(&env, "set_pauser"), &data);
         // The pauser must not be able to propose swapping the contract WASM
         // — it is not part of the admin signer set.
         let dummy_hash = BytesN::from_array(&env, &[0u8; 32]);
-        client.propose_admin_action(&pauser, &AdminAction::Upgrade(dummy_hash, 1));
+        let data: Vec<Val> =
+            Vec::from_array(&env, [dummy_hash.into_val(&env), 1u32.into_val(&env)]);
+        client.propose_admin_action(&pauser, &Symbol::new(&env, "upgrade"), &data);
+    }
+
+    #[test]
+    fn test_set_admin_signers_action_auto_executes_at_threshold_one() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let signer_b = Address::generate(&env);
+        env.mock_all_auths();
+
+        let mut signers = Vec::new(&env);
+        signers.push_back(admin.clone());
+        signers.push_back(signer_b);
+        let data: Vec<Val> = Vec::from_array(
+            &env,
+            [signers.into_val(&env), 2u32.into_val(&env)],
+        );
+        let pid = client.propose_admin_action(
+            &admin,
+            &Symbol::new(&env, "set_admin_signers"),
+            &data,
+        );
+
+        // Threshold-1 deploy auto-executes the rotation on propose.
+        assert!(client.get_admin_action_proposal(&pid).executed);
+        assert_eq!(client.get_admin_signers().len(), 2);
+        assert_eq!(client.get_admin_signers_threshold(), 2);
+    }
+
+    #[test]
+    fn test_set_admin_signers_requires_threshold_approvals() {
+        let env = Env::default();
+        let signer_a = Address::generate(&env);
+        let signer_b = Address::generate(&env);
+        let signers = vec![&env, signer_a.clone(), signer_b.clone()];
+        let (_id, client) = deploy_multisig(&env, &signers, 2);
+        let new_signer = Address::generate(&env);
+        env.mock_all_auths();
+
+        // One signer proposes a rotation — must stay pending at threshold 2.
+        let mut proposed = Vec::new(&env);
+        proposed.push_back(signer_a.clone());
+        proposed.push_back(new_signer);
+        let data: Vec<Val> = Vec::from_array(&env, [proposed.into_val(&env), 2u32.into_val(&env)]);
+        let pid = client.propose_admin_action(
+            &signer_a,
+            &Symbol::new(&env, "set_admin_signers"),
+            &data,
+        );
+        assert!(!client.get_admin_action_proposal(&pid).executed);
+        assert_eq!(client.get_admin_signers().len(), 2);
+        assert_eq!(client.get_admin_signers_threshold(), 2);
+
+        // The second signer's approval reaches the threshold and executes.
+        client.approve_admin_action(&pid, &signer_b);
+        assert!(client.get_admin_action_proposal(&pid).executed);
+        assert_eq!(client.get_admin_signers().len(), 2);
+        assert_eq!(client.get_admin_signers_threshold(), 2);
     }
 
     // ── Batch send ─────────────────────────────────────────────────────────
