@@ -1022,18 +1022,17 @@ impl FinchippayContract {
     /// `approve_admin_action` if the threshold is greater than 1) instead.
     pub fn pause(env: Env, caller: Address) {
         caller.require_auth();
-        let stored_admin = get_admin(&env);
+        // Only the designated pauser may trigger the circuit breaker directly
+        // (fast hot-key path). Admin-initiated pausing goes through
+        // `propose_admin_action`, so no single key can freeze the contract.
         let stored_pauser: Option<Address> = env.storage().persistent().get(&DataKey::Pauser);
-        let is_pauser = stored_pauser
-            .as_ref()
-            .map(|p| p == &caller)
-            .unwrap_or(false);
-        if caller != stored_admin && !is_pauser {
+        if stored_pauser.as_ref().map(|p| p == &caller).unwrap_or(false) {
+            env.storage().persistent().set(&DataKey::Paused, &true);
+            bump_to_floor(&env, &DataKey::Paused);
+            env.events().publish((Symbol::new(&env, "paused"),), ());
+        } else {
             panic!("Unauthorized");
         }
-        env.storage().persistent().set(&DataKey::Paused, &true);
-        bump_to_floor(&env, &DataKey::Paused);
-        env.events().publish((Symbol::new(&env, "paused"),), ());
     }
 
     /// Resume all value-transferring operations.
