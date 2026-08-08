@@ -4742,7 +4742,13 @@ mod tests {
         for _ in 1..num_signers {
             signers.push_back(Address::generate(env));
         }
-        client.set_admin_signers(&admin, &signers, &threshold);
+        // Rotate the signer set through the multi-sig path (threshold-1 deploy
+        // auto-executes on propose).
+        let data: Vec<Val> = Vec::from_array(
+            env,
+            [signers.clone().into_val(env), threshold.into_val(env)],
+        );
+        client.propose_admin_action(&admin, &Symbol::new(env, "set_admin_signers"), &data);
 
         (id, client, token_id, signers)
     }
