@@ -2880,13 +2880,13 @@ mod tests {
         assert!(!client.is_paused());
 
         // A single proposal from one signer is not enough to execute at threshold 2.
-        let proposal_id = client.propose_admin_action(&signer_a, &AdminAction::Pause);
+        let proposal_id =
+            client.propose_admin_action(&signer_a, &Symbol::new(&env, "pause"), &Vec::new(&env));
         assert!(!client.get_admin_action_proposal(&proposal_id).executed);
         assert!(!client.is_paused());
 
         // A second signer's approval reaches the threshold and auto-executes.
-        let executed = client.approve_admin_action(&proposal_id, &signer_b);
-        assert!(executed);
+        client.approve_admin_action(&proposal_id, &signer_b);
         assert!(client.is_paused());
         assert!(client.get_admin_action_proposal(&proposal_id).executed);
 
