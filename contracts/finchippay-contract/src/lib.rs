@@ -3331,7 +3331,7 @@ mod tests {
         let to = Address::generate(&env);
         env.mock_all_auths();
         let token_id = create_token(&env, &admin, &from, 2000);
-        client.propose_admin_action(&admin, &AdminAction::Pause);
+        client.propose_admin_action(&admin, &Symbol::new(&env, "pause"), &Vec::new(&env));
         let release = env.ledger().sequence() + 10;
         let memo = Symbol::new(&env, "test");
         client.create_escrow(&token_id, &from, &to, &2000, &release, &memo);
