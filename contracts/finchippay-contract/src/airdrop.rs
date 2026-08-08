@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Bytes, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{contracttype, xdr::ToXdr, Address, Bytes, BytesN, Env, Symbol, Vec};
 
 use crate::DataKey;
 
@@ -17,16 +17,16 @@ pub struct MerkleAirdrop {
 
 fn hash_pair(env: &Env, left: &BytesN<32>, right: &BytesN<32>) -> BytesN<32> {
     let mut combined = Bytes::new(env);
-    combined.append(&left.clone().into());
-    combined.append(&right.clone().into());
-    env.crypto().sha256(&combined)
+    combined.append(&left.clone().to_xdr(env));
+    combined.append(&right.clone().to_xdr(env));
+    env.crypto().sha256(&combined).into()
 }
 
 fn hash_leaf(env: &Env, recipient: &Address, amount: i128) -> BytesN<32> {
     let mut data = Bytes::new(env);
-    data.append(&recipient.clone().into());
+    data.append(&recipient.clone().to_xdr(env));
     data.append(&Bytes::from_slice(env, &amount.to_be_bytes()));
-    env.crypto().sha256(&data)
+    env.crypto().sha256(&data).into()
 }
 
 pub fn verify_merkle_proof(
@@ -155,9 +155,10 @@ pub fn claim_airdrop(
     env.storage()
         .persistent()
         .set(&DataKey::Airdrop(airdrop_id), &airdrop);
-    env.storage()
-        .persistent()
-        .set(&DataKey::AirdropClaimed(airdrop_id, recipient.clone()), &true);
+    env.storage().persistent().set(
+        &DataKey::AirdropClaimed(airdrop_id, recipient.clone()),
+        &true,
+    );
 
     env.events().publish(
         (Symbol::new(env, "airdrop_claimed"), airdrop_id),
