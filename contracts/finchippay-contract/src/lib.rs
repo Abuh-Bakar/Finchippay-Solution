@@ -915,10 +915,11 @@ impl FinchippayContract {
     ///
     /// `admin_signers` must be non-empty, contain no duplicates, and have at
     /// most `MAX_ADMIN_SIGNERS` entries. `threshold` must be between 1 and
-    /// `admin_signers.len()`. `pause`, `unpause`, `set_pauser`, `upgrade`,
-    /// and `rescue_tokens` all require `threshold` approvals from this
-    /// signer set (via `propose_admin_action` / `approve_admin_action`)
-    /// rather than a single admin signature.
+    /// `admin_signers.len()`. `pause`, `unpause`, `set_pauser`,
+    /// `set_admin_signers`, `upgrade`, and `rescue_tokens` all require
+    /// `threshold` approvals from this signer set (via
+    /// `propose_admin_action` / `approve_admin_action`) rather than a single
+    /// admin signature.
     ///
     /// The first signer is also stored as the legacy single `Admin` address
     /// for read-only convenience (`get_admin`) and for `transfer_admin`; it
