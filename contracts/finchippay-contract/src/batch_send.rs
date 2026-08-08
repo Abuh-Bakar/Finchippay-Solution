@@ -6,13 +6,18 @@
 
 use soroban_sdk::{token, Address, Env, Symbol, Map, Vec};
 
+use soroban_sdk::{token, Address, Env, Symbol, Map, Vec};
+
 use crate::storage;
 use crate::{
-    ContractError, DataKey, TipRecord, MAX_BATCH_SIZE,
+    contract_transfer_out, ContractError, DataKey, get_contract_balance,
+    get_token_client, increase_locked_balance, locked_balance, MAX_BATCH_SIZE,
+    MAX_VESTING_AMOUNT, MAX_VESTING_DURATION_LEDGERS, require_initialized,
+    require_not_paused, require_transfer_succeeded, set_contract_balance,
+    SwapItem, TipRecord, TokenTotal, VestingSchedule,
 };
 
 use crate::storage::*;
-
     // ─── Batch send ───────────────────────────────────────────────────────────
 
     /// Fan-out a single token transfer from `from` to multiple `recipients` in
@@ -486,10 +491,3 @@ use crate::storage::*;
             claimable
         }
     }
-
-    // ─── Swap / DEX ─────────────────────────────────────────────────────────
-
-    /// Admin: designate the address that receives protocol swap fees.
-    /// Defaults to the admin address if never called.
-    pub fn set_fee_collector(
-        env: Env,

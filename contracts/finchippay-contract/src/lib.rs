@@ -1,13 +1,5 @@
 #![no_std]
 //! # FinchippayContract — Soroban Smart Contract
-
-pub mod storage;
-pub mod airdrop;
-pub mod yield_escrow;
-pub mod escrow;
-pub mod streams;
-pub mod multi_sig;
-pub mod batch_send;
 //!
 //! A production-grade Soroban contract for the Finchippay-Solution platform on
 //! the Stellar network. Provides:
@@ -39,6 +31,14 @@ pub mod batch_send;
 //!   deploy security patches without migrating state.
 //! - **Bounded inputs**: escrow release ledgers, stream deposits, and
 //!   multi-sig amounts are capped to prevent griefing and permanent lock-up.
+
+pub mod storage;
+pub mod airdrop;
+pub mod yield_escrow;
+pub mod escrow;
+pub mod streams;
+pub mod multi_sig;
+pub mod batch_send;
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Symbol, Val, Vec,
@@ -2068,46 +2068,56 @@ impl FinchippayContract {
         memo: Symbol,
     ) -> Result<u32, ContractError> {
         escrow::create_escrow(env, token_address, from, to, amount, release_ledger, memo)
+    }
 
     /// Claim a partial amount from the escrow. The caller must be the
     /// escrow recipient and the release ledger must have passed.
     /// Returns the remaining escrow amount after the partial claim.
     pub fn claim_escrow_partial(env: Env, id: u32, claim_amount: i128) -> i128 {
         escrow::claim_escrow_partial(env, id, claim_amount)
+    }
 
     /// Return the list of escrow IDs associated with a recipient address.
     pub fn get_user_escrows(env: Env, recipient: Address) -> Vec<u32> {
         escrow::get_user_escrows(env, recipient)
+    }
 
     /// Recipient claims the escrowed funds after `release_ledger` has passed.
     pub fn claim_escrow(env: Env, id: u32) {
         escrow::claim_escrow(env, id)
+    }
 
     /// Payer cancels the escrow before `release_ledger`; funds are returned.
     pub fn cancel_escrow(env: Env, id: u32) {
         escrow::cancel_escrow(env, id)
+    }
 
     pub fn get_escrow(env: Env, id: u32) -> Result<Escrow, ContractError> {
         escrow::get_escrow(env, id)
+    }
 
     /// Return the total number of escrows ever created.
     pub fn get_escrow_count(env: Env) -> u32 {
         escrow::get_escrow_count(env)
+    }
 
     /// Stable alias for `get_escrow_count`. Provides a consistent SDK
     /// binding for dashboard and analytics consumers.
     pub fn escrow_count(env: Env) -> u32 {
         escrow::escrow_count(env)
+    }
 
     // ─── Dispute resolution ──────────────────────────────────────────────────
 
     /// Admin: add an arbitrator to the global arbitrator list.
     pub fn add_arbitrator(env: Env, admin: Address, arbitrator: Address) {
         escrow::add_arbitrator(env, admin, arbitrator)
+    }
 
     /// Admin: remove an arbitrator from the global arbitrator list.
     pub fn remove_arbitrator(env: Env, admin: Address, arbitrator: Address) {
         escrow::remove_arbitrator(env, admin, arbitrator)
+    }
 
     /// Create a disputable escrow with a designated arbitrator.
     /// Same as create_escrow but allows dispute resolution.
@@ -2121,11 +2131,13 @@ impl FinchippayContract {
         arbitrator: Address,
     ) -> Result<u32, ContractError> {
         escrow::create_disputable_escrow(env, token_address, from, to, amount, release_ledger, arbitrator)
+    }
 
     /// Raise a dispute on a disputable escrow. Only the sender or recipient
     /// can raise a dispute.
     pub fn raise_dispute(env: Env, escrow_id: u32, by: Address) {
         escrow::raise_dispute(env, escrow_id, by)
+    }
 
     /// Resolve a dispute. Only the designated arbitrator can call this.
     /// Resolution types: "release" (to recipient), "refund" (to sender),
@@ -2139,10 +2151,12 @@ impl FinchippayContract {
         amount: i128,
     ) {
         escrow::resolve_dispute(env, escrow_id, arbitrator, resolution, to, amount)
+    }
 
     /// Return the list of registered arbitrators.
     pub fn get_arbitrators(env: Env) -> Vec<Address> {
         escrow::get_arbitrators(env)
+    }
 
     // ─── Streaming payments ───────────────────────────────────────────────────
 
@@ -2159,6 +2173,7 @@ impl FinchippayContract {
         deposit: i128,
     ) -> u32 {
         streams::open_stream(env, token_address, payer, recipient, rate_per_ledger, deposit)
+    }
 
     /// Recipient claims all currently claimable tokens from stream `id`.
     ///
@@ -2166,10 +2181,12 @@ impl FinchippayContract {
     /// progresses; the running `claimed` counter prevents double-claiming.
     pub fn claim_stream(env: Env, stream_id: u32, recipient: Address) -> i128 {
         streams::claim_stream(env, stream_id, recipient)
+    }
 
     /// Payer adds `amount` more tokens to an existing open stream.
     pub fn top_up_stream(env: Env, stream_id: u32, payer: Address, amount: i128) {
         streams::top_up_stream(env, stream_id, payer, amount)
+    }
 
     /// Payer closes the stream early. Any unclaimed streamed tokens are sent to
     /// the recipient first; the remainder is refunded to the payer.
@@ -2177,6 +2194,7 @@ impl FinchippayContract {
     /// Returns the refund amount sent back to the payer.
     pub fn close_stream(env: Env, stream_id: u32, payer: Address) -> i128 {
         streams::close_stream(env, stream_id, payer)
+    }
 
     /// Recipient rejects an open stream. Any accrued-but-unclaimed tokens are
     /// sent to the recipient first; the remainder is refunded to the payer.
@@ -2186,6 +2204,7 @@ impl FinchippayContract {
     /// Returns the refund amount sent back to the payer.
     pub fn reject_stream(env: Env, stream_id: u32, recipient: Address) -> i128 {
         streams::reject_stream(env, stream_id, recipient)
+    }
 
     /// Allow a stream recipient to transfer their incoming stream to a new
     /// recipient address. The original recipient must authorise this call.
@@ -2198,27 +2217,33 @@ impl FinchippayContract {
         new_recipient: Address,
     ) {
         streams::transfer_stream(env, stream_id, current_recipient, new_recipient)
+    }
 
     /// Return the stream record for `stream_id`.
     pub fn get_stream(env: Env, stream_id: u32) -> Result<Stream, ContractError> {
         streams::get_stream(env, stream_id)
+    }
 
     /// Calculate how much the recipient could claim right now without mutating state.
     pub fn get_claimable(env: Env, stream_id: u32) -> i128 {
         streams::get_claimable(env, stream_id)
+    }
 
     /// Return the total number of streams ever opened.
     pub fn get_stream_count(env: Env) -> u32 {
         streams::get_stream_count(env)
+    }
 
     /// Stable alias for `get_stream_count`. Generates a consistent SDK
     /// binding name that will not change across contract upgrades, making
     /// dashboard and analytics integrations resilient to internal refactors.
     pub fn stream_count(env: Env) -> u32 {
         streams::stream_count(env)
+    }
 
     pub fn list_streams_by_payer(env: Env, payer: Address, offset: u32, limit: u32) -> Vec<Stream> {
         streams::list_streams_by_payer(env, payer, offset, limit)
+    }
 
     pub fn list_escrows_by_recipient(
         env: Env,
@@ -2227,6 +2252,7 @@ impl FinchippayContract {
         limit: u32,
     ) -> Vec<Escrow> {
         streams::list_escrows_by_recipient(env, recipient, offset, limit)
+    }
 
     // Internal: compute claimable amount for a stream at the current ledger.
     pub(crate) fn _claimable(env: &Env, stream: &Stream) -> i128 {
@@ -2254,34 +2280,41 @@ impl FinchippayContract {
         expiration_ledger: u32,
     ) -> u32 {
         multi_sig::create_multisig(env, token_address, proposer, recipient, amount, threshold, signers, expiration_ledger)
+    }
 
     /// A signer approves proposal `id`. If the approval count reaches `threshold`
     /// the payment is executed immediately within this call.
     pub fn approve_multisig(env: Env, proposal_id: u32, signer: Address) {
         multi_sig::approve_multisig(env, proposal_id, signer)
+    }
 
     /// Anyone can call this to close an expired multi-sig proposal and refund
     /// the proposer. This prevents funds from being locked forever if signers
     /// abandon a proposal.
     pub fn timeout_multisig(env: Env, proposal_id: u32) {
         multi_sig::timeout_multisig(env, proposal_id)
+    }
 
     /// The proposer cancels the proposal before execution; funds are refunded.
     pub fn cancel_multisig(env: Env, proposal_id: u32, proposer: Address) {
         multi_sig::cancel_multisig(env, proposal_id, proposer)
+    }
 
     /// Return the multi-sig proposal for `proposal_id`.
     pub fn get_multisig(env: Env, proposal_id: u32) -> Result<MultiSigProposal, ContractError> {
         multi_sig::get_multisig(env, proposal_id)
+    }
 
     /// Return total number of multi-sig proposals ever created.
     pub fn get_multisig_count(env: Env) -> u32 {
         multi_sig::get_multisig_count(env)
+    }
 
     /// Stable alias for `get_multisig_count`. Provides a consistent SDK
     /// binding for dashboard and analytics consumers.
     pub fn multisig_count(env: Env) -> u32 {
         multi_sig::multisig_count(env)
+    }
 
     // ─── Diagnostic helpers ───────────────────────────────────────────────────
 
@@ -2290,6 +2323,7 @@ impl FinchippayContract {
     /// multisig_count).
     pub fn get_contract_stats(env: Env) -> (u32, u32, u32) {
         batch_send::get_contract_stats(env, u32, u32)
+    }
 
     // ─── Batch send ───────────────────────────────────────────────────────────
 
@@ -2311,7 +2345,8 @@ impl FinchippayContract {
         amounts: Vec<i128>,
         memos: Vec<Symbol>,
     ) -> Result<(), ContractError> {
-        batch_send::batch_send(env, token_address, from, recipients, amounts, memos, Result<()
+        batch_send::batch_send(env, token_address, from, recipients, amounts, memos)
+    }
 
     /// Fan-out multi-token transfers from `from` to multiple `recipients` in
     /// one transaction. `recipients[i]` receives `amounts[i]` of `tokens[i]` with memo `memos[i]`.
@@ -2332,7 +2367,8 @@ impl FinchippayContract {
         amounts: Vec<i128>,
         memos: Vec<Symbol>,
     ) -> Result<(), ContractError> {
-        batch_send::batch_send_multi(env, from, tokens, recipients, amounts, memos, Result<()
+        batch_send::batch_send_multi(env, from, tokens, recipients, amounts, memos)
+    }
 
     /// Estimate total amounts per token for a batch of swap items.
     ///
@@ -2341,6 +2377,7 @@ impl FinchippayContract {
     /// and returns aggregated totals for each token present in `swaps`.
     pub fn estimate_batch_swap_totals(env: Env, swaps: Vec<SwapItem>) -> Vec<TokenTotal> {
         batch_send::estimate_batch_swap_totals(env, swaps)
+    }
 
     pub fn create_vesting(
         env: Env,
@@ -2352,18 +2389,23 @@ impl FinchippayContract {
         end_ledger: u32,
     ) -> u32 {
         batch_send::create_vesting(env, token, from, beneficiary, amount, cliff_ledger, end_ledger)
+    }
 
     pub fn claim_vesting(env: Env, id: u32, beneficiary: Address) -> i128 {
         batch_send::claim_vesting(env, id, beneficiary)
+    }
 
     pub fn revoke_vesting(env: Env, id: u32, admin: Address) {
         batch_send::revoke_vesting(env, id, admin)
+    }
 
     pub fn get_vesting(env: Env, id: u32) -> VestingSchedule {
         batch_send::get_vesting(env, id)
+    }
 
     pub fn get_claimable_vesting(env: Env, id: u32) -> i128 {
         batch_send::get_claimable_vesting(env, id)
+    }
 
     // ─── Swap / DEX ─────────────────────────────────────────────────────────
 
