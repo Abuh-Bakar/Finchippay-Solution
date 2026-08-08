@@ -5132,7 +5132,9 @@ mod tests {
         env.mock_all_auths();
 
         let dummy_hash = BytesN::from_array(&env, &[1u8; 32]);
-        client.propose_admin_action(&admin, &AdminAction::Upgrade(dummy_hash, 0));
+        let data: Vec<Val> =
+            Vec::from_array(&env, [dummy_hash.into_val(&env), 0u32.into_val(&env)]);
+        client.propose_admin_action(&admin, &Symbol::new(&env, "upgrade"), &data);
     }
 
     // ==================== Storage TTL Tests ====================
