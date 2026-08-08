@@ -1,5 +1,4 @@
 /**
-import { logger } from "@/lib/logger";
  * components/TradeForm.tsx
  *
  * Token swap interface with Stellar path-payment support (Issue #249).
@@ -15,6 +14,7 @@ import { logger } from "@/lib/logger";
  * - Confirmation modal before signing
  */
 
+import { logger } from "@/lib/logger";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Asset } from "@stellar/stellar-sdk";
 import {

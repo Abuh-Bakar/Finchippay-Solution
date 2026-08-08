@@ -1,9 +1,9 @@
 /**
-import { logger } from "@/lib/logger";
  * components/TransactionList.tsx
  * Displays paginated payment history for a Stellar account.
  */
 
+import { logger } from "@/lib/logger";
 import { useState, useEffect, useCallback, useRef, useReducer } from "react";
 import { useRouter } from "next/router";
 import { useTranslation } from "react-i18next";
