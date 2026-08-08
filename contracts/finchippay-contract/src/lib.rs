@@ -1119,11 +1119,24 @@ impl FinchippayContract {
             .persistent()
             .set(&DataKey::AdminActionCount, &counter);
         bump(&env, &DataKey::AdminActionCount);
-
         env.events().publish(
             (Symbol::new(&env, "admin_action_proposed"),),
-            (counter, action_type, proposer),
+            (counter, action_type.clone(), proposer.clone()),
         );
+
+        // Threshold 1: the proposer's recorded approval already meets it.
+        if threshold == 1 {
+            proposal.executed = true;
+            env.storage()
+                .persistent()
+                .set(&DataKey::AdminActionProposal(counter), &proposal);
+            bump(&env, &DataKey::AdminActionProposal(counter));
+            env.events().publish(
+                (Symbol::new(&env, "admin_action_approved"),),
+                (counter, proposer, 1u32, threshold),
+            );
+            Self::execute_admin_action(&env, &proposal);
+        }
 
         counter
     }
