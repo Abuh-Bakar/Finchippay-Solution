@@ -1198,7 +1198,11 @@ fn test_initiate_emergency_withdrawal() {
     let mut signers = Vec::new(&env);
     signers.push_back(admin.clone());
     signers.push_back(signer2.clone());
-    client.set_admin_signers(&admin, &signers, &2);
+    // Rotate to a 2-of-2 signer set via the multi-sig path (threshold-1 deploy
+    // auto-executes on propose).
+    let data: Vec<Val> =
+        Vec::from_array(&env, [signers.into_val(&env), 2u32.into_val(&env)]);
+    client.propose_admin_action(&admin, &Symbol::new(&env, "set_admin_signers"), &data);
 
     let token_id = create_token(&env, &admin, &contract_id, 5_000);
 
