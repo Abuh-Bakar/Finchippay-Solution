@@ -3,6 +3,8 @@
  * Authentication helpers for API calls.
  */
 
+import { logger } from "@/lib/logger";
+
 let inMemoryAccessToken: string | null = null;
 let refreshPromise: Promise<string | null> | null = null;
 
@@ -68,7 +70,7 @@ async function performRefresh(): Promise<string | null> {
       }
     }
   } catch (err) {
-    console.error("Token refresh failed:", err);
+    logger.error("Token refresh failed", { apiUrl: API_URL }, err instanceof Error ? err : new Error(String(err)));
   }
 
   clearJwtToken();
@@ -182,7 +184,7 @@ export async function getSessions(): Promise<SessionInfo[]> {
       return data.sessions || [];
     }
   } catch (err) {
-    console.error("Failed to fetch sessions:", err);
+    logger.error("Failed to fetch sessions", {}, err instanceof Error ? err : undefined);
   }
   return [];
 }
@@ -207,7 +209,7 @@ export async function revokeSession(sessionId: number | string): Promise<boolean
       return Boolean(data.success);
     }
   } catch (err) {
-    console.error("Failed to revoke session:", err);
+    logger.error("Failed to revoke session", { sessionId: String(sessionId) }, err instanceof Error ? err : undefined);
   }
   return false;
 }
@@ -232,7 +234,7 @@ export async function revokeAllSessions(): Promise<boolean> {
       return true;
     }
   } catch (err) {
-    console.error("Failed to revoke all sessions:", err);
+    logger.error("Failed to revoke all sessions", {}, err instanceof Error ? err : undefined);
   }
   return false;
 }

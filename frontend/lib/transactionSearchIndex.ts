@@ -3,6 +3,7 @@
  * IndexedDB utilities for persisting transaction search index
  */
 
+import { logger } from "@/lib/logger";
 import { PaymentRecord } from "./stellar";
 
 const DB_NAME = "FinChippayDB";
@@ -139,7 +140,7 @@ export async function saveIndexedDB(
 
     db.close();
   } catch (error) {
-    console.error("Failed to save search index to IndexedDB:", error);
+    logger.error("Failed to save search index to IndexedDB", {}, error instanceof Error ? error : undefined);
   }
 }
 
@@ -179,7 +180,7 @@ export async function loadIndexedDB(): Promise<Map<string, string[]> | null> {
       };
     });
   } catch (error) {
-    console.error("Failed to load search index from IndexedDB:", error);
+    logger.error("Failed to load search index from IndexedDB", {}, error instanceof Error ? error : undefined);
     return null;
   }
 }
@@ -202,7 +203,7 @@ export async function clearIndexedDB(): Promise<void> {
       clearReq.onerror = () => reject(clearReq.error);
     });
   } catch (error) {
-    console.error("Failed to clear search index:", error);
+    logger.error("Failed to clear search index", {}, error instanceof Error ? error : undefined);
   }
 }
 
@@ -224,7 +225,7 @@ export async function getIndexMetadata(): Promise<TransactionIndexMetadata | nul
       getReq.onerror = () => reject(getReq.error);
     });
   } catch (error) {
-    console.error("Failed to get index metadata:", error);
+    logger.error("Failed to get index metadata", {}, error instanceof Error ? error : undefined);
     return null;
   }
 }

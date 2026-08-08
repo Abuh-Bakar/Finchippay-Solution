@@ -1,3 +1,5 @@
+import { logger } from "@/lib/logger";
+
 /**
  * lib/notifications.ts
  * Helper functions for web push notifications.
@@ -55,7 +57,7 @@ export async function subscribeToPush(publicKey: string): Promise<boolean> {
     await saveSubscription(publicKey, subscription);
     return true;
   } catch (err) {
-    console.error("Failed to subscribe to push", err);
+    logger.error("Failed to subscribe to push", {}, err instanceof Error ? err : undefined);
     return false;
   }
 }
@@ -88,7 +90,7 @@ export async function unsubscribePush(publicKey: string): Promise<boolean> {
     }
     return true;
   } catch (err) {
-    console.error("Failed to unsubscribe from push", err);
+    logger.error("Failed to unsubscribe from push", {}, err instanceof Error ? err : undefined);
     return false;
   }
 }

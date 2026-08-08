@@ -25,6 +25,7 @@ import {
   Federation,
 } from "@stellar/stellar-sdk";
 import { logRpcCorrelation } from "@/lib/correlation";
+import { logger } from "@/lib/logger";
 
 import { FinchippayContractClient } from "./contract-bindings";
 
@@ -281,7 +282,7 @@ export async function getFeeEstimate(
       estimated_stroops: 10000n,
     };
   } catch (error) {
-    console.error(`Failed to fetch fee estimate for ${estimateMethod}:`, error);
+    logger.error(`Failed to fetch fee estimate for ${estimateMethod}`, {}, error instanceof Error ? error : undefined);
     throw error;
   }
 }
@@ -379,7 +380,7 @@ export async function getTrustlines(publicKey: string): Promise<Trustline[]> {
     if (horizonErr?.response?.status === 404) {
       throw new Error(ACCOUNT_NOT_FOUND_ERROR);
     }
-    console.error("Failed to load account trustlines:", err);
+    logger.error("Failed to load account trustlines", {}, err instanceof Error ? err : undefined);
     throw new Error("Could not fetch account trustlines. Is this address funded?");
   }
 }
@@ -850,7 +851,7 @@ export async function collectSignatures(unsignedXDR: string, signedXDRs: string[
 
     return transaction.toXDR();
   } catch (err: unknown) {
-    console.error("Failed to collect signatures:", err);
+    logger.error("Failed to collect signatures", {}, err instanceof Error ? err : undefined);
     throw new Error("Invalid transaction XDR or signature collection failed.");
   }
 }
@@ -1199,7 +1200,7 @@ export async function getContractTipTotal(recipient: string): Promise<string> {
     const client = new FinchippayContractClient(CONTRACT_ID);
     return await client.getTipTotal(recipient);
   } catch (err) {
-    console.error("Failed to query tip total:", err);
+    logger.error("Failed to query tip total", { recipient: recipient.slice(0, 8) }, err instanceof Error ? err : undefined);
     return "0";
   }
 }
@@ -1217,7 +1218,7 @@ export async function getContractTipCount(recipient: string): Promise<number> {
     const client = new FinchippayContractClient(CONTRACT_ID);
     return await client.getTipCount(recipient);
   } catch (err) {
-    console.error("Failed to query tip count:", err);
+    logger.error("Failed to query tip count", { recipient: recipient.slice(0, 8) }, err instanceof Error ? err : undefined);
     return 0;
   }
 }
@@ -1354,7 +1355,7 @@ export function streamPayments(
       onPayment(record);
     },
     onerror: (error: unknown) => {
-      console.error("Payment stream error:", error);
+      logger.error("Payment stream error", {}, error instanceof Error ? error : undefined);
       onError?.(error);
     },
   });

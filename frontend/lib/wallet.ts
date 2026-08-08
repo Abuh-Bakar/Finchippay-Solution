@@ -9,6 +9,7 @@
  * friendly error messages and typed return values.
  */
 
+import { logger } from "@/lib/logger";
 import {
   isConnected,
   getAddress,
@@ -210,7 +211,7 @@ export async function initEncryptionSession(publicKey: string): Promise<void> {
       unlockFederationCache(key, publicKey),
     ]);
   } catch (err) {
-    console.error("Failed to initialise encryption session:", err);
+    logger.error("Failed to initialise encryption session", {}, err instanceof Error ? err : undefined);
   }
 }
 
@@ -239,7 +240,7 @@ export function disconnectWallet(): void {
       },
       body: JSON.stringify({ refreshToken: rToken }),
     }).catch((err) => {
-      console.error("Failed to revoke token family on logout:", err);
+      logger.error("Failed to revoke token family on logout", {}, err instanceof Error ? err : undefined);
     });
   }
 
