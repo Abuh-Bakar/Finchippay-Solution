@@ -1042,68 +1042,44 @@ impl FinchippayContract {
     /// multi-sig via `propose_admin_action` with action_type `"unpause"`.
     pub fn unpause(env: Env, caller: Address) {
         caller.require_auth();
-        let stored_admin = get_admin(&env);
+        // Mirror `pause`: only the designated pauser lifts the circuit breaker
+        // directly; admin-initiated unpausing uses `propose_admin_action`.
         let stored_pauser: Option<Address> = env.storage().persistent().get(&DataKey::Pauser);
-        let is_pauser = stored_pauser
-            .as_ref()
-            .map(|p| p == &caller)
-            .unwrap_or(false);
-        if caller != stored_admin && !is_pauser {
+        if stored_pauser.as_ref().map(|p| p == &caller).unwrap_or(false) {
+            env.storage().persistent().set(&DataKey::Paused, &false);
+            bump_to_floor(&env, &DataKey::Paused);
+            env.events().publish((Symbol::new(&env, "unpaused"),), ());
+        } else {
             panic!("Unauthorized");
         }
-        env.storage().persistent().set(&DataKey::Paused, &false);
-        bump_to_floor(&env, &DataKey::Paused);
-        env.events().publish((Symbol::new(&env, "unpaused"),), ());
-    }
-
-    /// Admin: configure the list of admin signers and threshold for emergency
-    /// withdrawal approvals. The admin must be part of the signers list.
-    /// `threshold` must be between 1 and `signers.len()`.
-    pub fn set_admin_signers(env: Env, admin: Address, signers: Vec<Address>, threshold: u32) {
-        admin.require_auth();
-        let signers_set = get_admin_signers(&env);
-        if !signers_set.iter().any(|s| s == admin) {
-            panic!("Unauthorized");
-        }
-        validate_admin_signers(&signers, threshold);
-        // The calling admin must remain among the new signers.
-        if !signers.iter().any(|s| s == admin) {
-            panic!("admin must be in signers list");
-        }
-
-        env.storage()
-            .persistent()
-            .set(&DataKey::AdminSignersThreshold, &threshold);
-        bump_to_floor(&env, &DataKey::AdminSignersThreshold);
-        env.storage()
-            .persistent()
-            .set(&DataKey::AdminSigners, &signers);
-        bump_to_floor(&env, &DataKey::AdminSigners);
-
-        env.events().publish(
-            (Symbol::new(&env, "admin_signers_set"),),
-            (threshold, signers.len()),
-        );
     }
 
     // ─── Admin multi-sig governance ─────────────────────────────────────────
 
     /// Propose an admin action for multi-sig approval.
     ///
-    /// Anyone can propose — execution requires threshold approvals from
-    /// the configured admin signers.
+    /// Only a configured admin signer may propose. The proposer's own
+    /// approval is recorded at creation time, so a threshold of 1
+    /// auto-executes immediately; higher thresholds execute once enough
+    /// other signers approve via `approve_admin_action`.
     pub fn propose_admin_action(
         env: Env,
         proposer: Address,
         action_type: Symbol,
         action_data: Vec<Val>,
     ) -> u64 {
-        // Load admin signers config (must exist).
-        let _signers: Vec<Address> = env
+        require_initialized(&env);
+        proposer.require_auth();
+
+        // Only a configured admin signer may propose a gated action.
+        let signers: Vec<Address> = env
             .storage()
             .persistent()
             .get(&DataKey::AdminSigners)
             .unwrap_or_else(|| panic!("Admin signers not configured"));
+        if !signers.contains(&proposer) {
+            panic!("not an admin signer");
+        }
         let threshold: u32 = env
             .storage()
             .persistent()
