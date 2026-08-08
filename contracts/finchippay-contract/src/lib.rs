@@ -1155,7 +1155,7 @@ impl FinchippayContract {
             .get(&DataKey::AdminSigners)
             .unwrap_or_else(|| panic!("Admin signers not configured"));
         if !signers.contains(&approver) {
-            panic!("{:?}", ContractError::NotAdminSigner);
+            panic!("not an admin signer");
         }
 
         // Load proposal
