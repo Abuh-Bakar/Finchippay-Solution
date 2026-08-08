@@ -5289,13 +5289,15 @@ mod tests {
         assert!(ttl_of(&env, &id, &DataKey::EscrowRecipient(0)) < MIN_TTL_THRESHOLD);
         assert!(ttl_of(&env, &id, &DataKey::Stream(0)) < MIN_TTL_THRESHOLD);
 
-        // Three config keys, the two escrow keys plus their counter, and the two
-        // stream keys plus theirs.
+        // Five config keys (admin, signers, threshold, version, layout), the two
+        // escrow keys plus their counter, and the two stream keys plus theirs.
         let bumped = client.bump_all_ttls(&admin, &100);
-        assert_eq!(bumped, 9);
+        assert_eq!(bumped, 11);
 
         for key in [
             DataKey::Admin,
+            DataKey::AdminSigners,
+            DataKey::AdminSignersThreshold,
             DataKey::Version,
             DataKey::StorageLayoutVersion,
             DataKey::EscrowCount,
