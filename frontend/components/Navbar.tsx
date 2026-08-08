@@ -4,7 +4,7 @@
  */
 
 import Link from "next/link";
-import { useRouter } from "next/router";
+import { logger } from "@/lib/logger";
 import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
@@ -211,14 +211,14 @@ export default function Navbar({ onTakeTour }: NavbarProps) {
 
     if (!nextPublicKey) {
       if (walletError) {
-        console.error(walletError);
+        logger.error("Wallet connection error", {}, walletError instanceof Error ? walletError : new Error(String(walletError)));
       }
       return;
     }
 
     const { error: authError } = await performSEP0010Auth(nextPublicKey);
     if (authError) {
-      console.error(authError);
+      logger.error("Auth error", {}, authError instanceof Error ? authError : new Error(String(authError)));
       return;
     }
 
