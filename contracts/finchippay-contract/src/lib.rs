@@ -969,8 +969,8 @@ impl FinchippayContract {
     /// Transfer the legacy single-admin pointer to `new_admin`. Only the
     /// current legacy admin may call this. This does not change the
     /// `AdminSigners` set used to gate `pause`/`unpause`/`set_pauser`/
-    /// `upgrade`/`rescue_tokens` — use `propose_admin_action` with
-    /// `set_admin_signers` for that.
+    /// `set_admin_signers`/`upgrade`/`rescue_tokens` — propose a
+    /// `set_admin_signers` admin action for that.
     pub fn transfer_admin(env: Env, current_admin: Address, new_admin: Address) {
         current_admin.require_auth();
         let stored = get_admin(&env);
