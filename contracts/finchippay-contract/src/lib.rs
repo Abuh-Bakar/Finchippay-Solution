@@ -3400,7 +3400,8 @@ mod tests {
         env.mock_all_auths();
 
         // Only an admin signer may propose assigning the pauser role.
-        client.propose_admin_action(&stranger, &AdminAction::SetPauser(pauser));
+        let data: Vec<Val> = Vec::from_array(&env, [pauser.into_val(&env)]);
+        client.propose_admin_action(&stranger, &Symbol::new(&env, "set_pauser"), &data);
     }
 
     #[test]
