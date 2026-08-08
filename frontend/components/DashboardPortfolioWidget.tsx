@@ -7,6 +7,7 @@
  * when price feeds are unavailable.
  */
 
+import { logger } from "@/lib/logger";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import PortfolioOverview from "@/components/PortfolioOverview";
