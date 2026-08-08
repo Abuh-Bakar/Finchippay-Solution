@@ -70,14 +70,13 @@ fn test_initialize_cannot_be_called_twice() {
 fn test_pause_unpause() {
     let env = Env::default();
     let (_, client) = deploy(&env);
-    let admin = client.get_admin();
     env.mock_all_auths();
 
     assert!(!client.is_paused());
-    client.pause(&admin);
+    pause_contract(&env, &client);
     assert!(client.is_paused());
 
-    client.unpause(&admin);
+    unpause_contract(&env, &client);
     assert!(!client.is_paused());
 }
 
