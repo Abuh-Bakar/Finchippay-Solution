@@ -28,7 +28,7 @@ function buildEscrowScValBase64({
   return scVal.toXDR('base64');
 }
 
-async function connectWallet(page: any) {
+async function connectWallet(page: import('@playwright/test').Page) {
   await page.goto('/escrow');
   const createHeading = page.getByRole('heading', { name: /Create escrow/i });
   const alreadyConnected = await createHeading

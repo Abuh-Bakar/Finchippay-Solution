@@ -3,7 +3,7 @@ import { test, expect } from "./fixtures";
 const INITIATOR_KEY = "GB2JLUHNVHL64FKADLJVH5TMUWTS6P5BS4Y3WJT6KU7FRXBFQM5PGGVV";
 const COSIGNER_KEY = "GBPMK2QWQ2JKMSFL6EK44LNK45QWGS7IJBLUZXBT5B2FZXOG77GRQ5J4";
 
-async function connectWallet(page: any) {
+async function connectWallet(page: import('@playwright/test').Page) {
   await page.goto("/dashboard");
   const walletAddress = page.getByText("Wallet Address");
   const alreadyConnected = await walletAddress
