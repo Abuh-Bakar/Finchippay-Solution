@@ -166,7 +166,7 @@ export async function loadIndexedDB(): Promise<Map<string, string[]> | null> {
           return;
         }
 
-        const entry = cursor.value as any;
+        const entry = cursor.value as { key?: string; token?: string; hashes?: string[] };
         if (entry.key !== "metadata" && entry.token && entry.hashes) {
           index.set(entry.token, entry.hashes);
         }

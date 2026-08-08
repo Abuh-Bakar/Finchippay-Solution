@@ -1594,12 +1594,12 @@ function PaymentStatsWidget({
       <StatsCard
         label={t("dashboard.totalSent")}
         value={formatStatsXLM(stats.totalSentXLM)}
-        helper={`${stats.sentCount} ${t(`dashboard.${stats.sentCount === 1 ? "outgoingPayment" : "outgoingPayments"}` as any)}`}
+        helper={`${stats.sentCount} ${String(t(`dashboard.${stats.sentCount === 1 ? "outgoingPayment" : "outgoingPayments"}`))}`}
       />
       <StatsCard
         label={t("dashboard.totalReceived")}
         value={formatStatsXLM(stats.totalReceivedXLM, "received")}
-        helper={`${stats.receivedCount} ${t(`dashboard.${stats.receivedCount === 1 ? "incomingPayment" : "incomingPayments"}` as any)}`}
+        helper={`${stats.receivedCount} ${String(t(`dashboard.${stats.receivedCount === 1 ? "incomingPayment" : "incomingPayments"}`))}`}
       />
       <StatsCard
         label={t("dashboard.transactions_count")}

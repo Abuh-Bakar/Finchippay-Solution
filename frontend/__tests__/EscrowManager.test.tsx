@@ -58,7 +58,18 @@ import EscrowManage from "@/pages/escrow/manage";
 const senderKey = "GBRPYHIL2CI3WHZDTOOQFC6EB4RRJC3D5NZ2KMSUGSRNVO7ZFGIGSZ";
 const recipientKey = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
-const sampleEscrows = [
+interface EscrowEntry {
+  id: number;
+  from: string;
+  to: string;
+  token: string;
+  amount: string;
+  releaseLedger: number;
+  status: string;
+  memo: string;
+}
+
+const sampleEscrows: EscrowEntry[] = [
   {
     id: 1,
     from: senderKey,
@@ -99,10 +110,10 @@ describe("EscrowManage", () => {
     mockUseWallet.mockReturnValue({ publicKey: senderKey });
     mockGetCurrentLedger.mockResolvedValue(1000);
     mockGetEscrows.mockResolvedValue(sampleEscrows);
-    mockCategorizeEscrows.mockImplementation((escrows, pk) => ({
-      active: escrows.filter((e: any) => e.status === "Pending" && (e.from === pk || e.to === pk)),
-      completed: escrows.filter((e: any) => e.status === "Released" || e.status === "Cancelled"),
-      incoming: escrows.filter((e: any) => e.status === "Pending" && e.to === pk),
+    mockCategorizeEscrows.mockImplementation((escrows: EscrowEntry[], pk: string) => ({
+      active: escrows.filter((e: EscrowEntry) => e.status === "Pending" && (e.from === pk || e.to === pk)),
+      completed: escrows.filter((e: EscrowEntry) => e.status === "Released" || e.status === "Cancelled"),
+      incoming: escrows.filter((e: EscrowEntry) => e.status === "Pending" && e.to === pk),
     }));
     mockSortEscrows.mockImplementation((escrows) => escrows);
     mockFilterEscrows.mockImplementation((escrows, _q) => escrows);
@@ -148,10 +159,10 @@ describe("EscrowManage", () => {
   it("calls claimEscrow when claim button clicked", async () => {
     mockUseWallet.mockReturnValue({ publicKey: recipientKey });
     mockGetCurrentLedger.mockResolvedValue(2000);
-    mockCategorizeEscrows.mockImplementation((escrows, pk) => ({
-      active: escrows.filter((e: any) => e.status === "Pending" && (e.from === pk || e.to === pk)),
-      completed: escrows.filter((e: any) => e.status === "Released" || e.status === "Cancelled"),
-      incoming: escrows.filter((e: any) => e.status === "Pending" && e.to === pk),
+    mockCategorizeEscrows.mockImplementation((escrows: EscrowEntry[], pk: string) => ({
+      active: escrows.filter((e: EscrowEntry) => e.status === "Pending" && (e.from === pk || e.to === pk)),
+      completed: escrows.filter((e: EscrowEntry) => e.status === "Released" || e.status === "Cancelled"),
+      incoming: escrows.filter((e: EscrowEntry) => e.status === "Pending" && e.to === pk),
     }));
 
     render(<EscrowManage />);
@@ -214,10 +225,10 @@ describe("EscrowManage", () => {
   });
 
   it("switches between tabs", async () => {
-    mockCategorizeEscrows.mockImplementation((escrows, pk) => ({
-      active: escrows.filter((e: any) => e.status === "Pending" && (e.from === pk || e.to === pk)),
-      completed: escrows.filter((e: any) => e.status === "Released" || e.status === "Cancelled"),
-      incoming: escrows.filter((e: any) => e.status === "Pending" && e.to === pk),
+    mockCategorizeEscrows.mockImplementation((escrows: EscrowEntry[], pk: string) => ({
+      active: escrows.filter((e: EscrowEntry) => e.status === "Pending" && (e.from === pk || e.to === pk)),
+      completed: escrows.filter((e: EscrowEntry) => e.status === "Released" || e.status === "Cancelled"),
+      incoming: escrows.filter((e: EscrowEntry) => e.status === "Pending" && e.to === pk),
     }));
 
     render(<EscrowManage />);

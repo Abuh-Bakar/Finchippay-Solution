@@ -65,9 +65,11 @@ function TransactionDetailPage() {
         let to: string | undefined;
         let type: "sent" | "received" | "payment" | undefined;
 
-        const paymentOp = operations.records.find((op: any) => op.type === "payment");
+        type PaymentOp = import("@stellar/stellar-sdk").Horizon.HorizonApi.PaymentOperationResponse;
+        const paymentOp = operations.records.find(
+          (op): op is PaymentOp => op.type === "payment",
+        );
         if (paymentOp) {
-          const payment = paymentOp as any;
           amount = payment.amount;
           asset = payment.asset_type === "native" ? "XLM" : payment.asset_code;
           from = payment.from;

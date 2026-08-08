@@ -1197,7 +1197,7 @@ function SendPaymentForm({
             : `${(selectedFeeStroops / 10_000_000).toFixed(7)} XLM`
         }
         isTipOnChain={isTipOnChain}
-        t={t as any}
+        t={t}
         onCancel={() => setIsConfirmOpen(false)}
         onConfirm={() => { setIsConfirmOpen(false); executeSend(); }}
       />

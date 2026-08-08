@@ -140,7 +140,7 @@ export default function Home() {
                 <div className="font-display text-3xl font-bold text-gradient mb-1">
                   {stat.prefix || ""}{formatValue()}{stat.suffix || ""}
                 </div>
-                <div className="text-slate-400 text-sm">{t(`home.stats.${stat.key}` as any)}</div>
+                <div className="text-slate-400 text-sm">{String(t(`home.stats.${stat.key}`))}</div>
               </div>
             );
           })}
@@ -151,9 +151,9 @@ export default function Home() {
             <div key={f.key} className="card hover:border-stellar-500/30 transition-colors group cursor-default">
               <div className="text-2xl mb-3">{f.icon}</div>
               <h3 className="font-display font-semibold text-slate-900 dark:text-white mb-2 group-hover:text-stellar-700 dark:group-hover:text-stellar-300 transition-colors">
-                {t(`home.features.${f.key}.title` as any)}
+                {String(t(`home.features.${f.key}.title`))}
               </h3>
-              <p className="text-slate-600 dark:text-slate-400 text-sm leading-relaxed">{t(`home.features.${f.key}.desc` as any)}</p>
+              <p className="text-slate-600 dark:text-slate-400 text-sm leading-relaxed">{String(t(`home.features.${f.key}.desc`))}</p>
             </div>
           ))}
         </div>

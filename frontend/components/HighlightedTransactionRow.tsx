@@ -75,10 +75,8 @@ export default function HighlightedTransactionRow({
   onPrintReceipt,
   onSendAgain,
 }: HighlightedTransactionRowProps) {
-  const isIncoming = payment.type === "payment_received";
-  const counterparty = isIncoming
-    ? (payment as any).from
-    : (payment as any).to;
+  const isIncoming = payment.type === "received";
+  const counterparty: string = isIncoming ? payment.from : payment.to;
 
   const memoHighlights = result?.highlights.memo || [];
   const addressHighlights = result?.highlights.address || [];

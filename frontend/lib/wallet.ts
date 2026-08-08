@@ -38,7 +38,7 @@ async function fetchAuthChallenge(publicKey: string): Promise<string> {
 
 async function verifyAuthChallenge(signedXDR: string): Promise<{ accessToken: string; refreshToken: string }> {
   const res = await sdk.verifyChallenge(signedXDR);
-  const data = res as any;
+  const data = res as Record<string, string | undefined>;
   const accessToken = data.accessToken || data.token;
   const refreshToken = data.refreshToken;
   sdk.setToken(accessToken);
