@@ -1094,11 +1094,17 @@ impl FinchippayContract {
         counter += 1;
 
         let current_ledger = env.ledger().sequence();
-        let proposal = AdminActionProposal {
+
+        // The proposer's own approval is recorded at creation time, so a
+        // threshold of 1 auto-executes immediately on propose.
+        let mut approvals = Vec::new(&env);
+        approvals.push_back(proposer.clone());
+
+        let mut proposal = AdminActionProposal {
             id: counter,
             action_type: action_type.clone(),
             action_data,
-            approvals: Vec::new(&env),
+            approvals,
             threshold,
             executed: false,
             // Expire after 7 days (~120,960 ledgers at 5s/ledger).
