@@ -1219,9 +1219,113 @@ impl FinchippayContract {
             Self::do_pause(env);
         } else if action == &Symbol::new(env, "unpause") {
             Self::do_unpause(env);
+        } else if action == &Symbol::new(env, "set_admin_signers") {
+            let signers: Vec<Address> = proposal
+                .action_data
+                .get(0)
+                .unwrap()
+                .try_into_val(env)
+                .expect("invalid set_admin_signers payload");
+            let threshold: u32 = proposal
+                .action_data
+                .get(1)
+                .unwrap()
+                .try_into_val(env)
+                .expect("invalid set_admin_signers payload");
+            validate_admin_signers(&signers, threshold);
+            env.storage()
+                .persistent()
+                .set(&DataKey::AdminSigners, &signers);
+            bump_to_floor(env, &DataKey::AdminSigners);
+            env.storage()
+                .persistent()
+                .set(&DataKey::AdminSignersThreshold, &threshold);
+            bump_to_floor(env, &DataKey::AdminSignersThreshold);
+            env.events().publish(
+                (Symbol::new(env, "admin_signers_set"),),
+                (threshold, signers.len()),
+            );
+        } else if action == &Symbol::new(env, "set_pauser") {
+            let pauser: Address = proposal
+                .action_data
+                .get(0)
+                .unwrap()
+                .try_into_val(env)
+                .expect("invalid set_pauser payload");
+            env.storage().persistent().set(&DataKey::Pauser, &pauser);
+            bump_to_floor(env, &DataKey::Pauser);
+            env.events().publish((Symbol::new(env, "pauser_set"),), pauser);
+        } else if action == &Symbol::new(env, "upgrade") {
+            let wasm_hash: BytesN<32> = proposal
+                .action_data
+                .get(0)
+                .unwrap()
+                .try_into_val(env)
+                .expect("invalid upgrade payload");
+            let layout_version: u32 = proposal
+                .action_data
+                .get(1)
+                .unwrap()
+                .try_into_val(env)
+                .expect("invalid upgrade payload");
+            // Reject downgrades before touching the WASM (same guard as the
+            // legacy single-admin `upgrade` entrypoint).
+            Self::validate_storage_compatibility(env.clone(), layout_version);
+            env.deployer().update_current_contract_wasm(wasm_hash.clone());
+            let current_ver: u32 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Version)
+                .unwrap_or(CONTRACT_VERSION);
+            env.storage()
+                .persistent()
+                .set(&DataKey::Version, &(current_ver + 1));
+            bump(env, &DataKey::Version);
+            env.storage()
+                .persistent()
+                .set(&DataKey::StorageLayoutVersion, &layout_version);
+            bump(env, &DataKey::StorageLayoutVersion);
+            env.events().publish(
+                (Symbol::new(env, "upgraded"),),
+                (current_ver + 1, wasm_hash, layout_version),
+            );
+        } else if action == &Symbol::new(env, "rescue_tokens") {
+            let token_address: Address = proposal
+                .action_data
+                .get(0)
+                .unwrap()
+                .try_into_val(env)
+                .expect("invalid rescue_tokens payload");
+            let to: Address = proposal
+                .action_data
+                .get(1)
+                .unwrap()
+                .try_into_val(env)
+                .expect("invalid rescue_tokens payload");
+            let amount: i128 = proposal
+                .action_data
+                .get(2)
+                .unwrap()
+                .try_into_val(env)
+                .expect("invalid rescue_tokens payload");
+            if amount <= 0 {
+                panic!("amount must be positive");
+            }
+            let token = get_token_client(env, &token_address);
+            let balance = token.balance(&env.current_contract_address());
+            let locked = locked_balance(env, &token_address);
+            let unlocked = balance.checked_sub(locked).expect("overflow");
+            if amount > unlocked {
+                panic!("insufficient unlocked balance");
+            }
+            contract_transfer_out(env, &token, &to, &amount);
+            env.events().publish(
+                (Symbol::new(env, "rescue_tokens"),),
+                (token_address, amount, to),
+            );
+        } else {
+            panic!("unknown admin action");
         }
-        // upgrade, rescue_tokens, and set_pauser require parameter data
-        // and are executed via their existing single-admin entrypoints.
     }
 
     /// Execute pause without auth check (called from execute_admin_action).
