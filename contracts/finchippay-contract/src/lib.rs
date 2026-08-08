@@ -4457,21 +4457,25 @@ mod tests {
                 &env,
                 (
                     contract_id.clone(),
-                    (Symbol::new(&env, "admin_action_propose"), 0u32).into_val(&env),
-                    admin.into_val(&env),
+                    (Symbol::new(&env, "admin_action_proposed"),).into_val(&env),
+                    (1u64, Symbol::new(&env, "rescue_tokens"), admin.clone()).into_val(&env),
+                ),
+                (
+                    contract_id.clone(),
+                    (Symbol::new(&env, "admin_action_approved"),).into_val(&env),
+                    (1u64, admin.clone(), 1u32, 1u32).into_val(&env),
                 ),
                 (
                     contract_id.clone(),
                     (Symbol::new(&env, "rescue_tokens"),).into_val(&env),
-                    (token_id, 400i128, to).into_val(&env),
-                ),
-                (
-                    contract_id.clone(),
-                    (Symbol::new(&env, "admin_action_executed"), 0u32).into_val(&env),
-                    ().into_val(&env),
+                    (token_id.clone(), 400i128, to.clone()).into_val(&env),
                 ),
             ]
         );
+
+        // Funds must have moved to the recipient.
+        let sac = token::StellarAssetClient::new(&env, &token_id);
+        assert_eq!(sac.balance(&to), 400);
     }
     #[test]
     fn test_pagination_bounds() {
