@@ -104,6 +104,12 @@ pub enum ContractError {
     ExcessiveAmountIn = 23,
     /// `new_fee_bps` exceeds `MAX_SWAP_FEE_BPS`.
     InvalidFeeBps = 24,
+    /// The referenced admin action proposal does not exist.
+    ProposalNotFound = 25,
+    /// The admin action proposal has already been executed.
+    ProposalAlreadyExecuted = 26,
+    /// The yield escrow has not reached its release ledger.
+    ReleaseLedgerNotReached = 27,
 }
 
 // ─── Shared data types ────────────────────────────────────────────────────────
@@ -573,6 +579,12 @@ pub enum DataKey {
     // Yield escrow (AMM/DeFi pool integration)
     YieldEscrowCount,
     YieldEscrow(u64),
+    // Admin multi-sig governance
+    AdminActionCount,
+    AdminActionProposal(u64),
+    // Swap / DEX configuration
+    SwapFee,
+    FeeCollector,
 
 }
 
