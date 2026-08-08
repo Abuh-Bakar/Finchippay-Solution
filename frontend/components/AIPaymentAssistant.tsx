@@ -1,4 +1,5 @@
 /**
+import { logger } from "@/lib/logger";
  * components/AIPaymentAssistant.tsx
  * AI-powered payment assistant that parses natural language payment requests
  */
@@ -71,7 +72,7 @@ export default function AIPaymentAssistant({
       setParsedIntent(intent);
     } catch (err) {
       setError("Failed to parse your request. Please try again.");
-      console.error("Payment parsing error:", err);
+      logger.error("Payment parsing error:", err);
     } finally {
       setIsLoading(false);
     }

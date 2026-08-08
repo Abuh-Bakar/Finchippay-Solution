@@ -1,4 +1,5 @@
 /**
+import { logger } from "@/lib/logger";
  * pages/settings.tsx
  * Settings page with network switcher for testnet/mainnet/custom Horizon URL.
  */
@@ -99,7 +100,7 @@ export default function SettingsPage({
           }
         }
       } catch (err) {
-        console.error("Error fetching username:", err);
+        logger.error("Error fetching username:", err);
       }
     };
     

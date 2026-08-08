@@ -1,4 +1,5 @@
 /**
+import { logger } from "@/lib/logger";
  * components/SessionManager.tsx
  * Session management component for viewing and revoking active sessions (#488).
  */
@@ -17,7 +18,7 @@ export default function SessionManager() {
       const data = await getSessions();
       setSessions(data);
     } catch (err) {
-      console.error("Failed to load sessions:", err);
+      logger.error("Failed to load sessions:", err);
     } finally {
       setLoading(false);
     }

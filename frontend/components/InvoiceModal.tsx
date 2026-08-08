@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { logger } from "@/lib/logger";
 import { motion, AnimatePresence } from "framer-motion";
 import { createInvoice, InvoiceFormData } from "@/lib/invoices";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
@@ -89,7 +90,7 @@ export default function InvoiceModal({
       });
       setErrors({});
     } catch (err) {
-      console.error("Failed to create invoice:", err);
+      logger.error("Failed to create invoice:", err);
     } finally {
       setLoading(false);
     }

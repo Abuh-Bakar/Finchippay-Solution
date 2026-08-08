@@ -1,4 +1,5 @@
 /**
+import { logger } from "@/lib/logger";
  * components/admin/RateLimitRuleEditor.tsx
  * Table component for managing rate limit rules with toggles and test buttons.
  */
@@ -49,7 +50,7 @@ export default function RateLimitRuleEditor({ rules, onUpdate }: RateLimitRuleEd
       setEditingId(null);
       onUpdate();
     } catch (err) {
-      console.error("Failed to update rule:", err);
+      logger.error("Failed to update rule:", err);
     } finally {
       setSaving(false);
     }

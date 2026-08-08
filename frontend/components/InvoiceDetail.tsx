@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { logger } from "@/lib/logger";
 import { motion } from "framer-motion";
 import { Invoice, generateInvoicePDF, updateInvoiceStatus, deleteInvoice } from "@/lib/invoices";
 import { formatAsset, formatDate } from "@/utils/format";
@@ -26,7 +27,7 @@ export default function InvoiceDetail({ invoice, onClose, onUpdate }: InvoiceDet
     try {
       await generateInvoicePDF(invoice);
     } catch (err) {
-      console.error("Failed to generate PDF:", err);
+      logger.error("Failed to generate PDF:", err);
       alert("Failed to generate PDF. Please try again.");
     } finally {
       setDownloading(false);

@@ -1,4 +1,5 @@
 /**
+import { logger } from "@/lib/logger";
  * components/TransactionActions.tsx
  * Action buttons for transaction detail page — now includes Generate Invoice
  */
@@ -59,7 +60,7 @@ export default function TransactionActions({
     try {
       await generatePDFReceipt(transaction);
     } catch (err) {
-      console.error("Failed to generate PDF:", err);
+      logger.error("Failed to generate PDF:", err);
       alert("Failed to generate PDF receipt. Please try again.");
     } finally {
       setGeneratingPDF(false);

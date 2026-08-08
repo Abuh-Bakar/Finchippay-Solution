@@ -1,4 +1,5 @@
 /**
+import { logger } from "@/lib/logger";
  * pages/dashboard.tsx
  * Dashboard with wallet summary, payment stats, payment actions, and recent activity.
  *
@@ -329,7 +330,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
         }
       }
     } catch (err) {
-      console.error("Error fetching username:", err);
+      logger.error("Error fetching username:", err);
     }
   }, [publicKey]);
 
@@ -540,7 +541,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
 
       setSpendingData(months);
     } catch (err) {
-      console.error("Failed to fetch spending history:", err);
+      logger.error("Failed to fetch spending history:", err);
     } finally {
       setSpendingLoading(false);
     }
@@ -553,7 +554,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
       const history = await getRecentPaymentsForSparkline(publicKey, 10);
       setSparklineData(history.map(h => parseFloat(h.amount)));
     } catch (err) {
-      console.error("Failed to fetch sparkline data:", err);
+      logger.error("Failed to fetch sparkline data:", err);
     } finally {
       setSparklineLoading(false);
     }
@@ -592,7 +593,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
       });
       setThirtyDayData(days);
     } catch (err) {
-      console.error("Failed to fetch 30-day volume:", err);
+      logger.error("Failed to fetch 30-day volume:", err);
     } finally {
       setThirtyDayLoading(false);
     }
@@ -615,7 +616,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
         setTopRecipients(payload?.data?.topRecipients ?? []);
       }
     } catch (err) {
-      console.error("Failed to fetch top recipients:", err);
+      logger.error("Failed to fetch top recipients:", err);
     } finally {
       setTopRecipientsLoading(false);
     }
@@ -908,7 +909,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
           badge: '/favicon.svg',
         });
       } catch (err) {
-        console.error('Test notification failed:', err);
+        logger.error('Test notification failed:', err);
       }
     }
   };
@@ -938,7 +939,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
                   badge: '/favicon.svg',
                 });
               } catch (err) {
-                console.error('showNotification failed:', err);
+                logger.error('showNotification failed:', err);
               }
             } else {
               // Page is visible — in-app bubble is less intrusive.
@@ -960,7 +961,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
         setIncomingPayment(payment);
       },
       (error) => {
-        console.error('Dashboard payment stream error:', error);
+        logger.error('Dashboard payment stream error:', error);
       }
     );
 

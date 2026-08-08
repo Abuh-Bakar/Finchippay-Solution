@@ -1,4 +1,5 @@
 import clsx from "clsx";
+import { logger } from "@/lib/logger";
 import { useEffect, useRef, useState } from "react";
 import SendPaymentForm from "@/components/SendPaymentForm";
 import WalletConnect from "@/components/WalletConnect";
@@ -111,7 +112,7 @@ export default function TipWidget({
         }),
       });
     } catch (err) {
-      console.error("Failed to record tip:", err);
+      logger.error("Failed to record tip:", err);
     }
   };
 

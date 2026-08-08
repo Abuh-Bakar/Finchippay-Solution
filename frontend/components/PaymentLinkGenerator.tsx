@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { logger } from "@/lib/logger";
 import clsx from "clsx";
 import { QRCodeSVG } from "qrcode.react"; // Ensure this is installed
 import { buildPaymentLinkUrl, rememberPaymentLink } from "@/lib/paymentLinks";
@@ -42,7 +43,7 @@ export default function PaymentLinkGenerator() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
-      console.error("Failed to copy!", err);
+      logger.error("Failed to copy!", err);
     }
   };
 

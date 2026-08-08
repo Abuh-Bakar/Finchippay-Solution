@@ -1,4 +1,5 @@
 /**
+import { logger } from "@/lib/logger";
  * components/TransactionList.tsx
  * Displays paginated payment history for a Stellar account.
  */
@@ -319,7 +320,7 @@ function TransactionList({
         }
 
         setError("Could not load transaction history.");
-        console.error(err);
+        logger.error(err);
       } finally {
         setLoading(false);
         setLoadingMore(false);

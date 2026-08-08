@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { logger } from "@/lib/logger";
 import Head from "next/head";
 import { useWallet } from "@/lib/useWallet";
 import { getReceiptCount, getReceipt, type ReceiptMetadata } from "@/lib/stellar";
@@ -55,7 +56,7 @@ export default function ReceiptsPage() {
 
       setReceipts(startPage === 1 ? validResults : [...currentReceipts, ...validResults]);
     } catch (err) {
-      console.error("Failed to fetch receipts:", err);
+      logger.error("Failed to fetch receipts:", err);
     } finally {
       setLoading(false);
     }

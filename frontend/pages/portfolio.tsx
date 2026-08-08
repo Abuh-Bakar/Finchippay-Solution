@@ -1,4 +1,5 @@
 /**
+import { logger } from "@/lib/logger";
  * pages/portfolio.tsx
  * Interactive token portfolio dashboard (issue #362): total value, 24h
  * change, allocation donut, per-token price history, and adding custom
@@ -66,7 +67,7 @@ export default function PortfolioPage() {
       } catch (err) {
         // Most commonly: the connected account hasn't been funded on this
         // network yet (no XLM balance exists to derive holdings from).
-        console.error("Failed to load wallet holdings:", err);
+        logger.error("Failed to load wallet holdings:", err);
       }
 
       const customTokens = loadCustomTokens();
@@ -88,7 +89,7 @@ export default function PortfolioPage() {
         const priceSnapshots = await fetchTokenPrices(codes);
         setPrices(priceSnapshots);
       } catch (err) {
-        console.error("Failed to load token prices:", err);
+        logger.error("Failed to load token prices:", err);
       }
     } finally {
       setLoading(false);

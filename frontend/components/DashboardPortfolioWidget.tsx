@@ -1,4 +1,5 @@
 /**
+import { logger } from "@/lib/logger";
  * components/DashboardPortfolioWidget.tsx
  * Integrates PortfolioOverview + PortfolioAllocation + a value-over-time
  * chart into the main dashboard (issue #482): total USD value, 24h change,
@@ -50,7 +51,7 @@ export default function DashboardPortfolioWidget({ publicKey }: DashboardPortfol
       try {
         walletHoldings = await getPortfolioHoldings(publicKey);
       } catch (err) {
-        console.error("DashboardPortfolioWidget: failed to load holdings:", err);
+        logger.error("DashboardPortfolioWidget: failed to load holdings:", err);
       }
       setHoldings(walletHoldings);
 
@@ -70,7 +71,7 @@ export default function DashboardPortfolioWidget({ publicKey }: DashboardPortfol
         }
         setHistory(loadPortfolioHistory());
       } catch (err) {
-        console.error("DashboardPortfolioWidget: failed to load prices:", err);
+        logger.error("DashboardPortfolioWidget: failed to load prices:", err);
         setPricesUnavailable(true);
       }
       setLastRefreshedAt(Date.now());

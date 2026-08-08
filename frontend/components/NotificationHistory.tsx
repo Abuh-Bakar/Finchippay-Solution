@@ -1,4 +1,5 @@
 /**
+import { logger } from "@/lib/logger";
  * components/NotificationHistory.tsx
  * Reverse-chronological notification history viewer.
  *
@@ -109,7 +110,7 @@ export default function NotificationHistory({ publicKey }: NotificationHistoryPr
         prev.map((h) => (h.id === item.id ? { ...h, read: true } : h)),
       );
     } catch (err) {
-      console.error("Failed to mark as read:", err);
+      logger.error("Failed to mark as read:", err);
     }
   };
 

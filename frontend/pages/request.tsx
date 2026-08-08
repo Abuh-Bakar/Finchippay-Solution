@@ -1,4 +1,5 @@
 import Head from "next/head";
+import { logger } from "@/lib/logger";
 import { useRouter } from "next/router";
 import { useState, useEffect } from "react";
 import SendPaymentForm from "@/components/SendPaymentForm";
@@ -41,7 +42,7 @@ export default function RequestPage() {
         setPrefill(parsedData);
         setError(null);
       } catch (err) {
-        console.error("Invalid request link data", err);
+        logger.error("Invalid request link data", err);
         setError("Invalid request link. Please check the URL.");
       }
     }

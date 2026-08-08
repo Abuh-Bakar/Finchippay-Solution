@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { logger } from "@/lib/logger";
 import { useRouter } from "next/router";
 import Head from "next/head";
 import { getReceipt, resolveFederationAddress, isValidStellarAddress, type ReceiptMetadata } from "@/lib/stellar";
@@ -43,7 +44,7 @@ export default function PublicReceiptPage() {
 
         setReceipt(data);
       } catch (err: any) {
-        console.error("Failed to load receipt:", err);
+        logger.error("Failed to load receipt:", err);
         setError(err.message || "Failed to load receipt.");
       } finally {
         setLoading(false);

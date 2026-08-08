@@ -1,4 +1,5 @@
 /**
+import { logger } from "@/lib/logger";
  * pages/transactions.tsx
  * Full transaction history page with UX cursor fixes.
  */
@@ -155,7 +156,7 @@ export default function Transactions() {
           downloadPDF(blob, dateStamp);
         }
       } catch (err) {
-        console.error(`Failed to export ${format}:`, err);
+        logger.error(`Failed to export ${format}:`, err);
       } finally {
         setExporting(false);
         setExportFormat(null);

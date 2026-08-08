@@ -1,4 +1,5 @@
 import Head from "next/head";
+import { logger } from "@/lib/logger";
 /**
  * pages/trade.tsx
  * Stellar DEX trading interface with market/limit orders, orderbook, and trade history.
@@ -40,7 +41,7 @@ export default function Trade() {
       const data = await fetchOrderbook(USDC, Asset.native(), 10);
       setOrderbook(data);
     } catch (error) {
-      console.error("Failed to load orderbook:", error);
+      logger.error("Failed to load orderbook:", error);
     }
   }, []);
 
@@ -60,7 +61,7 @@ export default function Trade() {
       );
       setTradeHistory(data);
     } catch (error) {
-      console.error("Failed to load trade history:", error);
+      logger.error("Failed to load trade history:", error);
     }
   }, []);
 
@@ -71,7 +72,7 @@ export default function Trade() {
       const offers = await fetchOpenOffers(publicKey);
       setOpenOffers(offers);
     } catch (error) {
-      console.error("Failed to load open offers:", error);
+      logger.error("Failed to load open offers:", error);
     }
   }, [publicKey]);
 
@@ -102,7 +103,7 @@ export default function Trade() {
       showToast("Offer cancelled successfully!", "success");
       loadOpenOffers(); // Reload offers
     } catch (error) {
-      console.error("Failed to cancel offer:", error);
+      logger.error("Failed to cancel offer:", error);
       showToast(error instanceof Error ? error.message : "Failed to cancel offer", "error");
     } finally {
       setIsLoading(false);

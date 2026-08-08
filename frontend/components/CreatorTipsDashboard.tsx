@@ -1,4 +1,5 @@
 /**
+import { logger } from "@/lib/logger";
  * components/CreatorTipsDashboard.tsx
  * Dashboard component for creators to view tips received.
  *
@@ -62,7 +63,7 @@ export default function CreatorTipsDashboard({
       setOnChainTipCount(count);
       setOnChainTipTotal(total);
     } catch (err) {
-      console.error("Failed to fetch on-chain tip stats:", err);
+      logger.error("Failed to fetch on-chain tip stats:", err);
     }
   }, [publicKey]);
 
@@ -95,7 +96,7 @@ export default function CreatorTipsDashboard({
         setTips([]);
       }
     } catch (err) {
-      console.error("Error fetching tips:", err);
+      logger.error("Error fetching tips:", err);
       setError("Unable to load tips. Make sure you have a registered username.");
       setTips([]);
     } finally {

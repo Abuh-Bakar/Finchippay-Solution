@@ -1,4 +1,5 @@
 /**
+import { logger } from "@/lib/logger";
  * pages/tx/[txHash].tsx
  * Transaction detail page with mobile-first responsive design
  */
@@ -93,7 +94,7 @@ function TransactionDetailPage() {
 
         setTransaction(detail);
       } catch (err) {
-        console.error("Failed to fetch transaction:", err);
+        logger.error("Failed to fetch transaction:", err);
         setError("Failed to load transaction details. Please try again.");
       } finally {
         setLoading(false);

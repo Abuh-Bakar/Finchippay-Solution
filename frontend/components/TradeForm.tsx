@@ -1,4 +1,5 @@
 /**
+import { logger } from "@/lib/logger";
  * components/TradeForm.tsx
  *
  * Token swap interface with Stellar path-payment support (Issue #249).
@@ -364,7 +365,7 @@ export default function TradeForm({
       setPathResult(null);
       setSwapPreview(null);
     } catch (err) {
-      console.error("Swap failed:", err);
+      logger.error("Swap failed:", err);
       onError(err instanceof Error ? err.message : "Swap failed");
     } finally {
       setIsSubmitting(false);

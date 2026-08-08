@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { logger } from "@/lib/logger";
 import { motion } from "framer-motion";
 import { generatePDFReceipt } from "@/lib/generatePDF";
 import type { TransactionReceipt } from "@/lib/generatePDF";
@@ -22,7 +23,7 @@ export default function PDFReceipt({
     try {
       await generatePDFReceipt(transaction);
     } catch (err) {
-      console.error("Failed to generate PDF receipt:", err);
+      logger.error("Failed to generate PDF receipt:", err);
       alert("Failed to generate PDF receipt. Please try again.");
     } finally {
       setGenerating(false);

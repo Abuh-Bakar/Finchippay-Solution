@@ -1,4 +1,5 @@
 /**
+import { logger } from "@/lib/logger";
  * components/TransactionSearchBar.tsx
  * Advanced transaction search with operator support and real-time filtering
  */
@@ -42,7 +43,7 @@ export default function TransactionSearchBar({
         await saveIndexedDB(payments, index);
         setIndexReady(true);
       } catch (error) {
-        console.error("Failed to build search index:", error);
+        logger.error("Failed to build search index:", error);
       } finally {
         setIsSearching(false);
       }
@@ -80,7 +81,7 @@ export default function TransactionSearchBar({
         setSuggestions(Array.from(uniqueMemos).slice(0, 5));
         setShowSuggestions(true);
       } catch (error) {
-        console.error("Search error:", error);
+        logger.error("Search error:", error);
       } finally {
         setIsSearching(false);
       }
