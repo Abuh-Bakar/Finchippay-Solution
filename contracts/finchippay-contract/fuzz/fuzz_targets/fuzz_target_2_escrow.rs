@@ -31,7 +31,8 @@ fuzz_target!(|data: &[u8]| {
     let contract_id = env.register(finchippay_contract::FinchippayContract, ());
     let client = finchippay_contract::FinchippayContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
-    let _ = client.initialize(&admin);
+    let signers = soroban_sdk::Vec::from_array(&env, [admin.clone()]);
+    let _ = client.initialize(&signers, &1);
 
     // Create test token
     let token_admin = Address::generate(&env);
