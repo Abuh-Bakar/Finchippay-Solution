@@ -19,7 +19,8 @@ fn setup_env() -> (Env, FinchippayContractClient, Address) {
     );
     let client = FinchippayContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
-    let _ = client.initialize(&admin);
+    let signers = soroban_sdk::Vec::from_array(&env, [admin.clone()]);
+    let _ = client.initialize(&signers, &1);
     // Register a real Stellar Asset Contract so TokenClient works
     let token_id = env.register_stellar_asset_contract(admin.clone());
     let tc = TokenClient::new(&env, &token_id);
