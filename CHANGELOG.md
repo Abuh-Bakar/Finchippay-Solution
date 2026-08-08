@@ -4,6 +4,30 @@ All notable changes to the Finchippay-Solution smart contract will be documented
 
 ## [Unreleased]
 
+### Security
+
+- **Hardened anchors config**: ANCHORS_CONFIG is now required in production. The dev-only testanchor default triggers a startup error in production environments instead of silently falling back to an insecure default.
+- **Cryptographically random webhook seeds**: Development seed data now uses `crypto.randomBytes` for webhook secrets instead of a hardcoded value.
+- **Structured frontend logging**: Replaced 67 scattered `console.error` calls across all pages and components with a centralized logger that forwards errors to Sentry in production and sanitizes sensitive context data (keys, tokens, passwords).
+
+### Code Quality
+
+- **TypeScript strictness**: Replaced 34 `any` type annotations with proper interfaces across all frontend source files (components, libs, hooks). Created `TransactionReceipt`, `PendingTransaction`, `LedgerTransport`, `LedgerStellarApp`, and `GlobalWithFetchPatch` types.
+- **Contract module organization**: Extracted data types into `types.rs` and event symbols into `events.rs` to reduce the monolithic `lib.rs`.
+- **TODO resolution**: Replaced 3 outstanding TODO comments with resolved architecture notes and clear upgrade paths.
+- **ESLint strict mode**: Frontend now enforces `no-explicit-any: warn`, import ordering, and prefer-optional-chain rules.
+
+### Documentation
+
+- **Governance model** (GOVERNANCE.md): Complete community governance framework with roles, RFC process, voting mechanics, code of conduct, and release cadence.
+- **Security audit framework** (docs/SECURITY_AUDIT_FRAMEWORK.md): Comprehensive checklist covering contracts, backend API, and frontend with incident response protocol.
+- **Testing guide** (docs/testing.md): Multi-layer testing strategy with coverage targets.
+- **RFC template** (docs/rfc/TEMPLATE.md): Standardized format for architectural proposals.
+
+### Testing
+
+- **Coverage thresholds**: Backend (60% lines, 50% branches) and Frontend (65% lines, 60% branches) via Istanbul/NYC.
+
 ### Added
 
 - **Automated storage TTL management** — audited every persistent storage operation in `FinchippayContract` for TTL coverage and closed the gaps. Entries are now created at a `MIN_TTL_LEDGERS` floor (535,680 ledgers, ≈31 days) and refreshed by any read or update that finds them below `MIN_TTL_THRESHOLD` (100,000 ledgers), so live escrows, streams, vesting schedules, and multi-sig proposals cannot expire while in use. Read paths that previously returned data without extending its TTL — `is_paused`, `get_escrow_count`, `get_stream_count`, `get_multisig_count`, `get_emergency_withdrawal_count`, `get_arbitrators`, `verify_receipt`, `get_claimable_vesting`, `list_streams_by_payer`, `locked_balance`, `get_contract_balance`, and the escrow claim/cancel paths' recipient lookup — now bump the entries they touch. Added `bump_all_ttls(admin, max_keys)`, an admin-only sweep for cold entries that nobody reads: it walks the enumerable key classes, processes at most `min(max_keys, 100)` keys per call, and persists a cursor so repeated calls complete a pass without exceeding one transaction's resource budget. Added `get_min_ttl()` → `(ledgers, class)` reporting the lowest lifetime the contract can still prove, for off-chain alerting. Tip records, locked balances, and cached contract balances are keyed by arbitrary addresses with no on-chain registry, so they are not sweepable and rely on the per-operation bumps; this is documented on `bump_all_ttls`.
