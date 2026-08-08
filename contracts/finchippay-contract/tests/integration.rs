@@ -14,8 +14,22 @@ fn deploy(env: &Env) -> (Address, FinchippayContractClient<'_>) {
     let id = env.register(FinchippayContract, ());
     let client = FinchippayContractClient::new(env, &id);
     let admin = Address::generate(env);
-    client.initialize(&admin);
+    let signers = Vec::from_array(env, [admin.clone()]);
+    client.initialize(&signers, &1);
     (id, client)
+}
+
+/// Pause the contract through the admin multi-sig path. The default
+/// deploy() uses a threshold of 1, so the proposal auto-executes on propose.
+fn pause_contract(env: &Env, client: &FinchippayContractClient<'_>) {
+    let admin = client.get_admin();
+    client.propose_admin_action(&admin, &Symbol::new(env, "pause"), &Vec::new(env));
+}
+
+/// Unpause through the admin multi-sig path.
+fn unpause_contract(env: &Env, client: &FinchippayContractClient<'_>) {
+    let admin = client.get_admin();
+    client.propose_admin_action(&admin, &Symbol::new(env, "unpause"), &Vec::new(env));
 }
 
 fn create_token(env: &Env, admin: &Address, to: &Address, amount: i128) -> Address {
