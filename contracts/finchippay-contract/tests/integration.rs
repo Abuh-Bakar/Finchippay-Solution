@@ -5,7 +5,7 @@ use finchippay_contract::{
 };
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger},
-    token, Address, Env, Symbol, Vec,
+    token, Address, Env, IntoVal, Symbol, Val, Vec,
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
