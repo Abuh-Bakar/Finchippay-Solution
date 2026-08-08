@@ -2940,7 +2940,8 @@ mod tests {
         let admin = client.get_admin();
         let pauser = Address::generate(&env);
 
-        client.propose_admin_action(&admin, &AdminAction::SetPauser(pauser.clone()));
+        let data: Vec<Val> = Vec::from_array(&env, [pauser.clone().into_val(&env)]);
+        client.propose_admin_action(&admin, &Symbol::new(&env, "set_pauser"), &data);
         assert_eq!(client.get_pauser(), Some(pauser.clone()));
 
         // The pauser retains its fast single-signature pause/unpause path.
