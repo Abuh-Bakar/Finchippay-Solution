@@ -2915,7 +2915,7 @@ mod tests {
         env.mock_all_auths();
         let (_id, client) = deploy(&env);
         let stranger = Address::generate(&env);
-        client.propose_admin_action(&stranger, &AdminAction::Pause);
+        client.propose_admin_action(&stranger, &Symbol::new(&env, "pause"), &Vec::new(&env));
     }
 
     #[test]
