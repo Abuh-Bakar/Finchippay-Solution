@@ -2927,7 +2927,8 @@ mod tests {
         let signer_b = Address::generate(&env);
         let signers = vec![&env, signer_a.clone(), signer_b.clone()];
         let (_id, client) = deploy_multisig(&env, &signers, 2);
-        let proposal_id = client.propose_admin_action(&signer_a, &AdminAction::Pause);
+        let proposal_id =
+            client.propose_admin_action(&signer_a, &Symbol::new(&env, "pause"), &Vec::new(&env));
         client.approve_admin_action(&proposal_id, &signer_a);
     }
 
