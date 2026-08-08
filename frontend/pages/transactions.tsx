@@ -1,5 +1,5 @@
 /**
-import { logger } from "@/lib/logger";
+
  * pages/transactions.tsx
  * Full transaction history page with UX cursor fixes.
  */

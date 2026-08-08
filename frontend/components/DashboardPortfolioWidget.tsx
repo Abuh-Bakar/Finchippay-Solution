@@ -1,5 +1,5 @@
 /**
-import { logger } from "@/lib/logger";
+
  * components/DashboardPortfolioWidget.tsx
  * Integrates PortfolioOverview + PortfolioAllocation + a value-over-time
  * chart into the main dashboard (issue #482): total USD value, 24h change,

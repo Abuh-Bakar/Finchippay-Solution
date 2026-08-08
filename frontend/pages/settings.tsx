@@ -1,5 +1,5 @@
 /**
-import { logger } from "@/lib/logger";
+
  * pages/settings.tsx
  * Settings page with network switcher for testnet/mainnet/custom Horizon URL.
  */

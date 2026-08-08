@@ -1,5 +1,5 @@
 /**
-import { logger } from "@/lib/logger";
+
  * components/AIPaymentAssistant.tsx
  * AI-powered payment assistant that parses natural language payment requests
  */

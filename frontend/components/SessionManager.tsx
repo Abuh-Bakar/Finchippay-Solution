@@ -1,5 +1,5 @@
 /**
-import { logger } from "@/lib/logger";
+
  * components/SessionManager.tsx
  * Session management component for viewing and revoking active sessions (#488).
  */

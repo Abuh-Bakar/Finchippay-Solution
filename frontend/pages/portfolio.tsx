@@ -1,5 +1,5 @@
 /**
-import { logger } from "@/lib/logger";
+
  * pages/portfolio.tsx
  * Interactive token portfolio dashboard (issue #362): total value, 24h
  * change, allocation donut, per-token price history, and adding custom

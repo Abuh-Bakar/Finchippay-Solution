@@ -1,5 +1,5 @@
 /**
-import { logger } from "@/lib/logger";
+
  * components/CreatorTipsDashboard.tsx
  * Dashboard component for creators to view tips received.
  *

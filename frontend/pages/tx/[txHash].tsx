@@ -1,5 +1,5 @@
 /**
-import { logger } from "@/lib/logger";
+
  * pages/tx/[txHash].tsx
  * Transaction detail page with mobile-first responsive design
  */

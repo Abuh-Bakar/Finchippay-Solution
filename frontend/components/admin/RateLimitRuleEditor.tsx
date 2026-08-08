@@ -1,5 +1,5 @@
 /**
-import { logger } from "@/lib/logger";
+
  * components/admin/RateLimitRuleEditor.tsx
  * Table component for managing rate limit rules with toggles and test buttons.
  */

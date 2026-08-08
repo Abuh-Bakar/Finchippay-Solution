@@ -1,5 +1,5 @@
 /**
-import { logger } from "@/lib/logger";
+
  * components/TransactionSearchBar.tsx
  * Advanced transaction search with operator support and real-time filtering
  */

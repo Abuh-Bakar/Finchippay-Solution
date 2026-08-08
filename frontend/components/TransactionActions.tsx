@@ -1,5 +1,5 @@
 /**
-import { logger } from "@/lib/logger";
+
  * components/TransactionActions.tsx
  * Action buttons for transaction detail page — now includes Generate Invoice
  */

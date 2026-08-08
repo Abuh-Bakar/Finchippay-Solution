@@ -1,5 +1,5 @@
 /**
-import { logger } from "@/lib/logger";
+
  * components/NotificationHistory.tsx
  * Reverse-chronological notification history viewer.
  *

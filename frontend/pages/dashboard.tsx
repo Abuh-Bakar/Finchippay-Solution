@@ -1,5 +1,4 @@
 /**
-import { logger } from "@/lib/logger";
  * pages/dashboard.tsx
  * Dashboard with wallet summary, payment stats, payment actions, and recent activity.
  *
@@ -13,6 +12,7 @@ import { logger } from "@/lib/logger";
  *  4. The service worker's push event handler calls showNotification().
  */
 
+import { logger } from "@/lib/logger";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
