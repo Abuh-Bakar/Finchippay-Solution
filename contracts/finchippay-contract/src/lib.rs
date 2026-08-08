@@ -3317,7 +3317,7 @@ mod tests {
         env.mock_all_auths();
         let token_id = create_token(&env, &admin, &from, 500);
         let memo = Symbol::new(&env, "test");
-        client.propose_admin_action(&admin, &AdminAction::Pause);
+        client.propose_admin_action(&admin, &Symbol::new(&env, "pause"), &Vec::new(&env));
         client.send_tip(&token_id, &from, &to, &100, &memo);
     }
 
