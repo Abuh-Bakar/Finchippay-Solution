@@ -126,7 +126,8 @@ fn setup_contract() -> (Env, FinchippayContractClient, Address, Address) {
     let client = FinchippayContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
-    let _ = client.initialize(&admin);
+    let signers = soroban_sdk::Vec::from_array(&env, [admin.clone()]);
+    let _ = client.initialize(&signers, &1);
 
     // Create a simple token for payment operations.
     let token_id = Address::generate(&env);
