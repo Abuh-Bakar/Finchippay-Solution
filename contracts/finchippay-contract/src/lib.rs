@@ -3347,7 +3347,7 @@ mod tests {
         let recipient = Address::generate(&env);
         env.mock_all_auths();
         let token_id = create_token(&env, &admin, &payer, 1000);
-        client.propose_admin_action(&admin, &AdminAction::Pause);
+        client.propose_admin_action(&admin, &Symbol::new(&env, "pause"), &Vec::new(&env));
         client.open_stream(&token_id, &payer, &recipient, &10, &500);
     }
 
