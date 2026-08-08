@@ -90,6 +90,19 @@ interface CustomAsset {
   issuer: string;
 }
 
+interface PendingTransaction {
+  id: string;
+  type: "sent";
+  amount: string;
+  asset: string;
+  from: string;
+  to: string;
+  memo?: string;
+  createdAt: string;
+  transactionHash: string;
+  isPending: boolean;
+}
+
 const ESTIMATED_NETWORK_FEE = `${STELLAR_BASE_FEE_XLM} XLM`;
 
 const RECENT_RECIPIENTS_KEY = "finchippay:recent-recipients";
@@ -785,7 +798,7 @@ function SendPaymentForm({
       markStepCompleted("confirming");
       
       const resolvedTx = { ...pendingTx, transactionHash: result.hash, isPending: false };
-      const updatedPending = JSON.parse(sessionStorage.getItem("finchippay:pending-txs") || "[]").filter((t: any) => t.id !== pendingId);
+      const updatedPending = JSON.parse(sessionStorage.getItem("finchippay:pending-txs") || "[]").filter((t: PendingTransaction) => t.id !== pendingId);
       sessionStorage.setItem("finchippay:pending-txs", JSON.stringify(updatedPending));
       window.dispatchEvent(new CustomEvent("finchippay:resolved-tx", { detail: { pendingId, resolvedTx } }));
       markStepCompleted("submitting");
@@ -802,7 +815,7 @@ function SendPaymentForm({
       onSuccess?.(result.hash);
     } catch (err: unknown) {
       if (pendingId) {
-        const updatedPending = JSON.parse(sessionStorage.getItem("finchippay:pending-txs") || "[]").filter((t: any) => t.id !== pendingId);
+        const updatedPending = JSON.parse(sessionStorage.getItem("finchippay:pending-txs") || "[]").filter((t: PendingTransaction) => t.id !== pendingId);
         sessionStorage.setItem("finchippay:pending-txs", JSON.stringify(updatedPending));
         window.dispatchEvent(new CustomEvent("finchippay:failed-tx", { detail: { pendingId } }));
       }

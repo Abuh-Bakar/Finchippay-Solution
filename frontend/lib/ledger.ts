@@ -8,8 +8,18 @@
 
 import { getNetworkPassphrase } from "./stellar";
 
-let transportInstance: any = null;
-let stellarAppInstance: any = null;
+// Ledger hardware wallet transport types (imported dynamically to avoid bundling)
+interface LedgerTransport {
+  close(): Promise<void>;
+}
+
+interface LedgerStellarApp {
+  getPublicKey(path: string): Promise<{ publicKey: string }>;
+  signTransaction(path: string, xdr: string): Promise<{ signature: string }>;
+}
+
+let transportInstance: LedgerTransport | null = null;
+let stellarAppInstance: LedgerStellarApp | null = null;
 
 /**
  * Check if WebUSB is available in this browser.

@@ -1,9 +1,10 @@
 import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { generatePDFReceipt } from "@/lib/generatePDF";
+import type { TransactionReceipt } from "@/lib/generatePDF";
 
 interface PDFReceiptProps {
-  transaction: any;
+  transaction: TransactionReceipt;
   variant?: "button" | "icon" | "full";
   className?: string;
 }

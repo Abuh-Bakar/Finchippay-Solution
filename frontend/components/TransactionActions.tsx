@@ -8,12 +8,13 @@ import { explorerUrl } from "@/lib/stellar";
 import { copyToClipboard } from "@/utils/format";
 import { ExternalLinkIcon, CopyIcon, CheckIcon, PrinterIcon } from "@/components/icons";
 import { generatePDFReceipt } from "@/lib/generatePDF";
+import type { TransactionReceipt } from "@/lib/generatePDF";
 import { motion } from "framer-motion";
 import InvoiceModal from "@/components/InvoiceModal";
 
 interface TransactionActionsProps {
   transactionHash: string;
-  transaction: any;
+  transaction: TransactionReceipt;
 }
 
 export default function TransactionActions({

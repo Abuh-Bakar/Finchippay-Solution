@@ -21,8 +21,11 @@ interface TransactionForPDF {
   successful: boolean;
 }
 
+/** Type alias exported for components to reference. */
+export type TransactionReceipt = TransactionForPDF;
+
 export async function generatePDFReceipt(transaction: TransactionForPDF): Promise<void> {
-  const doc = new jsPDF() as any; // v4.x API compatibility
+  const doc = new jsPDF();
   
   // Colors
   const primaryColor: [number, number, number] = [99, 102, 241]; // Stellar blue

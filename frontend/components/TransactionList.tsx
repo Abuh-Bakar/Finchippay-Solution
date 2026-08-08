@@ -30,6 +30,24 @@ import { SearchResult } from "@/lib/transactionSearch";
 import clsx from "clsx";
 import { motion, AnimatePresence } from "framer-motion";
 
+/** Shape of the CustomEvent detail for pending transaction lifecycle events. */
+interface PendingTxEventDetail {
+  id?: string;
+  pendingId?: string;
+  resolvedTx?: PaymentRecord;
+}
+
+/** Shape of CustomEvent for resolved tx events. */
+interface ResolvedTxEventDetail {
+  pendingId: string;
+  resolvedTx: PaymentRecord;
+}
+
+/** Shape of CustomEvent for failed tx events. */
+interface FailedTxEventDetail {
+  pendingId: string;
+}
+
 export type TransactionDirectionFilter = "all" | "sent" | "received";
 
 export interface TransactionFilters {
@@ -178,8 +196,8 @@ function TransactionList({
       dispatchPending({ type: "INIT", payload: stored });
     } catch {}
 
-    const onPending = (e: any) => dispatchPending({ type: "ADD", payload: e.detail });
-    const onResolved = (e: any) => {
+    const onPending = (e: CustomEvent<PendingTxEventDetail>) => dispatchPending({ type: "ADD", payload: e.detail as PaymentRecord });
+    const onResolved = (e: CustomEvent<ResolvedTxEventDetail>) => {
       dispatchPending({ type: "RESOLVE", payload: e.detail });
       setPayments((prev) => {
         if (prev.some(p => p.id === e.detail.resolvedTx.id)) return prev;
@@ -188,7 +206,7 @@ function TransactionList({
         return next;
       });
     };
-    const onFailed = (e: any) => dispatchPending({ type: "REMOVE", payload: e.detail.pendingId });
+    const onFailed = (e: CustomEvent<FailedTxEventDetail>) => dispatchPending({ type: "REMOVE", payload: e.detail.pendingId });
 
     window.addEventListener("finchippay:pending-tx", onPending);
     window.addEventListener("finchippay:resolved-tx", onResolved);

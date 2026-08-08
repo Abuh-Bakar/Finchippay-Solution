@@ -40,12 +40,17 @@ export async function apiFetch(
 }
 
 // Automatically patch global fetch in the browser/client-side and Node environment
-const globalObj = typeof window !== "undefined" ? window : globalThis;
-if (globalObj && !((globalObj as any).__fetchPatched)) {
+interface GlobalWithFetchPatch extends typeof globalThis {
+  __fetchPatched?: boolean;
+  fetch?: typeof globalThis.fetch;
+}
+
+const globalObj = (typeof window !== "undefined" ? window : globalThis) as GlobalWithFetchPatch;
+if (globalObj && !globalObj.__fetchPatched) {
   const originalFetch = globalObj.fetch;
   if (originalFetch) {
     globalObj.fetch = async function (
-      this: any,
+      this: GlobalWithFetchPatch,
       input: RequestInfo | URL,
       init?: RequestInit
     ) {
@@ -72,6 +77,6 @@ if (globalObj && !((globalObj as any).__fetchPatched)) {
 
       return originalFetch.call(this, input, init);
     };
-    (globalObj as any).__fetchPatched = true;
+    globalObj.__fetchPatched = true;
   }
 }
