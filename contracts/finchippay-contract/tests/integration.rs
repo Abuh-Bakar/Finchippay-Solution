@@ -1054,9 +1054,8 @@ fn test_get_contract_stats() {
 fn test_paused_blocks_escrow_create() {
     let env = Env::default();
     let (_, client) = deploy(&env);
-    let admin = client.get_admin();
     env.mock_all_auths();
-    client.pause(&admin);
+    pause_contract(&env, &client);
 
     let result = client.try_create_escrow(
         &Address::generate(&env),
