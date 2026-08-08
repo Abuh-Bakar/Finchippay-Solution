@@ -84,36 +84,38 @@ fn test_pause_unpause() {
 fn test_pause_emits_event() {
     let env = Env::default();
     let (contract_id, client) = deploy(&env);
-    let admin = client.get_admin();
     env.mock_all_auths();
 
-    client.pause(&admin);
+    pause_contract(&env, &client);
+    // The test host clears the event buffer at the start of every top-level
+    // invocation, so inspect the proposal's events before any further call.
     let events = env.events().all().filter_by_contract(&contract_id);
     let raw = events.events();
-    assert_eq!(raw.len(), 1);
+    // admin_action_proposed + admin_action_approved + paused
+    assert!(raw.len() >= 3);
+    assert!(client.is_paused());
 }
 
 #[test]
 fn test_unpause_emits_event() {
     let env = Env::default();
     let (contract_id, client) = deploy(&env);
-    let admin = client.get_admin();
     env.mock_all_auths();
-    client.pause(&admin);
+    pause_contract(&env, &client);
 
-    client.unpause(&admin);
+    unpause_contract(&env, &client);
     let events = env.events().all().filter_by_contract(&contract_id);
     let raw = events.events();
-    assert_eq!(raw.len(), 1);
+    assert!(raw.len() >= 3);
+    assert!(!client.is_paused());
 }
 
 #[test]
 fn test_pause_blocks_send_tip() {
     let env = Env::default();
     let (_, client) = deploy(&env);
-    let admin = client.get_admin();
     env.mock_all_auths();
-    client.pause(&admin);
+    pause_contract(&env, &client);
 
     let token_id = Address::generate(&env);
     let from = Address::generate(&env);
