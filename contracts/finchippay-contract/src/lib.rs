@@ -4437,11 +4437,19 @@ mod tests {
         let to = Address::generate(&env);
         env.mock_all_auths();
         let token_id = create_token(&env, &admin, &contract_id, 400);
-        client.propose_admin_action(
-            &admin,
-            &AdminAction::RescueTokens(token_id.clone(), to.clone(), 400),
+        let data: Vec<Val> = Vec::from_array(
+            &env,
+            [
+                token_id.clone().into_val(&env),
+                to.clone().into_val(&env),
+                400i128.into_val(&env),
+            ],
         );
+        client.propose_admin_action(&admin, &Symbol::new(&env, "rescue_tokens"), &data);
 
+        // Threshold-1 deploy auto-executes the rescue on propose. The test host
+        // clears the event buffer at the start of every top-level invocation, so
+        // inspect the proposal's events before any further contract call.
         let events = env.events().all().filter_by_contract(&contract_id);
         assert_eq!(
             events,
