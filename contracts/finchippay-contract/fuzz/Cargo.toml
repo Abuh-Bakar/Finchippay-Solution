@@ -3,8 +3,9 @@ name = "finchippay-contract-fuzz"
 version = "0.0.0"
 edition = "2021"
 publish = false
-publish = false
-edition = "2021"
+
+# Standalone crate (cargo-fuzz style): do not inherit the root workspace.
+[workspace]
 
 [package.metadata]
 cargo-fuzz = true
