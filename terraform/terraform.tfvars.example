@@ -14,7 +14,8 @@
 # ─── Authentication ──────────────────────────────────────────────────────────
 # DigitalOcean personal access token.
 # Generate one at: https://cloud.digitalocean.com/account/api/tokens
-do_token = "dop_v1_REPLACE_WITH_YOUR_TOKEN"
+# NEVER hardcode a real token here — copy to terraform.tfvars or use TF_VAR_do_token
+do_token = ""  # required: set via TF_VAR_do_token or terraform.tfvars
 
 # ─── Project / naming ────────────────────────────────────────────────────────
 project_name = "finchippay"
