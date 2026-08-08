@@ -3360,7 +3360,8 @@ mod tests {
         env.mock_all_auths();
 
         // Admin designates a separate pauser (hot-key) role.
-        client.propose_admin_action(&admin, &AdminAction::SetPauser(pauser.clone()));
+        let data: Vec<Val> = Vec::from_array(&env, [pauser.clone().into_val(&env)]);
+        client.propose_admin_action(&admin, &Symbol::new(&env, "set_pauser"), &data);
         assert_eq!(client.get_pauser(), Some(pauser.clone()));
 
         // The pauser — not the admin — can trigger the circuit breaker.
