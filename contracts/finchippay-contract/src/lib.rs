@@ -3414,7 +3414,8 @@ mod tests {
         let new_admin = Address::generate(&env);
         env.mock_all_auths();
 
-        client.propose_admin_action(&admin, &AdminAction::SetPauser(pauser.clone()));
+        let data: Vec<Val> = Vec::from_array(&env, [pauser.clone().into_val(&env)]);
+        client.propose_admin_action(&admin, &Symbol::new(&env, "set_pauser"), &data);
         // The pauser role is pause-only; it must not be able to seize admin
         // rights by transferring them away.
         client.transfer_admin(&pauser, &new_admin);
