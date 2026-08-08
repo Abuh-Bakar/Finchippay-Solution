@@ -32,21 +32,23 @@
 //! - **Bounded inputs**: escrow release ledgers, stream deposits, and
 //!   multi-sig amounts are capped to prevent griefing and permanent lock-up.
 
-pub mod storage;
 pub mod airdrop;
-pub mod yield_escrow;
-pub mod escrow;
-pub mod streams;
-pub mod multi_sig;
 pub mod batch_send;
+pub mod escrow;
+pub mod multi_sig;
+pub mod storage;
+pub mod streams;
+pub mod yield_escrow;
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Symbol, Val, Vec,
+    contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Symbol, Val,
+    Vec,
 };
 
-use crate::storage::{self, MIN_TTL_LEDGERS, TTL_CLASS_COUNT};
+use crate::storage::{MIN_TTL_LEDGERS, TTL_CLASS_COUNT};
 // Bring all TTL primitives (bump, bump_to_floor, ttl_class_*, etc.) into scope
 // so the FinchippayContract impl methods can call them without storage:: prefix.
+// (`pub mod storage;` already brings the module name into scope.)
 use crate::storage::*;
 
 // ─── Error catalogue ──────────────────────────────────────────────────────────
@@ -207,7 +209,6 @@ pub struct TokenTotal {
     pub token: Address,
     pub total: i128,
 }
-
 
 // ─── Streaming payments ───────────────────────────────────────────────────────
 
@@ -378,47 +379,14 @@ pub struct EmergencyWithdrawal {
 
 // ─── Admin governance ──────────────────────────────────────────────────────────
 
-/// A governance operation gated behind the contract's M-of-N admin signer
-/// threshold. Carries whatever parameters the underlying operation needs so
-/// that a proposal fully specifies the action to be taken.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub enum AdminAction {
-    /// Pause all value-transferring operations.
-    Pause,
-    /// Resume all value-transferring operations.
-    Unpause,
-    /// Set (or clear, via the zero address convention is not used — always a
-    /// concrete address) the pauser role.
-    SetPauser(Address),
-    /// Upgrade the contract WASM. Carries the new WASM hash and the storage
-    /// layout version declared by the new WASM.
-    Upgrade(BytesN<32>, u32),
-    /// Sweep unlocked tokens held by the contract. Carries
-    /// (token_address, destination, amount).
-    RescueTokens(Address, Address, i128),
-}
-
-/// An admin governance proposal awaiting M-of-N approval.
-///
-/// The proposer's own approval is recorded at creation time, so a
-/// `threshold` of 1 auto-executes immediately on `propose_admin_action`.
-/// Otherwise, subsequent admin signers call `approve_admin_action` until the
-/// threshold is met, at which point the action executes automatically.
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct AdminActionProposal {
-    pub id: u32,
-    /// Admin signer that created the proposal.
-    pub proposer: Address,
-    /// The governance operation this proposal will perform once approved.
-    pub action: AdminAction,
-    /// Subset of admin signers that have approved so far.
-    pub approvals: Vec<Address>,
-    /// True once the action has been executed. Executed proposals can no
-    /// longer be approved.
-    pub executed: bool,
-}
+// ─── Admin governance ──────────────────────────────────────────────────────
+// Admin-governed operations (pause, unpause, set_pauser, upgrade,
+// rescue_tokens) are gated by the M-of-N admin signer set configured in
+// `initialize`. Proposals use the Symbol-based `AdminActionProposal` struct
+// defined below, created via `propose_admin_action` and approved via
+// `approve_admin_action`. The legacy single-`Admin` address is retained only
+// as a read-only convenience pointer and for `transfer_admin`; it carries no
+// authority over gated operations.
 
 // ─── Security bounds ──────────────────────────────────────────────────────────
 
@@ -585,7 +553,6 @@ pub enum DataKey {
     // Swap / DEX configuration
     SwapFee,
     FeeCollector,
-
 }
 
 // ─── Helpers (TTL primitives re-exported from storage module) ────────────────
@@ -697,6 +664,72 @@ pub(crate) fn contract_transfer_out(env: &Env, token: &token::Client, to: &Addre
         env.storage().persistent().set(&key, &balance_after);
         storage::bump(env, &key);
     }
+}
+
+// ─── Swap / DEX helpers ──────────────────────────────────────────────────────
+
+/// Maximum protocol swap fee in basis points (1000 bps = 10%).
+pub(crate) const MAX_SWAP_FEE_BPS: u32 = 1_000;
+
+/// Default protocol swap fee in basis points (30 bps = 0.3%).
+pub(crate) const DEFAULT_SWAP_FEE_BPS: u32 = 30;
+
+/// Current protocol swap fee in basis points (default 0.3%).
+pub(crate) fn get_swap_fee_bps(env: &Env) -> u32 {
+    env.storage()
+        .persistent()
+        .get(&DataKey::SwapFee)
+        .unwrap_or(DEFAULT_SWAP_FEE_BPS)
+}
+
+/// Address that receives protocol swap fees; defaults to the admin.
+pub(crate) fn get_fee_collector_address(env: &Env) -> Address {
+    match env.storage().persistent().get(&DataKey::FeeCollector) {
+        Some(collector) => collector,
+        None => get_admin(env),
+    }
+}
+
+/// Split a gross `amount_in` into (protocol_fee, amount_to_swap).
+pub(crate) fn compute_swap_fee(amount_in: i128, fee_bps: u32) -> (i128, i128) {
+    let fee = amount_in
+        .checked_mul(fee_bps as i128)
+        .expect("overflow")
+        .checked_div(10_000)
+        .expect("divide by zero");
+    (fee, amount_in.checked_sub(fee).expect("underflow"))
+}
+
+/// Gross input required so the caller nets `amount_out` after the fee, using
+/// ceiling division so the contract never short-changes the caller.
+pub(crate) fn compute_required_amount_in(amount_out: i128, fee_bps: u32) -> i128 {
+    let denominator = 10_000i128
+        .checked_sub(fee_bps as i128)
+        .expect("swap fee must be below 100%");
+    amount_out
+        .checked_mul(10_000)
+        .expect("overflow")
+        .checked_add(denominator - 1)
+        .expect("overflow")
+        .checked_div(denominator)
+        .expect("divide by zero")
+}
+
+/// Validate a swap path: at least two hops, first == token_in, last == token_out.
+pub(crate) fn validate_swap_path(
+    path: &Vec<Address>,
+    token_in: &Address,
+    token_out: &Address,
+) -> Result<(), ContractError> {
+    if path.len() < 2 {
+        return Err(ContractError::InvalidPath);
+    }
+    if path.get(0).unwrap() != token_in.clone()
+        || path.get(path.len() - 1).unwrap() != token_out.clone()
+    {
+        return Err(ContractError::InvalidPath);
+    }
+    Ok(())
 }
 
 /// Check that the contract is not paused. Panics with `ContractPaused` if it is.
@@ -812,10 +845,7 @@ pub(crate) fn assert_invariants(env: &Env, domain: Symbol) {
             .get(&DataKey::StreamCount)
             .unwrap_or(0);
         for i in 0..stream_count {
-            let stream: Option<Stream> = env
-                .storage()
-                .persistent()
-                .get(&DataKey::Stream(i));
+            let stream: Option<Stream> = env.storage().persistent().get(&DataKey::Stream(i));
             if let Some(s) = stream {
                 if s.claimed > s.deposited {
                     panic!(
@@ -841,10 +871,8 @@ pub(crate) fn assert_invariants(env: &Env, domain: Symbol) {
             .get(&DataKey::MultiSigCount)
             .unwrap_or(0);
         for i in 0..multisig_count {
-            let proposal: Option<MultiSigProposal> = env
-                .storage()
-                .persistent()
-                .get(&DataKey::MultiSig(i));
+            let proposal: Option<MultiSigProposal> =
+                env.storage().persistent().get(&DataKey::MultiSig(i));
             if let Some(p) = proposal {
                 if p.status == MultiSigStatus::Executed {
                     // Check all signers are unique
@@ -872,7 +900,6 @@ pub(crate) fn assert_invariants(env: &Env, domain: Symbol) {
     }
 }
 
-
 #[contract]
 pub struct FinchippayContract;
 
@@ -899,10 +926,20 @@ impl FinchippayContract {
     /// carries no special authority over the multi-sig-gated operations.
     ///
     /// Can only be called once; returns `AlreadyInitialized` on subsequent calls.
-    pub fn initialize(env: Env, admin_signers: Vec<Address>, threshold: u32) -> Result<(), ContractError> {
+    pub fn initialize(
+        env: Env,
+        admin_signers: Vec<Address>,
+        threshold: u32,
+    ) -> Result<(), ContractError> {
         if env.storage().persistent().has(&DataKey::Admin) {
             return Err(ContractError::AlreadyInitialized);
         }
+        validate_admin_signers(&admin_signers, threshold);
+        // The first signer doubles as the legacy single-`Admin` pointer (see
+        // `transfer_admin`); the full `AdminSigners` set gates admin actions.
+        let admin = admin_signers
+            .get(0)
+            .unwrap_or_else(|| panic!("admin_signers must not be empty"));
         env.storage().persistent().set(&DataKey::Admin, &admin);
         bump_to_floor(&env, &DataKey::Admin);
         env.storage()
@@ -981,7 +1018,7 @@ impl FinchippayContract {
     /// The designated pauser (if any) may call this directly as a fast
     /// circuit breaker, retaining its existing single-signature behavior.
     /// Admin-initiated pausing now requires the admin signer multi-sig —
-    /// call `propose_admin_action(AdminAction::Pause)` (and
+    /// call `propose_admin_action` with action_type `"pause"` (and
     /// `approve_admin_action` if the threshold is greater than 1) instead.
     pub fn pause(env: Env, caller: Address) {
         caller.require_auth();
@@ -1003,7 +1040,7 @@ impl FinchippayContract {
     ///
     /// The designated pauser (if any) may call this directly, mirroring
     /// `pause`. Admin-initiated unpausing requires the admin signer
-    /// multi-sig via `propose_admin_action(AdminAction::Unpause)`.
+    /// multi-sig via `propose_admin_action` with action_type `"unpause"`.
     pub fn unpause(env: Env, caller: Address) {
         caller.require_auth();
         let stored_admin = get_admin(&env);
@@ -1018,26 +1055,6 @@ impl FinchippayContract {
         env.storage().persistent().set(&DataKey::Paused, &false);
         bump_to_floor(&env, &DataKey::Paused);
         env.events().publish((Symbol::new(&env, "unpaused"),), ());
-    }
-
-    /// Admin: approve a pending governance action proposal created by
-    /// `propose_admin_action`.
-    ///
-    /// `approver` must be one of the current admin signers and must not have
-    /// already approved this proposal. Once the number of distinct
-    /// approvals reaches the configured threshold, the action executes
-    /// automatically. Returns `true` if this call caused execution.
-    pub fn approve_admin_action(env: Env, proposal_id: u32, approver: Address) -> bool {
-        require_initialized(&env);
-        approver.require_auth();
-        let signers = get_admin_signers(&env);
-        if !signers.iter().any(|s| s == approver) {
-            panic!("not an admin signer");
-        }
-        env.storage().persistent().set(&DataKey::Pauser, &pauser);
-        bump_to_floor(&env, &DataKey::Pauser);
-        env.events()
-            .publish((Symbol::new(&env, "pauser_set"),), pauser);
     }
 
     /// Admin: configure the list of admin signers and threshold for emergency
@@ -1950,12 +1967,13 @@ impl FinchippayContract {
             .persistent()
             .get(&DataKey::TotalReceiptCount)
             .unwrap_or(0);
-        
-        env.storage()
-            .persistent()
-            .set(&DataKey::ReceiptByIndex(global_count), &(from.clone(), count));
+
+        env.storage().persistent().set(
+            &DataKey::ReceiptByIndex(global_count),
+            &(from.clone(), count),
+        );
         bump_to_floor(&env, &DataKey::ReceiptByIndex(global_count));
-        
+
         env.storage()
             .persistent()
             .set(&DataKey::TotalReceiptCount, &(global_count + 1));
@@ -2027,7 +2045,6 @@ impl FinchippayContract {
             expected_memo: receipt.memo,
         }
     }
-
 
     /// Verify that a receipt at `payer` + `index` matches the given `expected_amount`
     /// and `expected_memo`. Returns `true` only if all fields match exactly, proving
@@ -2130,7 +2147,15 @@ impl FinchippayContract {
         release_ledger: u32,
         arbitrator: Address,
     ) -> Result<u32, ContractError> {
-        escrow::create_disputable_escrow(env, token_address, from, to, amount, release_ledger, arbitrator)
+        escrow::create_disputable_escrow(
+            env,
+            token_address,
+            from,
+            to,
+            amount,
+            release_ledger,
+            arbitrator,
+        )
     }
 
     /// Raise a dispute on a disputable escrow. Only the sender or recipient
@@ -2172,7 +2197,14 @@ impl FinchippayContract {
         rate_per_ledger: i128,
         deposit: i128,
     ) -> u32 {
-        streams::open_stream(env, token_address, payer, recipient, rate_per_ledger, deposit)
+        streams::open_stream(
+            env,
+            token_address,
+            payer,
+            recipient,
+            rate_per_ledger,
+            deposit,
+        )
     }
 
     /// Recipient claims all currently claimable tokens from stream `id`.
@@ -2279,7 +2311,16 @@ impl FinchippayContract {
         signers: Vec<Address>,
         expiration_ledger: u32,
     ) -> u32 {
-        multi_sig::create_multisig(env, token_address, proposer, recipient, amount, threshold, signers, expiration_ledger)
+        multi_sig::create_multisig(
+            env,
+            token_address,
+            proposer,
+            recipient,
+            amount,
+            threshold,
+            signers,
+            expiration_ledger,
+        )
     }
 
     /// A signer approves proposal `id`. If the approval count reaches `threshold`
@@ -2322,7 +2363,10 @@ impl FinchippayContract {
     /// monitoring and dashboards. Returns (escrow_count, stream_count,
     /// multisig_count).
     pub fn get_contract_stats(env: Env) -> (u32, u32, u32) {
-        batch_send::get_contract_stats(env, u32, u32)
+        let escrow_count = storage::counter(&env, &DataKey::EscrowCount);
+        let stream_count = storage::counter(&env, &DataKey::StreamCount);
+        let multisig_count = storage::counter(&env, &DataKey::MultiSigCount);
+        (escrow_count, stream_count, multisig_count)
     }
 
     // ─── Batch send ───────────────────────────────────────────────────────────
@@ -2388,7 +2432,15 @@ impl FinchippayContract {
         cliff_ledger: u32,
         end_ledger: u32,
     ) -> u32 {
-        batch_send::create_vesting(env, token, from, beneficiary, amount, cliff_ledger, end_ledger)
+        batch_send::create_vesting(
+            env,
+            token,
+            from,
+            beneficiary,
+            amount,
+            cliff_ledger,
+            end_ledger,
+        )
     }
 
     pub fn claim_vesting(env: Env, id: u32, beneficiary: Address) -> i128 {
@@ -2857,31 +2909,31 @@ mod tests {
         let payer3 = Address::generate(&env);
         let payee = Address::generate(&env);
         env.mock_all_auths();
-        
+
         // Mint 2 receipts from payer1
         client.mint_receipt(&payer1, &payee, &1000, &Symbol::new(&env, "r1"));
         client.mint_receipt(&payer1, &payee, &2000, &Symbol::new(&env, "r2"));
-        
+
         // Mint 2 receipts from payer2
         client.mint_receipt(&payer2, &payee, &3000, &Symbol::new(&env, "r3"));
         client.mint_receipt(&payer2, &payee, &4000, &Symbol::new(&env, "r4"));
-        
+
         // Mint 1 receipt from payer3
         client.mint_receipt(&payer3, &payee, &5000, &Symbol::new(&env, "r5"));
-        
+
         // Assert global count is 5
         assert_eq!(client.total_receipt_count(), 5);
-        
+
         // Verify individual counts
         assert_eq!(client.get_receipt_count(&payer1), 2);
         assert_eq!(client.get_receipt_count(&payer2), 2);
         assert_eq!(client.get_receipt_count(&payer3), 1);
-        
+
         // Verify receipt by index mapping
         let (from, local_idx) = client.get_receipt_by_index(&0);
         assert_eq!(from, payer1);
         assert_eq!(local_idx, 0);
-        
+
         let (from, local_idx) = client.get_receipt_by_index(&4);
         assert_eq!(from, payer3);
         assert_eq!(local_idx, 0);
@@ -5100,7 +5152,10 @@ mod tests {
         // eventually cover every escrow.
         for _ in 0..12 {
             let bumped = client.bump_all_ttls(&admin, &2);
-            assert!(bumped <= 4, "a call bumped {bumped} keys with a budget of 2");
+            assert!(
+                bumped <= 4,
+                "a call bumped {bumped} keys with a budget of 2"
+            );
         }
 
         for index in 0..recipients.len() {
