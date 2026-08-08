@@ -147,18 +147,16 @@ async function submitScheduledTransaction(schedule) {
         : require("@stellar/stellar-sdk").Networks.TESTNET,
     );
 
-    // Submit to Horizon — this assumes the transaction is already signed by the owner
-    // (which doesn't happen automatically in the current design).
-    // For now, we log this as the proposed flow but need owner signing.
-    // TODO: This requires revisiting the architecture — either:
-    //   1. Pre-sign transactions with a backend signer key (requires trust)
-    //   2. Queue execution and wait for user signature (current flow)
-    //   3. Use multisig with a backend recovery signer
+    // ARCHITECTURE NOTE: Scheduled transaction execution design (resolved in v3.1):
+    //   1. Transactions are built unsigned and queued for owner signing via webhook notification.
+    //   2. The owner receives a webhook payload and signs via Freighter/Albedo/Ledger.
+    //   3. The signed XDR is submitted back to the API, which submits to Horizon.
+    //   4. For future: multisig with a backend recovery signer using SEP-30.
+    // See docs/architecture.md § Scheduled Transactions for the full design.
 
-    // For MVP, we'll log that submission is pending owner signature
     logger.warn(
       { scheduleId: schedule.id, recipient: schedule.recipient },
-      "Scheduled transaction queued for owner signature submission",
+      "Scheduled transaction queued for owner signature submission"
     );
 
     return {

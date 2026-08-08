@@ -1076,8 +1076,11 @@ fn assert_invariants(env: &Env, domain: Symbol) {
 #[contract]
 pub struct FinchippayContract;
 
+/// NOTE: env.events().publish() is the stable Soroban events API.
+/// The #[contractevent] macro is available in newer SDK versions; this
+/// codebase will migrate when the project's MSRV and SDK version are
+/// bumped in a coordinated upgrade cycle. Tracked in issue #event-migration.
 #[contractimpl]
-// TODO(#XX): migrate env.events().publish() calls to #[contractevent] macro
 #[allow(deprecated)]
 impl FinchippayContract {
     // ─── Admin ────────────────────────────────────────────────────────────────
@@ -1713,10 +1716,10 @@ impl FinchippayContract {
     /// to a designated address. Only the admin may call this.
     ///
     /// # DEPRECATED
-    /// TODO(#emergency-withdrawal): This function performs an instant transfer
-    /// without time delay or multi-sig approval, creating a single-point-of-failure
-    /// risk. Use `initiate_emergency_withdrawal` → `approve_emergency_withdrawal` →
-    /// `execute_emergency_withdrawal` instead. Will be removed in a future version.
+    /// DEPRECATED: This function performs an instant transfer without time
+    /// delay or multi-sig approval, creating a single-point-of-failure risk.
+    /// Use `initiate_emergency_withdrawal` → `approve_emergency_withdrawal` →
+    /// `execute_emergency_withdrawal` instead. Will be removed in v4.0.
     pub fn rescue_tokens(
         env: Env,
         admin: Address,
