@@ -1204,6 +1204,14 @@ impl FinchippayContract {
         }
     }
 
+    /// Return an admin action proposal by id.
+    pub fn get_admin_action_proposal(env: Env, proposal_id: u64) -> AdminActionProposal {
+        env.storage()
+            .persistent()
+            .get(&DataKey::AdminActionProposal(proposal_id))
+            .unwrap_or_else(|| panic!("{:?}", ContractError::ProposalNotFound))
+    }
+
     /// Internal: execute the concrete admin action after threshold is met.
     fn execute_admin_action(env: &Env, proposal: &AdminActionProposal) {
         let action = &proposal.action_type;
