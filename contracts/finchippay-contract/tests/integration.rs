@@ -148,7 +148,8 @@ fn test_initialize_event() {
     let id = env.register(FinchippayContract, ());
     let client = FinchippayContractClient::new(&env, &id);
     let admin = Address::generate(&env);
-    client.initialize(&admin);
+    let signers = Vec::from_array(&env, [admin.clone()]);
+    client.initialize(&signers, &1);
     let events = env.events().all().filter_by_contract(&id);
     let raw = events.events();
     assert_eq!(raw.len(), 1);
