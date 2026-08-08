@@ -14,9 +14,6 @@ use soroban_sdk::{contracttype, token, Address, Env, Symbol};
 use crate::storage;
 use crate::DataKey;
 
-/// TTL bump amount for yield escrow entries (~30 days at 5 s/ledger).
-const YIELD_ESCROW_BUMP_AMOUNT: u32 = 518_400;
-
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct YieldEscrow {
