@@ -3,6 +3,7 @@
 
 pub mod storage;
 pub mod airdrop;
+pub mod yield_escrow;
 //!
 //! A production-grade Soroban contract for the Finchippay-Solution platform on
 //! the Stellar network. Provides:
@@ -563,7 +564,10 @@ pub enum DataKey {
     Airdrop(u32),
     AirdropCount,
     AirdropClaimed(u32, Address),
-								
+    // Yield escrow (AMM/DeFi pool integration)
+    YieldEscrowCount,
+    YieldEscrow(u64),
+
 }
 
 // ─── Helpers (TTL primitives re-exported from storage module) ────────────────
