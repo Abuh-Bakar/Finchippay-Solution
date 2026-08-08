@@ -4,6 +4,10 @@
 pub mod storage;
 pub mod airdrop;
 pub mod yield_escrow;
+pub mod escrow;
+pub mod streams;
+pub mod multi_sig;
+pub mod batch_send;
 //!
 //! A production-grade Soroban contract for the Finchippay-Solution platform on
 //! the Stellar network. Provides:
@@ -576,7 +580,7 @@ pub enum DataKey {
 // bump, bump_to_floor, bump_to_floor_if_present, bump_if_present
 // are now in crate::storage. The contract impl uses them via `use crate::storage::*`.
 
-fn get_admin(env: &Env) -> Address {
+pub(crate) fn get_admin(env: &Env) -> Address {
     let key = DataKey::Admin;
     let admin: Address = env
         .storage()
@@ -587,14 +591,14 @@ fn get_admin(env: &Env) -> Address {
     admin
 }
 
-fn locked_balance(env: &Env, token_address: &Address) -> i128 {
+pub(crate) fn locked_balance(env: &Env, token_address: &Address) -> i128 {
     let key = DataKey::LockedBalance(token_address.clone());
     let balance = env.storage().persistent().get(&key).unwrap_or(0);
     storage::bump_if_present(env, &key);
     balance
 }
 
-fn increase_locked_balance(env: &Env, token_address: &Address, amount: i128) {
+pub(crate) fn increase_locked_balance(env: &Env, token_address: &Address, amount: i128) {
     let key = DataKey::LockedBalance(token_address.clone());
     let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
     env.storage()
@@ -603,7 +607,7 @@ fn increase_locked_balance(env: &Env, token_address: &Address, amount: i128) {
     storage::bump(env, &key);
 }
 
-fn decrease_locked_balance(env: &Env, token_address: &Address, amount: i128) {
+pub(crate) fn decrease_locked_balance(env: &Env, token_address: &Address, amount: i128) {
     let key = DataKey::LockedBalance(token_address.clone());
     let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
     env.storage()
@@ -614,7 +618,7 @@ fn decrease_locked_balance(env: &Env, token_address: &Address, amount: i128) {
 
 /// Get a token client for a given token address, avoiding repeated
 /// boilerplate across all token-interacting functions.
-fn get_token_client<'a>(env: &'a Env, token_address: &'a Address) -> token::Client<'a> {
+pub(crate) fn get_token_client<'a>(env: &'a Env, token_address: &'a Address) -> token::Client<'a> {
     token::Client::new(env, token_address)
 }
 
@@ -625,7 +629,7 @@ fn get_token_client<'a>(env: &'a Env, token_address: &'a Address) -> token::Clie
 ///
 /// # Panics
 /// Panics with `TransferFailed` if the balance check does not hold.
-fn get_contract_balance(env: &Env, token: &token::Client) -> i128 {
+pub(crate) fn get_contract_balance(env: &Env, token: &token::Client) -> i128 {
     let key = DataKey::LastContractBalance(token.address.clone());
     match env.storage().persistent().get(&key) {
         Some(bal) => {
@@ -641,13 +645,13 @@ fn get_contract_balance(env: &Env, token: &token::Client) -> i128 {
     }
 }
 
-fn set_contract_balance(env: &Env, token_address: &Address, balance: i128) {
+pub(crate) fn set_contract_balance(env: &Env, token_address: &Address, balance: i128) {
     let key = DataKey::LastContractBalance(token_address.clone());
     env.storage().persistent().set(&key, &balance);
     storage::bump(env, &key);
 }
 
-fn require_transfer_succeeded(
+pub(crate) fn require_transfer_succeeded(
     env: &Env,
     token: &token::Client,
     from: &Address,
@@ -673,7 +677,7 @@ fn require_transfer_succeeded(
     }
 }
 
-fn contract_transfer_out(env: &Env, token: &token::Client, to: &Address, amount: &i128) {
+pub(crate) fn contract_transfer_out(env: &Env, token: &token::Client, to: &Address, amount: &i128) {
     token.transfer(&env.current_contract_address(), to, amount);
     let key = DataKey::LastContractBalance(token.address.clone());
     if env.storage().persistent().has(&key) {
@@ -684,7 +688,7 @@ fn contract_transfer_out(env: &Env, token: &token::Client, to: &Address, amount:
 }
 
 /// Check that the contract is not paused. Panics with `ContractPaused` if it is.
-fn require_not_paused(env: &Env) {
+pub(crate) fn require_not_paused(env: &Env) {
     let key = DataKey::Paused;
     let paused: bool = env.storage().persistent().get(&key).unwrap_or(false);
     if paused {
@@ -695,13 +699,13 @@ fn require_not_paused(env: &Env) {
 
 /// Check that the contract has been initialised. Panics if `initialize()` was
 /// never called. This prevents use of the contract before the admin is set.
-fn require_initialized(env: &Env) {
+pub(crate) fn require_initialized(env: &Env) {
     if !env.storage().persistent().has(&DataKey::Admin) {
         panic!("Contract not initialized");
     }
 }
 
-fn get_admin_signers(env: &Env) -> Vec<Address> {
+pub(crate) fn get_admin_signers(env: &Env) -> Vec<Address> {
     let key = DataKey::AdminSigners;
     let signers: Vec<Address> = env
         .storage()
@@ -716,7 +720,7 @@ fn get_admin_signers(env: &Env) -> Vec<Address> {
 /// and `set_admin_signers` so both enforce the same invariants: a non-empty,
 /// duplicate-free signer list no longer than `MAX_ADMIN_SIGNERS`, and a
 /// threshold in `1..=signers.len()`.
-fn validate_admin_signers(signers: &Vec<Address>, threshold: u32) {
+pub(crate) fn validate_admin_signers(signers: &Vec<Address>, threshold: u32) {
     if signers.len() == 0 {
         panic!("signers list must not be empty");
     }
@@ -735,7 +739,7 @@ fn validate_admin_signers(signers: &Vec<Address>, threshold: u32) {
     }
 }
 
-fn get_admin_signers_threshold(env: &Env) -> u32 {
+pub(crate) fn get_admin_signers_threshold(env: &Env) -> u32 {
     let key = DataKey::AdminSignersThreshold;
     let threshold: u32 = env
         .storage()
@@ -757,7 +761,7 @@ fn get_admin_signers_threshold(env: &Env) -> u32 {
 /// violation, preventing invalid state transitions at the contract level.
 ///
 /// `domain` can be "all", "tips", "escrows", "streams", or "multisig".
-fn assert_invariants(env: &Env, domain: Symbol) {
+pub(crate) fn assert_invariants(env: &Env, domain: Symbol) {
     let sym_all = Symbol::new(env, "all");
     let sym_tips = Symbol::new(env, "tips");
     let sym_escrows = Symbol::new(env, "escrows");
@@ -3089,7 +3093,7 @@ impl FinchippayContract {
     }
 
     // Internal: compute claimable amount for a stream at the current ledger.
-    fn _claimable(env: &Env, stream: &Stream) -> i128 {
+    pub(crate) fn _claimable(env: &Env, stream: &Stream) -> i128 {
         if stream.closed {
             return 0;
         }
