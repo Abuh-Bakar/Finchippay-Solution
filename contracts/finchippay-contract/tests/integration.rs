@@ -1112,7 +1112,7 @@ fn test_paused_does_not_block_view_functions() {
     let (_, client) = deploy(&env);
     let admin = client.get_admin();
     env.mock_all_auths();
-    client.pause(&admin);
+    pause_contract(&env, &client);
 
     let result = client.try_get_stream(&999);
     assert_eq!(result.unwrap_err().unwrap(), ContractError::NotFound);
