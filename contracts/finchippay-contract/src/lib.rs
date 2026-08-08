@@ -2902,7 +2902,8 @@ mod tests {
         let (_id, client) = deploy(&env);
         let admin = client.get_admin();
 
-        let proposal_id = client.propose_admin_action(&admin, &AdminAction::Pause);
+        let proposal_id =
+            client.propose_admin_action(&admin, &Symbol::new(&env, "pause"), &Vec::new(&env));
         assert!(client.get_admin_action_proposal(&proposal_id).executed);
         assert!(client.is_paused());
     }
