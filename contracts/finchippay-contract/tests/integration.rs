@@ -60,8 +60,9 @@ fn test_initialize_cannot_be_called_twice() {
     let id = env.register(FinchippayContract, ());
     let client = FinchippayContractClient::new(&env, &id);
     let admin = Address::generate(&env);
-    client.initialize(&admin);
-    let result = client.try_initialize(&admin);
+    let signers = Vec::from_array(&env, [admin.clone()]);
+    client.initialize(&signers, &1);
+    let result = client.try_initialize(&signers, &1);
     assert_eq!(result.unwrap_err().unwrap(), ContractError::AlreadyInitialized);
 }
 
