@@ -2,16 +2,27 @@
 
 function loadAnchors() {
   const raw = process.env.ANCHORS_CONFIG;
+  const isDev = process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
 
   if (!raw) {
-    // Sensible default so the feature works out of the box in dev/testnet.
-    return {
-      testanchor: {
-        name: "testanchor",
-        sep24Url: "https://testanchor.stellar.org/sep24",
-        supportedAssets: ["SRT", "USDC"],
-      },
-    };
+    if (isDev) {
+      const logger = require("../utils/logger");
+      logger.warn(
+        "ANCHORS_CONFIG not set — using development-only default anchor. " +
+        "Set ANCHORS_CONFIG in production to prevent startup failure."
+      );
+      return {
+        testanchor: {
+          name: "testanchor",
+          sep24Url: "https://testanchor.stellar.org/sep24",
+          supportedAssets: ["SRT", "USDC"],
+        },
+      };
+    }
+    throw new Error(
+      "ANCHORS_CONFIG environment variable is required in production. " +
+      "Set it to a JSON object mapping anchor names to { sep24Url, supportedAssets }."
+    );
   }
 
   let parsed;
