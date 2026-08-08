@@ -378,8 +378,6 @@ pub struct EmergencyWithdrawal {
 }
 
 // ─── Admin governance ──────────────────────────────────────────────────────────
-
-// ─── Admin governance ──────────────────────────────────────────────────────
 // Admin-governed operations (pause, unpause, set_pauser, upgrade,
 // rescue_tokens) are gated by the M-of-N admin signer set configured in
 // `initialize`. Proposals use the Symbol-based `AdminActionProposal` struct
