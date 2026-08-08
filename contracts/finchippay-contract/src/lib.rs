@@ -3383,7 +3383,8 @@ mod tests {
         let stranger = Address::generate(&env);
         env.mock_all_auths();
 
-        client.propose_admin_action(&admin, &AdminAction::SetPauser(pauser.clone()));
+        let data: Vec<Val> = Vec::from_array(&env, [pauser.clone().into_val(&env)]);
+        client.propose_admin_action(&admin, &Symbol::new(&env, "set_pauser"), &data);
         // A random address that is neither admin nor the designated pauser
         // must be rejected even with a valid auth signature.
         client.pause(&stranger);
