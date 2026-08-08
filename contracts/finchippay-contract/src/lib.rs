@@ -41,8 +41,8 @@ pub mod streams;
 pub mod yield_escrow;
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Symbol, Val,
-    Vec,
+    contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, IntoVal,
+    Symbol, TryIntoVal, Val, Vec,
 };
 
 use crate::storage::{MIN_TTL_LEDGERS, TTL_CLASS_COUNT};
