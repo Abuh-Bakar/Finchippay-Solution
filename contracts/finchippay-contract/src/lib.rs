@@ -477,6 +477,8 @@ pub enum TtlClass {
     Vesting,
     /// Emergency withdrawal counter and per-id withdrawals.
     Emergency,
+    /// Yield escrow counter and per-id escrows (AMM/DeFi pool integration).
+    YieldEscrow,
 }
 
 // ─── Admin multi-sig proposal type ────────────────────────────────────────────

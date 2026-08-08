@@ -42,7 +42,7 @@ pub const MAX_TTL_BUMP_KEYS: u32 = 100;
 
 /// Number of variants in `TtlClass`, i.e. how many key groups a full sweep
 /// walks through.
-pub const TTL_CLASS_COUNT: u32 = 7;
+pub const TTL_CLASS_COUNT: u32 = 8;
 
 /// Number of singleton configuration keys enumerated by the `Config` class.
 pub const TTL_CONFIG_KEYS: u32 = 9;
@@ -113,6 +113,7 @@ pub fn ttl_class_at(index: u32) -> TtlClass {
         3 => TtlClass::Streams,
         4 => TtlClass::MultiSig,
         5 => TtlClass::Vesting,
+        6 => TtlClass::YieldEscrow,
         _ => TtlClass::Emergency,
     }
 }
@@ -127,6 +128,7 @@ pub fn ttl_class_symbol(env: &Env, class: &TtlClass) -> Symbol {
         TtlClass::MultiSig => Symbol::new(env, "multisig"),
         TtlClass::Vesting => Symbol::new(env, "vesting"),
         TtlClass::Emergency => Symbol::new(env, "emergency"),
+        TtlClass::YieldEscrow => Symbol::new(env, "yieldescrow"),
     }
 }
 
@@ -141,6 +143,7 @@ pub fn ttl_class_len(env: &Env, class: &TtlClass) -> u32 {
         TtlClass::MultiSig => 1 + counter(env, &DataKey::MultiSigCount),
         TtlClass::Vesting => 1 + counter(env, &DataKey::VestingCount),
         TtlClass::Emergency => 1 + counter(env, &DataKey::EmergencyWithdrawalCount),
+        TtlClass::YieldEscrow => 1 + counter(env, &DataKey::YieldEscrowCount),
     }
 }
 
@@ -243,6 +246,13 @@ pub fn bump_ttl_class_item(env: &Env, class: &TtlClass, index: u32) -> u32 {
                 bump_to_floor_if_present(env, &DataKey::EmergencyWithdrawalCount)
             } else {
                 bump_to_floor_if_present(env, &DataKey::EmergencyWithdrawal(index - 1))
+            }
+        }
+        TtlClass::YieldEscrow => {
+            if index == 0 {
+                bump_to_floor_if_present(env, &DataKey::YieldEscrowCount)
+            } else {
+                bump_to_floor_if_present(env, &DataKey::YieldEscrow((index - 1) as u64))
             }
         }
     }
