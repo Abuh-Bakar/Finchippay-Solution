@@ -59,7 +59,8 @@ fn deploy<'a>(env: &'a Env, payer: &Address) -> (Address, FinchippayContractClie
     let id = env.register(FinchippayContract, ());
     let client = FinchippayContractClient::new(env, &id);
     let admin = Address::generate(env);
-    client.initialize(&admin);
+    let signers = soroban_sdk::Vec::from_array(env, [admin.clone()]);
+    client.initialize(&signers, &1);
 
     let sac = env.register_stellar_asset_contract_v2(admin.clone());
     let token_id = sac.address();
