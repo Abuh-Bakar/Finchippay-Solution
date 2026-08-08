@@ -1089,9 +1089,8 @@ fn test_paused_blocks_open_stream() {
 fn test_paused_blocks_create_multisig() {
     let env = Env::default();
     let (_, client) = deploy(&env);
-    let admin = client.get_admin();
     env.mock_all_auths();
-    client.pause(&admin);
+    pause_contract(&env, &client);
 
     let mut signers = Vec::new(&env);
     signers.push_back(Address::generate(&env));
