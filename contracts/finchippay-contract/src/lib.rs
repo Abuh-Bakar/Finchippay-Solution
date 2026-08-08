@@ -525,9 +525,9 @@ pub enum DataKey {
     EmergencyWithdrawalCount,
     EmergencyWithdrawal(u32),
     /// List of addresses authorised to approve emergency withdrawals and
-    /// gated admin actions (pause, unpause, set_pauser, upgrade,
-    /// rescue_tokens). Configured at `initialize` and updatable via
-    /// `set_admin_signers`.
+    /// gated admin actions (pause, unpause, set_pauser, set_admin_signers,
+    /// upgrade, rescue_tokens). Configured at `initialize` and updatable via
+    /// the `set_admin_signers` admin action.
     AdminSigners,
     /// Number of approvals required from `AdminSigners` for emergency
     /// withdrawal execution and gated admin actions.
