@@ -273,3 +273,27 @@ try {
   }
 }
 ```
+
+## Multi-Language SDK Roadmap
+
+We plan to provide SDKs in the most common languages used by Stellar developers:
+
+| Language | Status | Timeline |
+|----------|--------|----------|
+| **TypeScript/JavaScript** | ✅ Stable | Shipped v1.0 |
+| **Python** | 📋 Planned | Q1 2027 |
+| **Go** | 📋 Planned | Q2 2027 |
+| **Rust** | 📋 Planned | Q2 2027 |
+
+All SDKs will share the same API design, error codes, and authentication model.
+TypeScript bindings are generated from the Soroban contract's schema, and
+language-specific wrappers add ergonomic helpers for common operations.
+
+### Contributing an SDK
+
+If you would like to build an SDK for an additional language:
+1. Use the TypeScript SDK as a reference implementation
+2. Follow the error code format in `shared/errorCodes.js`
+3. Implement the `FinchippayClient` interface from `sdk/src/types.ts`
+4. Add tests that mirror the TypeScript test suite
+5. Submit a PR with the new SDK in `sdk/<language>/`
