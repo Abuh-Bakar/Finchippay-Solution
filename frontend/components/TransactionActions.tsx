@@ -5,6 +5,7 @@
  */
 
 import { useState } from "react";
+import { logger } from "@/lib/logger";
 import { explorerUrl } from "@/lib/stellar";
 import { copyToClipboard } from "@/utils/format";
 import { ExternalLinkIcon, CopyIcon, CheckIcon, PrinterIcon } from "@/components/icons";
@@ -46,8 +47,9 @@ export default function TransactionActions({
           text: `View transaction on Finchippay`,
           url: shareUrl,
         });
-      } catch (err) {
-        console.log("Share cancelled");
+      } catch {
+        // User dismissed the native share sheet — not an error.
+        logger.info("Share cancelled by user");
       }
     } else {
       await copyToClipboard(shareUrl);
