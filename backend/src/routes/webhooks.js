@@ -36,7 +36,7 @@ const {
  * is also persisted for verification. The server restores all webhooks on
  * startup — re-registration is not required after a restart.
  */
-router.post("/", validate(registerWebhookSchema), async (req, res, next) => {
+router.post("/", validate(registerWebhookSchema), async (req, res) => {
   try {
     const { publicKey, url, secret, topics } = req.validated;
     const webhook = await webhookService.registerWebhook(
