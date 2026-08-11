@@ -276,3 +276,35 @@ promtool check config docs/prometheus.yml
 After starting the backend, exercise allowed and blocked requests, then verify
 that `/metrics` contains all three counters and that no raw test IP appears in
 the exposition or in `GET /api/admin/rate-limit-stats`.
+
+## Rate Limiting Tiers
+
+| Tier | Window | Max Requests | Scope |
+|------|--------|-------------|-------|
+| Global IP | 15 min | 100 | Per IP (hashed with salt) |
+| Authenticated User | 15 min | 300 | Per JWT subject (public key) |
+| Webhook Delivery | 1 min | 60 | Per webhook endpoint |
+| Admin API | 1 min | 30 | Per admin session |
+
+### Redis Backend
+
+When `REDIS_URL` is configured, rate limit counters are stored in Redis with
+automatic TTL expiration. When Redis is unavailable, the system falls back to
+in-memory storage (suitable for single-instance deployments only).
+
+### Response Headers
+
+Every rate-limited endpoint returns standard headers:
+
+```
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 97
+X-RateLimit-Reset: 1692000000
+Retry-After: 900
+```
+
+### Admin Overrides
+
+Rate limit configurations can be adjusted at runtime via the admin API
+(`/api/admin/rate-limits`). Changes take effect immediately without a restart.
+Each override is logged to the audit trail.
