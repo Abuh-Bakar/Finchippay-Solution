@@ -155,3 +155,37 @@ fuzz_target!(|data: &[u8]| {
 - [ ] Differential fuzzing against the contract's expected behavior
 - [ ] Cross-contract fuzzing with mock token contracts
 - [ ] Fuzz the streaming payment formula with larger parameter ranges
+
+## Fuzz Testing Strategy
+
+We run 10 libFuzzer targets on every PR via the `fuzz` CI job. Each target
+focuses on a specific contract entrypoint and uses randomized inputs to
+discover edge cases in validation, arithmetic, and state transitions.
+
+### Targets
+
+| Target | Entrypoint | Focus |
+|--------|-----------|-------|
+| `create_escrow` | `create_escrow` | Amount bounds, recipient validation |
+| `create_multisig` | `create_multisig` | Signer uniqueness, threshold bounds |
+| `batch_send` | `batch_send` | Batch size limits, duplicate detection |
+| `open_stream` | `open_stream` | Rate bounds, deposit validation |
+| `claim_stream` | `claim_stream` | Accumulation math, overflow protection |
+| `parse_payment` | (NLP parser) | Input format, edge cases |
+| `escrow` | All escrow ops | State transitions |
+| `multisig` | All multisig ops | Proposal/approval logic |
+| `batch_swap` | `batch_swap` | Path validation, slippage bounds |
+| `property_streaming` | Stream lifecycle | Invariants (total claimed ≤ deposited) |
+
+### Running Locally
+
+```bash
+cd contracts/finchippay-contract/fuzz
+cargo fuzz run create_escrow -- -max_total_time=60
+```
+
+### Adding a New Target
+
+```bash
+python3 create_fuzz_targets.py --entrypoint <name> --args "ArgType1, ArgType2"
+```
