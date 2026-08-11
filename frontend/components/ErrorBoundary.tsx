@@ -4,6 +4,7 @@
  */
 
 import React, { Component, ErrorInfo, ReactNode } from "react";
+import { logger } from "@/lib/logger";
 import { AlertCircleIcon } from "@/components/icons";
 
 interface Props {
@@ -28,7 +29,13 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error(`ErrorBoundary caught an error in ${this.props.name || "component"}:`, error, errorInfo);
+    logger.error(
+      { component: this.props.name || "unknown", errorInfo },
+      `ErrorBoundary caught an error in ${this.props.name || "component"}`,
+    );
+    // Also emit to console so Sentry's auto-capture picks it up alongside
+    // the structured logger entry above.
+    console.error(error);
   }
 
   private handleReset = () => {
