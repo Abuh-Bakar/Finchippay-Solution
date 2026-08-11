@@ -53,3 +53,43 @@ See [ENV.md](./ENV.md) for required environment variables.
 - **Grafana**: Import dashboards from `docs/grafana-*.json`
 - **Prometheus**: Alert rules in `docs/prometheus-alerts.yml`
 - **Sentry**: Error tracking configured via `SENTRY_DSN`
+
+## Contract Verification
+
+After deploying the Soroban contract to mainnet, verify the WASM hash against
+the source code to ensure a reproducible build:
+
+```bash
+# 1. Build from source
+cd contracts/finchippay-contract
+cargo build --target wasm32v1-none --release
+
+# 2. Compute the hash
+soroban contract install \
+  --wasm target/wasm32v1-none/release/finchippay_contract.wasm \
+  --source admin \
+  --network mainnet \
+  --dry-run
+
+# 3. Compare with deployed hash
+soroban contract invoke \
+  --id <CONTRACT_ID> \
+  --source admin \
+  --network mainnet \
+  -- get_version
+```
+
+### Reproducible Build Verification
+
+Soroban WASM builds are deterministic when using the same Rust toolchain
+version. Pin the toolchain in `rust-toolchain.toml` and verify:
+
+```bash
+# Pin exact toolchain
+rustup show
+
+# Build and compare hashes
+sha256sum target/wasm32v1-none/release/finchippay_contract.wasm
+```
+
+Store the expected hash in the release notes for community verification.
