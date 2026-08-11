@@ -16,7 +16,6 @@
 
 "use strict";
 
-const fs = require("fs");
 const https = require("https");
 const http = require("http");
 const fsp = require("fs/promises");
@@ -27,49 +26,6 @@ const eventIndexer = require("./eventIndexer");
 const logger = require("../utils/logger");
 
 const HEALTH_TIMEOUT_MS = parseInt(process.env.HEALTH_TIMEOUT_MS, 10) || 5_000;
-const HEALTH_EVENT_LOOP_LAG_MS =
-  parseInt(process.env.HEALTH_EVENT_LOOP_LAG_MS, 10) || 100;
-const HEALTH_MEMORY_RSS_BYTES =
-  parseInt(process.env.HEALTH_MEMORY_RSS_BYTES, 10) || 500 * 1024 * 1024;
-const HEALTH_DISK_USED_RATIO =
-  Number.parseFloat(process.env.HEALTH_DISK_USED_RATIO || "0.9") || 0.9;
-
-let startupComplete = false;
-let startupCompletedAt = null;
-let startupStartedAt = Date.now();
-let shuttingDown = false;
-
-function normalizeStatus(ok, degraded = false) {
-  if (ok) return "healthy";
-  return degraded ? "degraded" : "unhealthy";
-}
-
-function markStartupComplete() {
-  startupComplete = true;
-  startupCompletedAt = Date.now();
-}
-
-function markShuttingDown() {
-  shuttingDown = true;
-}
-
-function getStartupState() {
-  return {
-    status: startupComplete ? "started" : "starting",
-    initialized: startupComplete,
-    initDuration: startupComplete
-      ? startupCompletedAt - startupStartedAt
-      : Date.now() - startupStartedAt,
-  };
-}
-
-function getLivenessState() {
-  return {
-    status: "alive",
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString(),
-  };
-}
 
 const POSTGRES_DEGRADED_LATENCY_MS =
   parseInt(process.env.POSTGRES_DEGRADED_LATENCY_MS, 10) || 200;

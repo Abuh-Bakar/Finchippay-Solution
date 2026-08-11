@@ -26,6 +26,7 @@
 "use strict";
 
 const logger = require("../utils/logger");
+const metrics = require("./metricsService");
 const { getRequestIdHeader } = require("../utils/correlationId");
 const { parseEvent } = require("./eventParser");
 require("dotenv").config();
