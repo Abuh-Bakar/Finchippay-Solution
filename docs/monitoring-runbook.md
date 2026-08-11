@@ -26,3 +26,33 @@
 3. **Contain** — Pause contract if needed
 4. **Resolve** — Fix + deploy
 5. **Post-mortem** — Document in `docs/incidents/`
+
+## Prometheus Alert Rules
+
+Alert rules are defined in `docs/prometheus-alerts.yml` and cover:
+
+### Critical (PagerDuty)
+
+| Alert | Threshold | Description |
+|-------|-----------|-------------|
+| `HighErrorRate` | > 5% of requests in 5 min | Elevated 5xx responses |
+| `HighLatency` | p95 > 2000ms for 5 min | Degraded API performance |
+| `DatabaseDown` | Connection failures > 0 | PostgreSQL unavailable |
+| `RedisDown` | Connection failures > 0 | Redis unavailable |
+| `WebhookDeliveryFailure` | > 10% failures in 10 min | Webhook delivery degraded |
+
+### Warning (Slack)
+
+| Alert | Threshold | Description |
+|-------|-----------|-------------|
+| `HighMemoryUsage` | > 85% of container limit | Potential memory leak |
+| `HighDiskUsage` | > 80% of volume | Disk space running low |
+| `RateLimitTriggered` | > 50/minute | Unusual traffic pattern |
+| `ContractEventLag` | > 100 blocks behind | Event indexer falling behind |
+
+### Grafana Dashboards
+
+Three dashboards are provisioned:
+- **Operations** (`grafana-operations.json`): Service health, latency, errors
+- **Business** (`grafana-business.json`): Payment volume, active users, revenue
+- **System** (`grafana-system.json`): CPU, memory, disk, network
