@@ -162,7 +162,8 @@ Response timeline:
 |---|---|
 | **GitHub Issues** | Bug reports, feature requests, technical discussions |
 | **GitHub Discussions** | Questions, ideas, community building |
-| **Discord (planned)** | Real-time community chat and support |
+| **Discord** | Real-time community chat and support — join at [discord.gg/finchippay](https://discord.gg/finchippay) (planned Q4 2026) |
+| **Telegram** | Announcements and release notifications (planned) |
 | **Twitter/X (@finchippay)** | Announcements and project updates |
 
 ---
