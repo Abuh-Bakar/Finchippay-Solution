@@ -197,3 +197,12 @@ Request → Route Handler → Error? → formatErrorResponse(code, details)
 Error codes are categorized by layer (API, Contract, Frontend, Shared) and
 automatically include the request correlation ID. See `docs/error-codes.md` for
 the complete registry.
+
+## Contract Upgrade Path
+
+The contract supports WASM upgrades via `upgrade(new_wasm_hash, new_layout_version)`.
+Before upgrading:
+1. `validate_storage_compatibility(new_layout_version)` must return true
+2. The new WASM must declare `STORAGE_LAYOUT_VERSION >= current`
+3. Admin signer threshold must be met (via `propose_admin_action`/`approve_admin_action`)
+4. Post-upgrade, `get_version()` increments and `get_storage_layout_version()` updates
