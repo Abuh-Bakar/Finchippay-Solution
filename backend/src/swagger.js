@@ -1953,52 +1953,6 @@ const options = {
           },
         },
       },
-      "/api/webhooks/{publicKey}": {
-        get: {
-          tags: ["Webhooks"],
-          summary: "List webhooks for an account",
-          description:
-            "Returns all active webhook registrations for the given Stellar public key.\n\n" +
-            "Secrets are **never** included in the response.",
-          parameters: [
-            {
-              name: "publicKey",
-              in: "path",
-              required: true,
-              schema: { type: "string", pattern: "^G[A-Z0-9]{55}$" },
-              description: "Stellar public key",
-              example: "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUWDA",
-            },
-          ],
-          responses: {
-            200: {
-              description: "List of active webhooks (secrets omitted)",
-              content: {
-                "application/json": {
-                  schema: {
-                    type: "object",
-                    properties: {
-                      webhooks: {
-                        type: "array",
-                        items: {
-                          type: "object",
-                          properties: {
-                            id: { type: "string", format: "uuid" },
-                            publicKey: { type: "string" },
-                            url: { type: "string" },
-                            createdAt: { type: "string", format: "date-time" },
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-            400: { description: "Invalid Stellar public key format" },
-          },
-        },
-      },
       "/api/webhooks/{id}": {
         delete: {
           tags: ["Webhooks"],
