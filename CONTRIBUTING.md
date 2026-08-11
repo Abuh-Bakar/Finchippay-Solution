@@ -80,3 +80,7 @@ Please use the GitHub issue templates:
 ## License
 
 By contributing you agree that your contributions will be licensed under the [MIT License](LICENSE).
+
+## CI Pipeline
+
+All PRs are gated by 13 CI jobs: frontend (lint, i18n, type-check, unit, build), backend (format, lint, unit, integration, migrations), contracts (check, test, WASM build, bindings drift), fuzz (10 libFuzzer targets), E2E (Playwright), accessibility (Axe + Lighthouse), error docs (drift check), SBOM (Grype scan), and config validation. See CI_CD.md for details.
