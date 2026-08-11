@@ -161,3 +161,33 @@ Report via: `security@finchippay.dev` (PGP key in SECURITY.md)
 ---
 
 *Last updated: August 8, 2026*
+
+## Soroban Contract Audit Checklist
+
+### Authentication
+- [ ] Every mutating entrypoint calls `require_auth()` on the authorizing party
+- [ ] Admin functions are gated by multi-sig threshold (not single key)
+- [ ] Pauser role is separate from admin (least privilege)
+
+### Arithmetic
+- [ ] All arithmetic uses `checked_add`/`checked_sub`/`checked_mul`
+- [ ] No raw `+`/`-`/`*` operators on storage values
+- [ ] Overflow/underflow panics are explicit and descriptive
+
+### Storage
+- [ ] All persistent entries have TTL management (bump on read/write)
+- [ ] New entries start at MIN_TTL_LEDGERS floor
+- [ ] Admin can sweep cold entries via bump_all_ttls
+- [ ] Storage layout version is validated on upgrade
+
+### Bounds
+- [ ] Escrow release ledgers are capped (MAX_ESCROW_LEDGERS)
+- [ ] Stream deposit/rate has upper bounds (MAX_STREAM_DEPOSIT, MAX_STREAM_RATE)
+- [ ] Batch sizes are capped (MAX_BATCH_SIZE)
+- [ ] Multi-sig signer count is capped (MAX_MULTISIG_SIGNERS)
+- [ ] Minimum amounts enforced to prevent dust attacks
+
+### Events
+- [ ] Value-transferring operations emit events
+- [ ] Events include relevant addresses and amounts for indexing
+- [ ] Migration from deprecated `publish()` to `#[contractevent]` completed
