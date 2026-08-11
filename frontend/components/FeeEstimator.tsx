@@ -102,6 +102,8 @@ function FeeEstimator({ transaction, amount, asset, onFeeSelected }: FeeEstimato
             key={tier}
             type="button"
             onClick={() => setSelectedTier(tier)}
+            aria-pressed={selectedTier === tier}
+            aria-label={`${tierLabels[tier]} fee tier`}
             className={clsx(
               "flex-1 rounded-lg border px-3 py-2 text-center transition-all",
               selectedTier === tier
