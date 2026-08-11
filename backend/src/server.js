@@ -78,7 +78,6 @@ const {
 const { zodErrorHandler } = require("./validation/middleware");
 // Requiring errorResponse registers getRequestId as the shared registry's
 // correlation-ID provider (#270).
-const { errorLogFields } = require("./utils/errorResponse");
 const traceContextMiddleware = require("./middleware/tracing");
 
 const { ApolloServer } = require("apollo-server-express");
@@ -391,7 +390,6 @@ app.use((err, req, res, next) => {
 const SHUTDOWN_DRAIN_MS = parseInt(process.env.SHUTDOWN_DRAIN_MS, 10) || 10_000;
 
 async function gracefulShutdown(signal, server, otelSdk) {
-  markShuttingDown();
   logger.info({ signal }, "Received shutdown signal — draining…");
 
   // Fail readiness immediately so /api/health/ready starts returning 503
@@ -487,9 +485,14 @@ if (require.main === module) {
           try {
             const token = authHeader.split(" ")[1];
             const jwt = require("jsonwebtoken");
+            const jwtSecret = process.env.JWT_SECRET || null;
+            if (!jwtSecret) {
+              // JWT_SECRET is not configured — skip token decoding
+              return { user: null };
+            }
             const decoded = jwt.verify(
               token,
-              process.env.JWT_SECRET || "finchippay_secret_key",
+              jwtSecret,
             );
             if (decoded.publicKey && /^G[A-Z0-9]{55}$/.test(decoded.publicKey)) {
               user = decoded;
