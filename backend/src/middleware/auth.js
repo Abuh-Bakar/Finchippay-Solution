@@ -18,15 +18,24 @@ const {
   ERROR_CODES,
 } = require("../../../shared/errorCodes");
 
-const JWT_SECRET = process.env.JWT_SECRET || "finchippay_secret_key";
-
-// Warn loudly in development if the default secret is in use.
-if (!process.env.JWT_SECRET && process.env.NODE_ENV !== "test") {
-  logger.warn(
-    "JWT_SECRET is not set — using insecure default. " +
-      "Generate a production secret: openssl rand -hex 32",
-  );
-}
+/**
+ * JWT signing secret — MUST be configured in all non-test environments.
+ *
+ * In production this is enforced by validateEnv.js which exits the process.
+ * In development we throw early so the developer sees a clear error rather
+ * than silently accepting the insecure default.
+ *
+ * Generate with:  openssl rand -hex 32
+ */
+const JWT_SECRET =
+  process.env.JWT_SECRET ||
+  (process.env.NODE_ENV === "test"
+    ? "test-jwt-secret-for-unit-tests-only"
+    : (() => {
+        throw new Error(
+          "JWT_SECRET is not set. Generate one: openssl rand -hex 32",
+        );
+      })());
 
 /**
  * Verify the Bearer JWT from the Authorization header.
