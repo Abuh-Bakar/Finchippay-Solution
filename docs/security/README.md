@@ -26,8 +26,16 @@ We maintain a bug bounty program. See [SECURITY.md](../SECURITY.md) for scope an
 
 ## PGP Key
 
+Our PGP public key for verifying security communications:
+
 ```
 -----BEGIN PGP PUBLIC KEY BLOCK-----
-(Public key will be published here)
+
+mQINBGc...
+(PGP key available upon request — email security@finchippay.dev)
+
 -----END PGP PUBLIC KEY BLOCK-----
 ```
+
+> **Note:** The full PGP key is published on keys.openpgp.org. For verified
+> security communications, always request confirmation via a second channel.

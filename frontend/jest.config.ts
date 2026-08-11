@@ -13,22 +13,19 @@ const config: Config = {
   setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
   testPathIgnorePatterns: ["<rootDir>/e2e/"],
   collectCoverageFrom: [
-    "components/RecurringPayments.tsx",
-    "pages/escrow.tsx",
-    "components/TradeForm.tsx",
+    "components/**/*.tsx",
+    "pages/**/*.tsx",
+    "lib/**/*.ts",
+    "hooks/**/*.ts",
+    "!lib/stellar.ts",
+    "!lib/api.ts",
   ],
   coverageThreshold: {
     global: {
       lines: 70,
-    },
-    "./components/RecurringPayments.tsx": {
-      lines: 70,
-    },
-    "./pages/escrow.tsx": {
-      lines: 70,
-    },
-    "./components/TradeForm.tsx": {
-      lines: 70,
+      branches: 60,
+      functions: 65,
+      statements: 70,
     },
   },
 };

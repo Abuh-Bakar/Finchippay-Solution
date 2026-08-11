@@ -16,10 +16,10 @@ module.exports = {
   coverageReporters: ["text", "text-summary", "html", "lcov", "json-summary"],
   coverageThreshold: {
     global: {
-      branches: 50,
-      functions: 55,
-      lines: 60,
-      statements: 60,
+      branches: 60,
+      functions: 65,
+      lines: 70,
+      statements: 70,
     },
   },
   globalSetup: "<rootDir>/jest.globalSetup.js",
