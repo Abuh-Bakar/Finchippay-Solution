@@ -71,3 +71,27 @@ We maintain a [Security Audit Framework](./docs/SECURITY_AUDIT_FRAMEWORK.md) bas
 ## License
 
 MIT © Finchippay contributors
+
+## Quick Start (Local Development)
+
+```bash
+# 1. Clone and install dependencies
+git clone https://github.com/FinChippay/Finchippay-Solution.git
+cd Finchippay-Solution
+npm install && cd backend && npm install && cd ../frontend && npm install && cd ..
+
+# 2. Start development services (PostgreSQL, Redis, Horizon)
+docker compose -f docker-compose.dev.yml up -d
+
+# 3. Run migrations
+cd backend && npm run migrate && cd ..
+
+# 4. Start backend and frontend
+npm run dev
+```
+
+The app will be available at:
+- **Frontend**: http://localhost:3000
+- **Backend API**: http://localhost:4000
+- **Health Check**: http://localhost:4000/api/health
+- **Swagger Docs**: http://localhost:4000/api-docs
