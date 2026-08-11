@@ -109,3 +109,28 @@ as JSON files keyed by namespace (`common`, `errors`, `onboarding`).
 Every PR runs `i18next-scanner` to detect missing or unused translation keys.
 The CI job fails if any key is referenced in code but not present in all
 supported locale files.
+
+## Database Migrations
+
+Migrations use Knex and must be cross-dialect compatible (SQLite for dev/test,
+PostgreSQL for production).
+
+### Rules
+
+1. Use `knex.schema.alterTable()` with `columnInfo()` for additive changes —
+   never raw `ALTER TABLE` SQL that only works on one dialect.
+2. Index creation uses `CREATE INDEX IF NOT EXISTS` (supported by both SQLite
+   and PostgreSQL).
+3. Every migration must have a corresponding `down` function for rollback.
+4. Seed files in `backend/seeds/` are development-only and never run in CI.
+5. Check migration status before deployment: `npm run migrate:status`
+
+### Testing Migrations
+
+```bash
+# Test against SQLite (default dev database)
+cd backend && npm run migrate && npm run migrate:rollback && npm run migrate
+
+# Test against PostgreSQL (CI simulation)
+DATABASE_CLIENT=pg npm run migrate
+```
