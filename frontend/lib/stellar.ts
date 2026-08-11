@@ -178,8 +178,25 @@ export const sorobanServer = new Proxy({} as rpc.Server, {
   },
 });
 
-/** The deployed Soroban contract ID for recording tips. */
+/** The deployed Soroban contract ID for recording tips.
+ * When not configured, all contract operations throw descriptive errors
+ * instead of failing silently. Set NEXT_PUBLIC_CONTRACT_ID in your
+ * environment to enable on-chain contract operations.
+ */
 export const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID || "";
+
+/** Returns a descriptive error when contract ID is not configured. */
+function requireContractId(): string {
+  if (!CONTRACT_ID) {
+    throw new Error(
+      "FinchippayContract is not configured. " +
+      "Set NEXT_PUBLIC_CONTRACT_ID in your environment variables to enable " +
+      "on-chain operations (tips, escrow, streaming, multi-sig). " +
+      "See docs/deployment.md for setup instructions."
+    );
+  }
+  return CONTRACT_ID;
+}
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -1176,14 +1193,12 @@ export async function buildSorobanTipTransaction({
   amount: string;
   memo?: string;
 }): Promise<Transaction> {
-  if (!CONTRACT_ID) {
-    throw new Error("Contract ID is not configured.");
-  }
+  const contractId = requireContractId();
 
   const xlmContractId = Asset.native().contractId(NETWORK_PASSPHRASE);
   const stroops = BigInt(Math.round(parseFloat(amount) * STELLAR_STROOPS_PER_XLM));
 
-  const client = new FinchippayContractClient(CONTRACT_ID);
+  const client = new FinchippayContractClient(contractId);
   return client.sendTip(fromPublicKey, xlmContractId, fromPublicKey, toPublicKey, stroops, memo ?? "");
 }
 
@@ -1194,7 +1209,10 @@ export async function buildSorobanTipTransaction({
  * @returns A promise resolving to the total tips in stroops as a string.
  */
 export async function getContractTipTotal(recipient: string): Promise<string> {
-  if (!CONTRACT_ID) return "0";
+  if (!CONTRACT_ID) {
+    logger.warn("CONTRACT_ID not configured — getContractTipTotal returning 0", {});
+    return "0";
+  }
 
   try {
     const client = new FinchippayContractClient(CONTRACT_ID);
@@ -1212,7 +1230,10 @@ export async function getContractTipTotal(recipient: string): Promise<string> {
  * @returns A promise resolving to the tip count.
  */
 export async function getContractTipCount(recipient: string): Promise<number> {
-  if (!CONTRACT_ID) return 0;
+  if (!CONTRACT_ID) {
+    logger.warn("CONTRACT_ID not configured — getContractTipCount returning 0", {});
+    return 0;
+  }
 
   try {
     const client = new FinchippayContractClient(CONTRACT_ID);
@@ -1242,14 +1263,12 @@ export async function buildReceiptMintTransaction({
   amount: string;
   memo?: string;
 }): Promise<Transaction> {
-  if (!CONTRACT_ID) {
-    throw new Error("Contract ID is not configured.");
-  }
+  const contractId = requireContractId();
 
   const stroops = BigInt(Math.round(parseFloat(amount) * 10_000_000));
   const memoStr = (memo ?? "").slice(0, 28);
 
-  const client = new FinchippayContractClient(CONTRACT_ID);
+  const client = new FinchippayContractClient(contractId);
   return client.mintReceipt(fromPublicKey, fromPublicKey, toPublicKey, stroops, memoStr);
 }
 
