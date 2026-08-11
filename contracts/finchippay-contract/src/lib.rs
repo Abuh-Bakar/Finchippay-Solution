@@ -5429,3 +5429,8 @@ mod tests {
 
 // Mock contracts for storage compatibility tests — no longer needed.
 // Kept as empty module placeholder to avoid disrupting surrounding code.
+
+// ─── Stellar Constants ─────────────────────────────────────────────────────────
+// STROOPS_PER_XLM: 1 XLM = 10_000_000 stroops (the smallest unit on Stellar).
+// All on-chain amounts are expressed in stroops to avoid floating-point rounding.
+const STROOPS_PER_XLM: i128 = 10_000_000;
