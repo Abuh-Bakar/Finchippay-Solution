@@ -206,3 +206,27 @@ Before upgrading:
 2. The new WASM must declare `STORAGE_LAYOUT_VERSION >= current`
 3. Admin signer threshold must be met (via `propose_admin_action`/`approve_admin_action`)
 4. Post-upgrade, `get_version()` increments and `get_storage_layout_version()` updates
+
+## Wallet Connection Flow
+
+Finchippay uses [Freighter](https://freighter.app) as the primary Stellar
+wallet, with Albedo and xBull as secondary options.
+
+### Connection States
+
+1. **Disconnected**: User has not connected any wallet. Show `WalletConnect`.
+2. **Connecting**: Freighter popup is open. Show spinner.
+3. **Connected**: Public key available. All payment forms active.
+4. **Error**: Connection failed (user rejected, network mismatch, etc.).
+
+### Signing Flow
+
+All transactions are signed client-side via Freighter's `signTransaction` API.
+The signed XDR is then submitted to Horizon through the backend proxy for
+rate-limiting and analytics tracking.
+
+### Network Validation
+
+On connect, the wallet's network passphrase is compared against the app's
+configured `NEXT_PUBLIC_STELLAR_NETWORK`. A mismatch shows a clear error
+instructing the user to switch networks in Freighter.
