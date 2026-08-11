@@ -230,3 +230,27 @@ rate-limiting and analytics tracking.
 On connect, the wallet's network passphrase is compared against the app's
 configured `NEXT_PUBLIC_STELLAR_NETWORK`. A mismatch shows a clear error
 instructing the user to switch networks in Freighter.
+
+## Frontend Error Handling
+
+All page-level components are wrapped with `withErrorBoundary` which catches
+render errors and displays a fallback UI with a "Try Again" button. The error
+boundary logs to Sentry in production and to the console in development.
+
+### Pattern
+
+```tsx
+export default withErrorBoundary(MyPage, {
+  fallback: <ErrorFallback message="Something went wrong loading this page." />,
+});
+```
+
+API call errors are handled through `lib/handleError.ts` which maps error codes
+to user-friendly messages and suggested recovery actions (retry, reconnect
+wallet, wait, etc.).
+
+### Logger
+
+Use `import { logger } from "@/lib/logger"` instead of `console.*` calls.
+The logger strips Stellar secret keys, adds correlation IDs, and sends
+structured logs to the configured transport.
