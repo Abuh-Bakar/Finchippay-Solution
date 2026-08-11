@@ -235,3 +235,41 @@ npm run build:sdk
 ## License
 
 MIT
+## Quick Start
+
+```typescript
+import { FinchippayClient } from '@finchippay/sdk';
+
+const client = new FinchippayClient({
+  apiKey: process.env.FINCHIPPAY_API_KEY,
+  network: 'testnet', // or 'mainnet'
+});
+
+// Send a payment
+const payment = await client.sendPayment({
+  destination: 'GABC...',
+  amount: '10',
+  asset: 'XLM',
+  memo: 'Coffee',
+});
+
+// Get payment status
+const status = await client.getPayment(payment.id);
+```
+
+### Authentication
+
+All SDK requests require an API key generated from the Finchippay dashboard.
+The API key is sent as a Bearer token in the Authorization header.
+
+### Error Handling
+
+```typescript
+try {
+  await client.sendPayment({ ... });
+} catch (err) {
+  if (err instanceof FinchippayError) {
+    console.error(err.code, err.message, err.correlationId);
+  }
+}
+```
