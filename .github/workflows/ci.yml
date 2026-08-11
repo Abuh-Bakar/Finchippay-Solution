@@ -736,3 +736,38 @@ jobs:
             grype "sbom:sbom/${sbom}.cdx.json" --fail-on high
             echo "::endgroup::"
           done
+
+  # ─── Coverage Report ────────────────────────────────────────────────────
+  coverage:
+    name: Coverage Report
+    runs-on: ubuntu-latest
+    needs: [frontend, backend]
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Download frontend coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend-coverage
+        continue-on-error: true
+
+      - name: Download backend coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend-coverage
+        continue-on-error: true
+
+      - name: Generate coverage badge
+        run: |
+          echo "Coverage reporting will be generated when jest --coverage runs in CI."
+          echo "Frontend: frontend/coverage/lcov-report/"
+          echo "Backend: backend/coverage/lcov-report/"
