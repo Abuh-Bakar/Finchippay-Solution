@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { useEffect, useState } from "react";
 import { useWallet } from "@/lib/useWallet";
 import { listStreamsByPayer, StreamRecord } from "@/lib/stellar";
@@ -106,7 +107,7 @@ export default function RecurringPayments({ onPayNow }: RecurringPaymentsProps) 
 
   useEffect(() => {
     if (publicKey) {
-      listStreamsByPayer(publicKey, offset, limit).then(setContractStreams).catch(console.error);
+      listStreamsByPayer(publicKey, offset, limit).then(setContractStreams).catch((err) => { logger.error('Failed to list streams:', err); });
     }
   }, [publicKey, offset, limit]);
 
