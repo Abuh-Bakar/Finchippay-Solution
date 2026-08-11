@@ -41,7 +41,7 @@ pub mod streams;
 pub mod yield_escrow;
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, IntoVal,
+    contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env,
     Symbol, TryIntoVal, Val, Vec,
 };
 
@@ -5433,4 +5433,5 @@ mod tests {
 // ─── Stellar Constants ─────────────────────────────────────────────────────────
 // STROOPS_PER_XLM: 1 XLM = 10_000_000 stroops (the smallest unit on Stellar).
 // All on-chain amounts are expressed in stroops to avoid floating-point rounding.
+#[allow(dead_code)]
 const STROOPS_PER_XLM: i128 = 10_000_000;

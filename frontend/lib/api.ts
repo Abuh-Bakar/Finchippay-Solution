@@ -39,44 +39,45 @@ export async function apiFetch(
   });
 }
 
-// Automatically patch global fetch in the browser/client-side and Node environment
-interface GlobalWithFetchPatch extends typeof globalThis {
-  __fetchPatched?: boolean;
-  fetch?: typeof globalThis.fetch;
-}
+// Automatically patch global fetch in the browser/client-side and Node environment.
+// Uses a self-executing function to avoid top-level typeof checks that conflict
+// with certain tsconfig lib configurations.
+(function patchGlobalFetch() {
+  const globalObj = (
+    typeof window !== 'undefined' ? window : globalThis
+  ) as typeof globalThis & { __fetchPatched?: boolean };
 
-const globalObj = (typeof window !== "undefined" ? window : globalThis) as GlobalWithFetchPatch;
-if (globalObj && !globalObj.__fetchPatched) {
-  const originalFetch = globalObj.fetch;
-  if (originalFetch) {
-    globalObj.fetch = async function (
-      this: GlobalWithFetchPatch,
-      input: RequestInfo | URL,
-      init?: RequestInit
-    ) {
-      const urlStr =
-        typeof input === "string"
-          ? input
-          : input instanceof URL
-          ? input.href
-          : input.url;
+  if (globalObj && !(globalObj as any).__fetchPatched) {
+    const originalFetch = globalObj.fetch?.bind(globalObj);
+    if (originalFetch) {
+      (globalObj as any).fetch = async function (
+        input: RequestInfo | URL,
+        init?: RequestInit
+      ) {
+        const urlStr =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.href
+              : (input as Request).url;
 
-      // Only inject traceparent headers for relative paths or API endpoints belonging to our backend
-      const isBackendApi = urlStr.includes("/api/") || !urlStr.startsWith("http");
+        // Only inject traceparent headers for relative paths or API endpoints
+        const isBackendApi = urlStr.includes('/api/') || !urlStr.startsWith('http');
 
-      if (isBackendApi) {
-        const headers = new Headers(init?.headers);
-        if (!headers.has("traceparent")) {
-          headers.set("traceparent", generateTraceParent());
+        if (isBackendApi) {
+          const headers = new Headers(init?.headers);
+          if (!headers.has('traceparent')) {
+            headers.set('traceparent', generateTraceParent());
+          }
+          return originalFetch(input, {
+            ...init,
+            headers,
+          });
         }
-        return originalFetch.call(this, input, {
-          ...init,
-          headers,
-        });
-      }
 
-      return originalFetch.call(this, input, init);
-    };
-    globalObj.__fetchPatched = true;
+        return originalFetch(input, init);
+      };
+      (globalObj as any).__fetchPatched = true;
+    }
   }
-}
+})();
