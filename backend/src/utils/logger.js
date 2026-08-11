@@ -6,6 +6,9 @@
  * AsyncLocalStorage so every log line emitted during a request is automatically
  * correlated — including calls that still use the root `logger` instead of
  * `req.log`.
+ *
+ * All log output is scrubbed of Stellar secret keys ('S' + 55 base32 chars)
+ * via a `logMethod` hook, so a mis-routed key never appears in logs.
  */
 
 "use strict";
@@ -14,26 +17,17 @@ const pino = require("pino");
 
 const isProduction = process.env.NODE_ENV === "production";
 
-let transportConfig = undefined;
-if (!isProduction) {
-  try {
-    require.resolve("pino-pretty");
-    transportConfig = {
-      target: "pino-pretty",
-      options: {
-        colorize: true,
-        translateTime: "SYS:standard",
-        ignore: "pid,hostname",
-      },
-    };
-  } catch (_) {
-    // pino-pretty not installed — fall back to JSON output in development too.
-  }
 const STELLAR_SECRET_KEY_PATTERN = /S[A-Z2-7]{55}/g;
 const REDACTED_STELLAR = "[REDACTED_STELLAR_SECRET]";
 
-const isProduction = process.env.NODE_ENV === "production";
-
+/**
+ * Recursively scrub Stellar secret keys from strings, errors, and plain
+ * objects. Objects are serialised, scrubbed, and re-parsed so keys nested at
+ * any depth are caught without mutating callers' data.
+ *
+ * @param {*} obj value to scrub
+ * @returns {*} the scrubbed value (same reference for non-strings/objects)
+ */
 function redactStellarKeys(obj) {
   if (typeof obj === "string") {
     return obj.replace(STELLAR_SECRET_KEY_PATTERN, REDACTED_STELLAR);
@@ -59,30 +53,54 @@ function redactStellarKeys(obj) {
           str.replace(STELLAR_SECRET_KEY_PATTERN, REDACTED_STELLAR),
         );
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* non-serialisable — leave as-is */
+    }
   }
   return obj;
+}
+
+let transport = undefined;
+if (!isProduction) {
+  try {
+    require.resolve("pino-pretty");
+    transport = {
+      target: "pino-pretty",
+      options: {
+        colorize: true,
+        translateTime: "SYS:standard",
+        ignore: "pid,hostname",
+      },
+    };
+  } catch {
+    // pino-pretty not installed — fall back to JSON output in development too.
+  }
 }
 
 const logger = pino({
   level: process.env.LOG_LEVEL || "info",
   base: { service: "finchippay-backend" },
   mixin() {
-    return getCorrelationFields();
+    const { getRequestId } = require("./correlationId");
+    const correlationId = getRequestId();
+    return correlationId ? { correlationId } : {};
   },
   formatters: {
-    level: (label) => {
-      return { level: label.toUpperCase() };
-    },
-    bindings: (bindings) => {
-      return { service: "finchippay-backend", ...bindings };
-    },
+    level: (label) => ({ level: label.toUpperCase() }),
+    bindings: (bindings) => ({ service: "finchippay-backend", ...bindings }),
   },
   timestamp: pino.stdTimeFunctions.isoTime,
+  serializers: {
+    err: (err) => redactStellarKeys(err),
+    error: (err) => redactStellarKeys(err),
+  },
+  // Redact common secret-bearing keys; free-form strings are scrubbed in hooks.
   redact: {
     paths: [
       "privateKey",
       "secret",
+      "secretKey",
+      "seed",
       "password",
       "token",
       "signature",
@@ -94,30 +112,6 @@ const logger = pino({
       "access_token",
       "refreshToken",
       "refresh_token",
-    ],
-    censor: "[REDACTED]",
-  },
-  transport: transportConfig,
-  mixin() {
-    const { getRequestId } = require("./correlationId");
-    const correlationId = getRequestId();
-    return correlationId ? { correlationId } : {};
-  },
-  timestamp: pino.stdTimeFunctions.isoTime,
-  serializers: {
-    err: (err) => redactStellarKeys(err),
-    error: (err) => redactStellarKeys(err),
-  },
-  // Redact common secret-bearing keys; free-form strings are scrubbed in hooks.
-  redact: {
-    paths: [
-      "secret",
-      "secretKey",
-      "privateKey",
-      "seed",
-      "password",
-      "token",
-      "signature",
       "*.secret",
       "*.secretKey",
       "*.privateKey",
@@ -131,17 +125,7 @@ const logger = pino({
       return method.apply(this, args);
     },
   },
-  ...(isProduction
-    ? {}
-    : {
-        transport: {
-          target: "pino-pretty",
-          options: {
-            colorize: true,
-            translateTime: "SYS:standard",
-          },
-        },
-      }),
+  ...(transport ? { transport } : {}),
 });
 
 module.exports = logger;
