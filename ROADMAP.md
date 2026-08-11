@@ -88,3 +88,24 @@ This document tracks what's shipped, what's in progress, and what's planned.
 ---
 
 Have an idea? [Open an issue](https://github.com/FinChippay/Finchippay-Solution/issues) or see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+---
+
+## 📋 v1.4 — Quality & Stability (Current)
+
+- [x] Cross-dialect migration support (SQLite + PostgreSQL)
+- [x] Error code documentation drift checks in CI
+- [x] Code quality improvements (unused imports removed, logger deduplication)
+- [x] Stellar SDK Renovate updates re-enabled for automated version tracking
+- [x] Contract version in Cargo.toml aligned with on-chain CONTRACT_VERSION
+- [x] VAPID keys made optional in non-production environments
+- [x] Health test suite fixed (missing braces, ESLint globals)
+- [x] Better CONTRACT_ID error messaging with requireContractId helper
+- [ ] Contract event migration: `publish()` → `#[contractevent]` macro
+- [ ] AMM/DeFi integration (yield_escrow TODOs)
+- [ ] Stellar SDK v16 upgrade in frontend
+- [ ] Increase test coverage to 75%+ across all components
+
+---
+
+*Last updated: August 11, 2026*
