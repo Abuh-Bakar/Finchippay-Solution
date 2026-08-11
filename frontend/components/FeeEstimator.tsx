@@ -4,7 +4,7 @@
  * outgoing Stellar payment, based on live Horizon fee stats.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import clsx from "clsx";
 import type { Transaction } from "@stellar/stellar-sdk";
@@ -67,9 +67,13 @@ function FeeEstimator({ transaction, amount, asset, onFeeSelected }: FeeEstimato
     };
   }, []);
 
+  // Store callback in a ref to avoid stale closures while respecting the
+  // rules-of-hooks dependency contract.
+  const onFeeSelectedRef = useRef(onFeeSelected);
+  onFeeSelectedRef.current = onFeeSelected;
+
   useEffect(() => {
-    onFeeSelected(tiers[selectedTier], selectedTier);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    onFeeSelectedRef.current(tiers[selectedTier], selectedTier);
   }, [tiers, selectedTier]);
 
   const operationCount = transaction?.operations?.length || 1;

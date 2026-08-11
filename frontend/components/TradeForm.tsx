@@ -248,14 +248,14 @@ export default function TradeForm({
     };
   }, [payAmount, payToken, receiveToken, schedulePathFind]);
 
-  // Recompute minimum received when slippage changes (without re-fetching paths)
+  // Recompute minimum received when slippage changes (without re-fetching paths).
+  // Uses a functional updater so we don't need swapPreview in the dependency array.
   useEffect(() => {
-    if (!swapPreview) return;
-    const minReceived = applySlippage(swapPreview.destinationAmount, activeSlippage);
-    setSwapPreview((prev) =>
-      prev ? { ...prev, minimumReceived: minReceived } : prev
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setSwapPreview((prev) => {
+      if (!prev) return prev;
+      const minReceived = applySlippage(prev.destinationAmount, activeSlippage);
+      return { ...prev, minimumReceived: minReceived };
+    });
   }, [activeSlippage]);
 
   // ─── Handlers ─────────────────────────────────────────────────────────────
