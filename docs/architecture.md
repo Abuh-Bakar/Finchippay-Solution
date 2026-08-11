@@ -254,3 +254,25 @@ wallet, wait, etc.).
 Use `import { logger } from "@/lib/logger"` instead of `console.*` calls.
 The logger strips Stellar secret keys, adds correlation IDs, and sends
 structured logs to the configured transport.
+
+## Middleware Execution Order
+
+The Express middleware stack is applied in this order for every request:
+
+1. `helmet` — Security headers (CSP, HSTS, X-Frame-Options, etc.)
+2. `cors` — Cross-Origin Resource Sharing
+3. `compression` — Gzip/brotli response compression
+4. `express.json()` — Body parsing with 100kb limit
+5. `traceContextMiddleware` — Correlation ID injection
+6. `requestLogger` — Request/response logging
+7. `rateLimit` / `userRateLimit` — Rate limiting (IP or user-scoped)
+8. `auth.verifyJWT` — JWT verification (for protected routes)
+9. `zodErrorHandler` — Validation error formatting
+10. Route handlers
+11. Global error handler (500 → formatted error response)
+
+### Tracing
+
+Every request gets a `correlationId` from the `traceContextMiddleware`. This ID
+is attached to all log lines and error responses, enabling end-to-end request
+tracing across microservices.
