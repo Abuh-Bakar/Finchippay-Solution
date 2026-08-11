@@ -154,8 +154,6 @@ const EVENT_TYPES = [
   "contract_event",
 ];
 
-const EVENT_CHANNELS = ["push", "email", "in_app"];
-
 /**
  * Default event-channel config — all events on all channels.
  */

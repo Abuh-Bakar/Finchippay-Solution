@@ -10,7 +10,6 @@
 const logger = require("../utils/logger");
 
 const stellarService = require("./stellarService");
-const logger = require("../utils/logger");
 
 // Lazy-loaded cache service (avoids circular dependency at parse time)
 function getCache() {
