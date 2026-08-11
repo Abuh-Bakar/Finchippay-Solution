@@ -92,3 +92,34 @@ NEXT_PUBLIC_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
 - Similarly, configure `JWT_SECRET`, `SERVER_PRIVATE_KEY`, `SENTRY_DSN`, and `NEXT_PUBLIC_SENTRY_DSN` as repository secrets for production CI/CD. Never hardcode secrets in workflow files.
 
 > **Note:** `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are optional in development and test environments. When not configured, push notification features degrade gracefully to a no-op.
+
+## Production Configuration
+
+### Required for Mainnet
+
+```bash
+NODE_ENV=production
+STELLAR_NETWORK=mainnet
+HORIZON_URL=https://horizon.stellar.org
+SOROBAN_RPC_URL=https://soroban-mainnet.stellar.org
+DATABASE_URL=postgresql://user:pass@host:5432/finchippay
+REDIS_URL=rediss://user:pass@host:6379
+JWT_SECRET=<random-64-chars>
+WEBHOOK_ENCRYPTION_KEY=<random-32-bytes-base64>
+RATE_LIMIT_IP_HASH_SALT=<random-16-bytes-hex>
+```
+
+### Optional Features
+
+| Variable | Effect when unset |
+|----------|------------------|
+| `VAPID_PUBLIC_KEY` | Push notifications disabled |
+| `SENTRY_DSN` | Error reporting disabled |
+| `ANALYTICS_ENABLED` | Business metrics disabled |
+| `REDIS_URL` | Rate limiting uses in-memory fallback |
+
+### Secrets Management
+
+In production, all secrets should be injected via a secrets manager
+(HashiCorp Vault, AWS Secrets Manager, or Kubernetes Secrets). Never
+commit `.env` files containing production secrets.
