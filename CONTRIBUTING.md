@@ -84,3 +84,28 @@ By contributing you agree that your contributions will be licensed under the [MI
 ## CI Pipeline
 
 All PRs are gated by 13 CI jobs: frontend (lint, i18n, type-check, unit, build), backend (format, lint, unit, integration, migrations), contracts (check, test, WASM build, bindings drift), fuzz (10 libFuzzer targets), E2E (Playwright), accessibility (Axe + Lighthouse), error docs (drift check), SBOM (Grype scan), and config validation. See CI_CD.md for details.
+
+## Internationalization (i18n)
+
+Finchippay supports 12 languages. Translations live in `frontend/public/locales/`
+as JSON files keyed by namespace (`common`, `errors`, `onboarding`).
+
+### Adding a New Language
+
+1. Copy `frontend/public/locales/en/` to `frontend/public/locales/<lang>/`
+2. Translate all string values (keys must remain unchanged)
+3. Add the language code to `frontend/next.config.mjs` under `i18n.locales`
+4. Run `npm run i18n:scan` in the frontend to validate no keys are missing
+
+### Translation Guidelines
+
+- Use ICU MessageFormat for plurals: `"items": "{count, plural, one {# item} other {# items}}"`
+- Never concatenate strings for UI; use full sentence templates
+- Interpolation variables use `{{variable}}` syntax
+- Monetary amounts always display in the user's locale with proper decimal separators
+
+### CI Validation
+
+Every PR runs `i18next-scanner` to detect missing or unused translation keys.
+The CI job fails if any key is referenced in code but not present in all
+supported locale files.
