@@ -46,7 +46,7 @@ jest.mock("next/router", () => ({
 }));
 
 jest.mock("next/link", () => {
-  // eslint-disable-next-line react/display-name
+  // Using React.forwardRef with an explicit displayName set below
   return ({ children, href, ...props }: Record<string, unknown>) => {
     return <a href={href as string} {...props}>{children}</a>;
   };
