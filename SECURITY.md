@@ -30,6 +30,27 @@ The following are in scope for vulnerability reports:
 We maintain a bug bounty program. Rewards range from $50–$25,000 depending on severity.
 Contact `security@finchippay.dev` for details.
 
+### Scope & Rewards
+
+| Severity | Reward Range | Example |
+|----------|-------------|---------|
+| **Critical** | $10,000–$25,000 | Direct theft of contract funds, arbitrary token mint |
+| **High** | $3,000–$10,000 | Unauthorized admin action, bypass of timelock |
+| **Medium** | $500–$3,000 | DoS on streaming claims, information leak |
+| **Low** | $50–$500 | Minor UI issues, documentation gaps |
+
+### Rules
+
+1. Report via `security@finchippay.dev` — never open a public issue.
+2. Allow 90 days before public disclosure.
+3. Do not exploit the vulnerability beyond proof-of-concept.
+4. One reward per vulnerability (first reporter).
+5. KYC required for rewards over $1,000.
+
+### Safe Harbor
+
+We will not pursue legal action against researchers who follow the rules above.
+
 ## Security Features
 
 - **Smart contract**: Checked arithmetic, TTL management, emergency pause, M-of-N admin
