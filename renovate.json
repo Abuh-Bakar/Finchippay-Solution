@@ -16,7 +16,9 @@
     {
       "matchManagers": ["npm"],
       "matchPackageNames": ["@stellar/stellar-sdk"],
-      "enabled": false
+      "matchUpdateTypes": ["minor", "major"],
+      "labels": ["dependencies", "stellar", "needs-review"],
+      "automerge": false
     },
     {
       "matchManagers": ["npm"],
@@ -41,6 +43,6 @@
       "labels": ["dependencies", "grantfox", "needs-review"]
     }
   ],
-  "ignoreDeps": ["@stellar/stellar-sdk"],
+  "ignoreDeps": [],
   "ignorePaths": ["**/node_modules/**", "**/dist/**"]
 }
