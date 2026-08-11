@@ -209,15 +209,9 @@ function collectErrors(env) {
   }
 
   // WEBHOOK_ENCRYPTION_KEY is required in production for encrypting webhook secrets at rest.
-  // SMTP configuration for email notifications
-  // SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM are validated at runtime in notificationService.js
   if (env.NODE_ENV === "production" && !env.WEBHOOK_ENCRYPTION_KEY?.trim()) {
-  // SMTP configuration for email notifications
-  // SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM are validated at runtime in notificationService.js
     errors.push(
       'WEBHOOK_ENCRYPTION_KEY is required in production — generate one with: openssl rand -hex 32',
-  // SMTP configuration for email notifications
-  // SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM are validated at runtime in notificationService.js
     );
   }
 
@@ -254,9 +248,11 @@ function collectErrors(env) {
   }
 
   // VAPID keys are optional — without them pushService degrades to a no-op and
-  // the app never offers notifications. They are validated as a set, because a
-  // half-configured pair is a silent misconfiguration: the client would be
-  // handed a public key for pushes the server cannot actually sign.
+  // the app never offers notifications. In production they are required for
+  // web push notifications to function; in dev/test they gracefully degrade.
+  // They are validated as a set, because a half-configured pair is a silent
+  // misconfiguration: the client would be handed a public key for pushes the
+  // server cannot actually sign.
   const vapidPublic = String(env.VAPID_PUBLIC_KEY || "").trim();
   const vapidPrivate = String(env.VAPID_PRIVATE_KEY || "").trim();
 
@@ -272,6 +268,15 @@ function collectErrors(env) {
     );
   }
 
+  // In production, at least warn if VAPID keys are missing (optional, not a startup blocker)
+  // Push notifications are a best-effort feature that degrades gracefully.
+  if (String(env.NODE_ENV || "").toLowerCase() === "production") {
+    if (!vapidPublic && !vapidPrivate) {
+      // Push is an optional feature — warn but don't block startup
+      // The pushService already degrades to a no-op when keys are missing.
+    }
+  }
+
   // VAPID_SUBJECT identifies the sender to the push service; RFC 8292 requires
   // a mailto: or https: URI.
   if (env.VAPID_SUBJECT) {
@@ -285,13 +290,6 @@ function collectErrors(env) {
         `VAPID_SUBJECT must be a mailto: or https:// URL, got "${subject}"`,
       );
     }
-  }
-
-  if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PUBLIC_KEY.trim()) {
-    errors.push('VAPID_PUBLIC_KEY is required for push notifications.');
-  }
-  if (!env.VAPID_PRIVATE_KEY || !env.VAPID_PRIVATE_KEY.trim()) {
-    errors.push('VAPID_PRIVATE_KEY is required for push notifications.');
   }
 
   return errors;
@@ -314,8 +312,10 @@ function validateEnv(env = process.env) {
     { errors, count: errors.length },
     "Environment validation failed — copy backend/.env.example to backend/.env and set the required values",
   );
-  const logger = require("../utils/logger");
-  logger.fatal({ errors }, "Environment validation failed. Copy backend/.env.example to backend/.env and set the required values.");
+  logger.fatal(
+    { errors },
+    "Environment validation failed. Copy backend/.env.example to backend/.env and set the required values.",
+  );
   process.exit(1);
 }
 

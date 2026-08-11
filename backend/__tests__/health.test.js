@@ -14,6 +14,7 @@
  * middleware instead of the pass-through mock used here.
  */
 
+/* eslint-env jest */
 "use strict";
 
 const request = require("supertest");
@@ -27,11 +28,6 @@ jest.mock("../src/middleware/auth", () => ({
   requireAdmin: (_req, _res, next) => next(),
 }));
 
-const {
-  checkDependencies,
-  getLivenessState,
-  getStartupState,
-} = require("../src/services/healthService");
 const app = require("../src/server");
 const shutdownState = require("../src/services/shutdownState");
 
@@ -138,11 +134,6 @@ describe("GET /health/ready — readiness probe", () => {
       });
     });
 
-      expect(res.status).toBe(200);
-      expect(res.body.status).toBe("alive");
-      expect(checkDependencies).not.toHaveBeenCalled();
-    });
-
     it("returns status ready and summary all_healthy", async () => {
       const res = await request(app).get("/health/ready");
       expect(res.body.status).toBe("ready");
@@ -200,6 +191,7 @@ describe("GET /health/ready — readiness probe", () => {
       expect(res.body.status).toBe("ready");
       expect(res.body.summary).toBe("degraded");
     });
+  });
 
   describe("when PostgreSQL is unhealthy", () => {
     beforeEach(() => {
@@ -210,8 +202,7 @@ describe("GET /health/ready — readiness probe", () => {
         sorobanRpc: healthy(0),
         diskSpace: healthy(1),
       });
-
-      const res = await request(app).get("/api/health/ready");
+    });
 
     it("returns status not_ready and summary critical_failure", async () => {
       const res = await request(app).get("/health/ready");
