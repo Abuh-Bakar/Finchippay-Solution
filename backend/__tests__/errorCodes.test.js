@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/errorCodes.test.js
  * Unit tests for the shared/errorCodes.js module.

@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * Webhook registry, signed delivery, retry logic, dead letter queue,
  * SQLite persistence, and graceful shutdown.

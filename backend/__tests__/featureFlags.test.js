@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/featureFlags.test.js
  * Unit and integration tests for the feature flags system (#103).

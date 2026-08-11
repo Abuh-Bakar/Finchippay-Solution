@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/analytics.test.js
  * Unit and integration tests for analytics endpoints.

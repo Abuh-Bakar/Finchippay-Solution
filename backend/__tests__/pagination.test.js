@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/pagination.test.js
  * Tests for the standardized cursor-based pagination layer (#74):

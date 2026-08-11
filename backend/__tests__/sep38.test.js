@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/sep38.test.js
  * Unit tests for SEP-0038 RFQ API endpoints.

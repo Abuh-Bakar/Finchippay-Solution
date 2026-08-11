@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/healthDependencies.test.js
  * Verifies GET /health/dependencies is gated by the real auth middleware

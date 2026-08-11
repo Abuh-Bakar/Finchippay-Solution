@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * pushNotifier: mapping domain events to push notifications.
  *

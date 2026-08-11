@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/integration-eventIndexer.test.js
  * Integration tests for the contract event indexer service and API.

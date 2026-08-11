@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * Exponential backoff retry, dead letter queue, delivery status query API.
  * Issue #494.

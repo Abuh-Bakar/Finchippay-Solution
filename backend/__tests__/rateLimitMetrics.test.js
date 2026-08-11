@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/rateLimitMetrics.test.js
  * Rate-limit observability unit and route tests (#238).

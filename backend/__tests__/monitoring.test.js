@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/monitoring.test.js
  * #272 — the dashboard and alert rules only reference metrics the backend

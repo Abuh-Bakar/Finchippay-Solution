@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/bodyLimits.test.js
  * Tests for JSON body size limits and Content-Type enforcement (#81).

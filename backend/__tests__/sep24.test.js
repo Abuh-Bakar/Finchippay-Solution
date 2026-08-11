@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/sep24.test.js
  * Integration tests for SEP-0024 interactive deposit/withdrawal flow.

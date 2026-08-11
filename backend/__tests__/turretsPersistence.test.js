@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/turretsPersistence.test.js
  *

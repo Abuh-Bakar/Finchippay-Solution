@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/errorResponse.test.js
  * #270 — the canonical error response utility and its correlation-ID wiring.

@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/validateEnv.test.js
  * Unit tests for startup environment validation.

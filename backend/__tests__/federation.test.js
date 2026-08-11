@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/federation.test.js
  * Integration tests for federation endpoints per SEP-0002.

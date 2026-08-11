@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/scheduledTransactions.test.js
  * Unit tests for the scheduled transactions route.

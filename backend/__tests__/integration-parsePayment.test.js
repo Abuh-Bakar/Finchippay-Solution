@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/integration-parsePayment.test.js
  * Integration tests for the /api/parse-payment endpoint using nock.

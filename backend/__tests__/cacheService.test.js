@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/cacheService.test.js
  * Unit tests for the CacheService (Redis+LRU dual-layer cache).

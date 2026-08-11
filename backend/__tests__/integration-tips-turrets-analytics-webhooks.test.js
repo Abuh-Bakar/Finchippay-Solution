@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * Integration tests for tips, turrets, analytics, and webhook routes.
  * Closes #49

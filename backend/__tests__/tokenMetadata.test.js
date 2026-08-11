@@ -1,3 +1,4 @@
+/* eslint-env jest */
 const { getTokenMetadata } = require("../src/services/tokenMetadataService");
 
 test("getTokenMetadata returns default shape for unknown contract", async () => {

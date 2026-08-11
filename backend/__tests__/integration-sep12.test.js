@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/integration-sep12.test.js
  * Integration tests for the SEP-12 KYC proxy service and API.

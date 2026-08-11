@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * #157 — real-time balance over Server-Sent Events.
  *

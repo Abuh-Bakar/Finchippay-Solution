@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/health.test.js
  * Unit tests for the health check endpoints:

@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * #278 — account-data routes must require a SEP-10 JWT and only allow access to
  * the caller's own account.

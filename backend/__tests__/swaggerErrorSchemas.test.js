@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/swaggerErrorSchemas.test.js
  * #270 — the OpenAPI spec documents the canonical error body everywhere.

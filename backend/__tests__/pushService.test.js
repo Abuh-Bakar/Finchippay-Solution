@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * pushService: subscription storage and Web Push delivery.
  *

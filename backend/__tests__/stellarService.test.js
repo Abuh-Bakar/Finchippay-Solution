@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/stellarService.test.js
  * Unit tests for Stellar service with mocked Horizon SDK.

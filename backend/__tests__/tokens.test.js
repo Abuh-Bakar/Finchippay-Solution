@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/tokens.test.js
  * Unit tests for the token price-history API (issue #362).

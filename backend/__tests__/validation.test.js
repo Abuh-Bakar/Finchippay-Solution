@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/validation.test.js
  * Tests for the Zod validation layer:
