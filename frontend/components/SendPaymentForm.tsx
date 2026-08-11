@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 /**
  * components/SendPaymentForm.tsx
  * Form for sending XLM payments to any Stellar address.
@@ -273,8 +274,7 @@ function SendPaymentForm({
       controls?.stop();
       scannerControlsRef.current = null;
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isScannerOpen]);
+  }, [isScannerOpen, videoRef]);
 
   const openScanner = () => {
     setIsScannerOpen(true);
@@ -387,35 +387,6 @@ function SendPaymentForm({
     setDestinationResolutionError(null);
     setResolvedPaymentDestination(null);
   }, [prefill]);
-
-  // Debounced federation address resolution on keystroke (#98)
-  useEffect(() => {
-    const trimmed = destination.trim();
-    if (!trimmed || isValidStellarAddress(trimmed)) {
-      setResolvedPaymentDestination(null);
-      setDestinationResolutionError(null);
-      return;
-    }
-    if (!isValidFederationAddress(trimmed) && !trimmed.includes('*')) {
-      setResolvedPaymentDestination(null);
-      return;
-    }
-    const timer = setTimeout(async () => {
-      setIsResolvingDestination(true);
-      setDestinationResolutionError(null);
-      try {
-        const resolved = await resolveFederationAddress(trimmed);
-        setResolvedPaymentDestination(resolved);
-      } catch (err: unknown) {
-        setDestinationResolutionError(
-          err instanceof Error ? err.message : 'Failed to resolve address'
-        );
-      } finally {
-        setIsResolvingDestination(false);
-      }
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [destination]);
 
   // Debounced federation address resolution on keystroke (#98)
   useEffect(() => {
@@ -809,7 +780,7 @@ function SendPaymentForm({
       
       if (autoMintReceipt) {
         // Run in background without awaiting, so UI doesn't block
-        mintNftReceipt(true).catch(console.error);
+        mintNftReceipt(true).catch((err) => { logger.error('Receipt mint failed:', err); });
       }
 
       onSuccess?.(result.hash);
