@@ -409,3 +409,9 @@ For questions or issues:
 - Check the test cases for usage examples
 - Refer to Soroban documentation: https://docs.rs/soroban-sdk/latest/soroban_sdk/
 - Stellar documentation: https://developers.stellar.org/
+
+> **Pre-production checklist:** Before deploying to mainnet, ensure:
+> 1. All critical and high-priority issues identified in `CODE_REVIEW.md` are resolved.
+> 2. The contract has been migrated from deprecated `publish()` to `#[contractevent]`.
+> 3. `JWT_SECRET`, `WEBHOOK_ENCRYPTION_KEY`, and `RATE_LIMIT_IP_HASH_SALT` are all set to production-strength values.
+> 4. A formal third-party security audit has been completed (see `docs/audits/README.md`).
