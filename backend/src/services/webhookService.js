@@ -638,7 +638,7 @@ function startMonitoring(webhook) {
   });
   activeStreams.set(webhook.publicKey, closeStream);
   metrics.activeWebhookStreams.set(activeStreams.size);
-  logger.info({ type: "horizon_monitoring_started", publicKey: publicKey });
+  logger.info({ type: "horizon_monitoring_started", publicKey: webhook.publicKey });
 }
 
 // ─── Graceful Shutdown ────────────────────────────────────────────────────────
@@ -757,4 +757,4 @@ async function getDeliveryById(publicKey, id) {
   return delivery || null;
 }
 
-module.exports = { registerWebhook, getWebhooksByPublicKey, deleteWebhook, signPayload, deliverWebhook, getDeadDeliveries, retryDeadDeliveries, startRetryWorker, stopRetryWorker, closeAllStreams, getEvents, replayEvents, getEventStats, processRetryQueue, getDeliveries, getDeliveryById, MAX_RETRIES, RETRY_INTERVALS_SECONDS };
+module.exports = { registerWebhook, getWebhooksByPublicKey, deleteWebhook, signPayload, deliverWebhook, getDeadDeliveries, retryDeadDeliveries, startRetryWorker, stopRetryWorker, closeAllStreams, getEvents, replayEvents, getEventStats, processRetryQueue, getDeliveries, getDeliveryById, restoreWebhooks, MAX_RETRIES, RETRY_INTERVALS_SECONDS };
