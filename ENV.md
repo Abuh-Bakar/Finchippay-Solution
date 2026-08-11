@@ -90,3 +90,5 @@ NEXT_PUBLIC_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
 - In Docker / CI, inject secrets via environment variables or a secrets manager — not via files.
 - For production deployments, configure `ANTHROPIC_API_KEY` as a [GitHub repository secret](https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions) and reference it in your deployment workflow as `${{ secrets.ANTHROPIC_API_KEY }}`.
 - Similarly, configure `JWT_SECRET`, `SERVER_PRIVATE_KEY`, `SENTRY_DSN`, and `NEXT_PUBLIC_SENTRY_DSN` as repository secrets for production CI/CD. Never hardcode secrets in workflow files.
+
+> **Note:** `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are optional in development and test environments. When not configured, push notification features degrade gracefully to a no-op.
