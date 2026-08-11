@@ -4,10 +4,24 @@
 //! pool (AMM) to earn yield while escrowed. The beneficiary receives the
 //! principal plus any accumulated yield when the release ledger is reached.
 //!
-//! This module is a **scaffold** for future DeFi integration. Currently the
+//! ## Status: Feature-gated scaffold
+//!
+//! This module is a scaffold for future DeFi integration. Currently the
 //! `pool_address` and share accounting are placeholders. When a real AMM is
 //! integrated, `create_yield_escrow` will deposit into the pool for LP shares,
 //! and `claim_yield_escrow` will withdraw shares plus accrued yield.
+//!
+//! ## AMM Integration Tracking
+//!
+//! Issues: https://github.com/FinChippay/Finchippay-Solution/issues?q=amm-integration
+//!
+//! Remaining work:
+//! 1. Replace placeholder `pool_address` with real AMM contract ID
+//! 2. Implement LP share deposit in `create_yield_escrow`
+//! 3. Implement LP share withdrawal + yield computation in `claim_yield_escrow`
+//! 4. Implement LP share withdrawal + yield computation in `cancel_yield_escrow`
+//! 5. Add integration tests with a mock AMM contract
+//! 6. Add fuzz targets for yield escrow lifecycle
 
 use soroban_sdk::{contracttype, token, Address, Env, Symbol};
 
@@ -77,8 +91,10 @@ pub fn create_yield_escrow(
     let token_client = token::Client::new(env, token_a);
     token_client.transfer(from, &env.current_contract_address(), &amount);
 
-    // TODO(#amm-integration): Deposit tokens into the liquidity pool and
-    // record the actual LP shares received. Currently shares = amount (1:1 placeholder).
+    // TODO(#amm-integration, #yield-escrow-v2): Deposit tokens into the
+    // liquidity pool and record the actual LP shares received.
+    // See: https://github.com/FinChippay/Finchippay-Solution/issues?q=amm-integration
+    // Currently shares = amount (1:1 placeholder).
     let shares: i128 = amount;
 
     let escrow = YieldEscrow {
@@ -124,8 +140,10 @@ pub fn claim_yield_escrow(env: &Env, id: u64) -> i128 {
         panic!("Release ledger not reached");
     }
 
-    // TODO(#amm-integration): Withdraw LP shares from pool and compute
-    // actual principal + yield. Currently returns principal only.
+    // TODO(#amm-integration, #yield-escrow-v2): Withdraw LP shares from pool
+    // and compute actual principal + yield.
+    // See: https://github.com/FinChippay/Finchippay-Solution/issues?q=amm-integration
+    // Currently returns principal only.
     let principal = escrow.amount;
     let total = principal;
     let token_client = token::Client::new(env, &escrow.token_a);
@@ -158,8 +176,10 @@ pub fn cancel_yield_escrow(env: &Env, id: u64) -> i128 {
     }
     escrow.from.require_auth();
 
-    // TODO(#amm-integration): Withdraw LP shares from pool and compute
-    // actual principal + yield. Currently returns principal only.
+    // TODO(#amm-integration, #yield-escrow-v2): Withdraw LP shares from pool
+    // and compute actual principal + yield for refund.
+    // See: https://github.com/FinChippay/Finchippay-Solution/issues?q=amm-integration
+    // Currently returns principal only.
     let principal = escrow.amount;
     let refund = principal;
     let token_client = token::Client::new(env, &escrow.token_a);
