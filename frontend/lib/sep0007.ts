@@ -170,14 +170,15 @@ export function registerProtocolHandler(): void {
   try {
     // Register for web+stellar: protocol
     navigator.registerProtocolHandler('web+stellar', `${window.location.origin}?uri=%s`);
-    // Protocol handler registration success is informational; logger available at runtime
-    if (typeof window !== 'undefined') {
-      // eslint-disable-next-line no-console -- protocol registration is a browser API that only emits via console
-      console.info('Successfully registered web+stellar: protocol handler');
-    }
+    // Protocol handler registration is a browser API without a structured
+    // logging surface — the only feedback mechanism is the console.
+    // eslint-disable-next-line no-console -- browser protocol handler registration API
+    console.info('Successfully registered web+stellar: protocol handler');
   } catch (error) {
-    // Expected in some browsers/environments — no-op log for awareness
-    // eslint-disable-next-line no-console -- protocol handler failure is browser-only
+    // Expected in some browsers/environments (e.g., private browsing, older
+    // browsers). Not a functional error — the app falls back to manual URI
+    // entry. Logged to console for developer awareness.
+    // eslint-disable-next-line no-console -- browser protocol handler failure is non-actionable
     console.warn('Failed to register protocol handler:', error);
   }
 }
