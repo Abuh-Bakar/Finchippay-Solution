@@ -137,3 +137,25 @@ All notable changes to the Finchippay-Solution smart contract will be documented
 ## [v2.0.0] - Previous release
 
 - Initial production-grade Soroban contract with tips, receipts, escrow, streaming, multi-sig, batch send, pause/unpause, and upgrade functionality.
+
+## [v3.1.1] - 2026-08-11
+
+### Fixed
+
+- **Critical**: health.test.js syntax error (missing closing braces in disk-space and postgres test blocks).
+- **Critical**: validateEnv.js duplicated SMTP comment blocks from merge artifact removed.
+- **Critical**: VAPID keys made optional in non-production environments; app no longer fails to start without push notification config.
+- **High**: GraphQL context no longer falls back to insecure `finchippay_secret_key` default when JWT_SECRET is unset.
+- **High**: Webhook restoration now awaited at startup instead of fire-and-forget.
+- **Medium**: Contract Cargo.toml version bumped from 0.0.0 to 3.1.0 to match on-chain CONTRACT_VERSION.
+- **Medium**: Stellar SDK updates re-enabled in Renovate (previously ignored), with minor/major requiring review.
+- **Medium**: Test coverage thresholds raised to 70% lines / 60% branches.
+- **Medium**: Better CONTRACT_ID error messaging via `requireContractId()` helper with setup instructions.
+- **Low**: Replaced bare `console.log` with `console.info` in SEP-0007 protocol handler; documented rationale.
+
+### Changed
+
+- Documentation: ROADMAP updated with v1.4 quality & stability milestones.
+- Documentation: Audit status page added with self-audit preparation checklist.
+- Documentation: PGP key section updated with key discovery instructions.
+- Documentation: VAPID keys documented as optional in non-production environments.
