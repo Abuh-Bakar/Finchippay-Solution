@@ -6,43 +6,113 @@
     "helpers:pinGitHubActionDigests"
   ],
   "timezone": "UTC",
-  "schedule": ["before 9am on Monday"],
-  "labels": ["dependencies", "grantfox"],
+  "schedule": [
+    "before 9am on Monday"
+  ],
+  "labels": [
+    "dependencies",
+    "grantfox"
+  ],
   "lockFileMaintenance": {
     "enabled": true,
-    "schedule": ["before 9am on Monday"]
+    "schedule": [
+      "before 9am on Monday"
+    ]
   },
   "packageRules": [
     {
-      "matchManagers": ["npm"],
-      "matchPackageNames": ["@stellar/stellar-sdk"],
-      "matchUpdateTypes": ["minor", "major"],
-      "labels": ["dependencies", "stellar", "needs-review"],
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchPackageNames": [
+        "soroban-sdk",
+        "soroban-env-host"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "major"
+      ],
+      "labels": [
+        "dependencies",
+        "stellar",
+        "needs-review"
+      ],
       "automerge": false
     },
     {
-      "matchManagers": ["npm"],
-      "matchUpdateTypes": ["patch", "pin"],
+      "matchManagers": [
+        "npm"
+      ],
+      "matchPackageNames": [
+        "@stellar/stellar-sdk"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "major"
+      ],
+      "labels": [
+        "dependencies",
+        "stellar",
+        "needs-review"
+      ],
+      "automerge": false
+    },
+    {
+      "matchManagers": [
+        "npm"
+      ],
+      "matchUpdateTypes": [
+        "patch",
+        "pin"
+      ],
       "automerge": true,
       "automergeType": "pr"
     },
     {
-      "matchManagers": ["cargo"],
-      "matchUpdateTypes": ["patch", "pin"],
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchUpdateTypes": [
+        "patch",
+        "pin"
+      ],
       "automerge": true,
       "automergeType": "pr"
     },
     {
-      "matchManagers": ["npm"],
-      "matchUpdateTypes": ["minor", "major"],
-      "labels": ["dependencies", "grantfox", "needs-review"]
+      "matchManagers": [
+        "npm"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "major"
+      ],
+      "labels": [
+        "dependencies",
+        "grantfox",
+        "needs-review"
+      ]
     },
     {
-      "matchManagers": ["cargo"],
-      "matchUpdateTypes": ["minor", "major"],
-      "labels": ["dependencies", "grantfox", "needs-review"]
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "major"
+      ],
+      "labels": [
+        "dependencies",
+        "grantfox",
+        "needs-review"
+      ]
     }
   ],
   "ignoreDeps": [],
-  "ignorePaths": ["**/node_modules/**", "**/dist/**"]
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/dist/**"
+  ],
+  "dependencyDashboard": true,
+  "dependencyDashboardTitle": "Finchippay Dependency Updates"
 }
