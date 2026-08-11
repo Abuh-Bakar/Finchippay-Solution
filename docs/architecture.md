@@ -183,3 +183,17 @@ Key components:
 | Top-up enforcement | Cumulative stream deposit checked against `MAX_STREAM_DEPOSIT` |
 | Token balance verification | `require_transfer_succeeded()` checks recipient balance before & after every token transfer; panics with `TransferFailed` (error code 17) if the balance did not increase by at least the expected amount — guards against malicious/fake token contracts (phantom deposit attack) |
 | Overflow safety | Checked arithmetic throughout the Soroban contract |
+
+## Error Handling Flow
+
+All API errors follow the canonical shape defined in `shared/errorCodes.js`:
+
+```
+Request → Route Handler → Error? → formatErrorResponse(code, details)
+                                     ↓
+                               { error: { code, message, correlationId, details? } }
+```
+
+Error codes are categorized by layer (API, Contract, Frontend, Shared) and
+automatically include the request correlation ID. See `docs/error-codes.md` for
+the complete registry.
