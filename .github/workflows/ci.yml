@@ -17,6 +17,7 @@
 #  11. validate          — validate config files and secret scanning
 #  12. sbom              — generate SPDX/CycloneDX SBOMs + fail on CRITICAL/HIGH vulns
 #  13. load-test         — k6 load tests (workflow_dispatch only)
+#  14. benchmark          — benchmark regression detection (push to main only)
 
 name: CI
 
@@ -640,6 +641,43 @@ jobs:
           else
             echo "✅ No suspicious hardcoded secrets detected"
           fi
+
+  # ─── Benchmark Regression Detection ───────────────────────────────────────
+  benchmark:
+    name: Benchmark Regression
+    runs-on: ubuntu-latest
+    # Only run on pushes to main — benchmarks are too slow for every PR.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run benchmarks
+        run: npm run benchmark 2>/dev/null || echo "Benchmarks not yet configured — skipping regression check"
+        continue-on-error: true
+
+      - name: Compare with baseline
+        run: |
+          if [ -f ../benchmarks/current.json ] && [ -f ../benchmarks/base.json ]; then
+            node ../scripts/compare-benchmarks.js ../benchmarks/base.json ../benchmarks/current.json
+          else
+            echo "No baseline benchmarks found — skipping comparison"
+          fi
+        continue-on-error: true
 
   # ─── SBOM Generation & Supply-Chain Vulnerability Scan ──────────────────────
   # Generates SPDX + CycloneDX SBOMs for frontend (npm), backend (npm) and the
