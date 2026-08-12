@@ -1,4 +1,4 @@
-name: CI Extended
+name: CI Quality Gates
 
 on:
   push:
