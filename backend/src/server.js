@@ -41,7 +41,7 @@ const tipsRoutes = require("./routes/tips");
 const webhookRoutes = require("./routes/webhooks");
 const { restoreWebhooks } = require("./services/webhookService");
 const parsePaymentRoutes = require("./routes/parsePayment");
-const { strictLimiter } = require("./middleware/rateLimit");
+const { strictLimiter, createInstrumentedLimiter } = require("./middleware/rateLimit");
 const scheduledTransactionRoutes = require("./routes/scheduledTransactions");
 const sep24Routes = require("./routes/sep24");
 const sep12Routes = require("./routes/sep12");
@@ -66,19 +66,18 @@ const { validateEnv, parseAllowedOrigins } = require("./config/validateEnv");
 const { requireJsonContentType } = require("./middleware/bodyParsing");
 const { trackHttpMetrics } = require("./middleware/metrics");
 const metricsRoutes = require("./routes/metrics");
-const {
-  correlationMiddleware,
-} = require("./utils/correlationId");
+const { correlationMiddleware } = require("./utils/correlationId");
 const { errorLogFields } = require("./utils/errorResponse");
 const { initRedis, closeRedis } = require("./services/cacheService");
 const shutdownState = require("./services/shutdownState");
-const {
-  closeAll: closeBalanceStreams,
-} = require("./services/balanceStreamService");
+const { closeAll: closeBalanceStreams } = require("./services/balanceStreamService");
 const { zodErrorHandler } = require("./validation/middleware");
 // Requiring errorResponse registers getRequestId as the shared registry's
 // correlation-ID provider (#270).
+require("./utils/errorResponse");
+const { requestIdMiddleware } = require("./middleware/requestId");
 const traceContextMiddleware = require("./middleware/tracing");
+const crypto = require("crypto");
 
 const { ApolloServer } = require("apollo-server-express");
 const { ApolloServerPluginLandingPageGraphQLPlayground } = require("apollo-server-core");
@@ -94,9 +93,7 @@ const PORT = process.env.PORT || 4000;
 
 const STELLAR_SECRET_PATTERN = /S[A-Z2-7]{55}/g;
 function sanitizeMessage(msg) {
-  return typeof msg === "string"
-    ? msg.replace(STELLAR_SECRET_PATTERN, "[REDACTED]")
-    : msg;
+  return typeof msg === "string" ? msg.replace(STELLAR_SECRET_PATTERN, "[REDACTED]") : msg;
 }
 
 // ─── Sentry ───────────────────────────────────────────────────────────────────
@@ -150,9 +147,7 @@ function getFederationServerUrl(req) {
   const domain = getFederationDomain(req);
   const protocol =
     process.env.FEDERATION_SERVER_PROTOCOL ||
-    (domain.startsWith("localhost") || domain.startsWith("127.0.0.1")
-      ? "http"
-      : "https");
+    (domain.startsWith("localhost") || domain.startsWith("127.0.0.1") ? "http" : "https");
 
   return `${protocol}://${domain}/federation`;
 }
@@ -212,9 +207,7 @@ app.use((err, req, res, next) => {
 });
 
 // CORS
-const { origins: allowedOrigins } = parseAllowedOrigins(
-  process.env.ALLOWED_ORIGINS,
-);
+const { origins: allowedOrigins } = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
 
 app.use(
   cors({
@@ -249,12 +242,9 @@ app.get("/.well-known/stellar.toml", (req, res) => {
   const domain = getFederationDomain(req);
   const protocol =
     req.get("x-forwarded-proto") ||
-    (domain.startsWith("localhost") || domain.startsWith("127.0.0.1")
-      ? "http"
-      : "https");
+    (domain.startsWith("localhost") || domain.startsWith("127.0.0.1") ? "http" : "https");
   const serverUrl = getFederationServerUrl(req);
-  const transferServerUrl =
-    process.env.TRANSFER_SERVER_URL || `${protocol}://${domain}`;
+  const transferServerUrl = process.env.TRANSFER_SERVER_URL || `${protocol}://${domain}`;
 
   const tomlContent = `# Finchippay Solution federation discovery
 FEDERATION_SERVER="${serverUrl}"
@@ -266,15 +256,16 @@ TRANSFER_SERVER_SEP0024="${transferServerUrl}"
 });
 
 // Global rate limiting — 100 requests per 15 minutes per IP.
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: formatErrorResponse("RATE_LIMITED_GLOBAL"),
-  // Counts rejections into rate_limit_hits_total{limiter="global"} (#272).
-  handler: limitHandler("global", "RATE_LIMITED_GLOBAL"),
-});
+const limiter = createInstrumentedLimiter(
+  {
+    windowMs: 15 * 60 * 1000,
+    limit: 100,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: formatErrorResponse("RATE_LIMITED_GLOBAL"),
+  },
+  "global",
+);
 app.use(limiter);
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
@@ -369,12 +360,8 @@ app.use((err, req, res, next) => {
   }
 
   const status = err.status || 500;
-  const message =
-    sanitizeMessage(err.message) || ERROR_CODES.SRV_INTERNAL.message;
-  log.error(
-    { ...errorLogFields("SRV_INTERNAL"), status, message },
-    "Request error",
-  );
+  const message = sanitizeMessage(err.message) || ERROR_CODES.SRV_INTERNAL.message;
+  log.error({ ...errorLogFields("SRV_INTERNAL"), status, message }, "Request error");
   const fallback = formatErrorResponse("SRV_INTERNAL", {
     originalMessage: sanitizeMessage(err.message),
   });
@@ -468,9 +455,11 @@ if (require.main === module) {
     initRedis().catch((err) => {
       logger.error({ err }, "Redis initialisation failed");
     });
-    require("./services/scheduledTransactionService").loadActiveSchedules().catch((err) => {
-      logger.error({ err }, "Failed to load active scheduled transactions");
-    });
+    require("./services/scheduledTransactionService")
+      .loadActiveSchedules()
+      .catch((err) => {
+        logger.error({ err }, "Failed to load active scheduled transactions");
+      });
     // Start scheduled transaction executor and data retention cron
     require("./services/scheduledExecutor").start();
     require("./services/dataRetentionService").startRetentionCron();
@@ -490,10 +479,7 @@ if (require.main === module) {
               // JWT_SECRET is not configured — skip token decoding
               return { user: null };
             }
-            const decoded = jwt.verify(
-              token,
-              jwtSecret,
-            );
+            const decoded = jwt.verify(token, jwtSecret);
             if (decoded.publicKey && /^G[A-Z0-9]{55}$/.test(decoded.publicKey)) {
               user = decoded;
             }
