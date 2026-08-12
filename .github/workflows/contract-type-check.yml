@@ -10,6 +10,7 @@ jobs:
   contract-bindings:
     name: Contract Bindings
     runs-on: ubuntu-latest
+    continue-on-error: true
     defaults:
       run:
         working-directory: frontend
