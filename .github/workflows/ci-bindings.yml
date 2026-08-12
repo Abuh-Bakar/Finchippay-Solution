@@ -1,4 +1,4 @@
-name: CI Bindings
+name: Bindings Check
 
 on:
   push:
@@ -54,4 +54,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      - run: npm ci --ignore-scripts
       - run: node scripts/generate-error-codes-doc.js --check
