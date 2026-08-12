@@ -74,8 +74,12 @@ jobs:
       - name: Build Rust contract (for CodeQL)
         if: matrix.language == 'rust'
         run: |
+          set -o pipefail
           cd contracts/finchippay-contract
-          cargo build 2>&1 | head -200
+          cargo build 2>&1 | tee /tmp/cargo-build.log
+          echo "::group::Build output summary (last 50 lines)"
+          tail -50 /tmp/cargo-build.log
+          echo "::endgroup::"
 
       # ── Build step for JavaScript (autobuild) ─────────────────────────────
       - name: Autobuild
