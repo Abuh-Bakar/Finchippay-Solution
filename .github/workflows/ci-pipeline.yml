@@ -1,4 +1,4 @@
-name: CI
+name: CI Pipeline
 
 # .github/workflows/ci.yml
 # Continuous Integration for Finchippay-Solution
@@ -802,3 +802,4 @@ jobs:
           echo "Coverage reporting will be generated when jest --coverage runs in CI."
           echo "Frontend: frontend/coverage/lcov-report/"
           echo "Backend: backend/coverage/lcov-report/"
+
