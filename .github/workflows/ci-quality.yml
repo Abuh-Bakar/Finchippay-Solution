@@ -5,12 +5,6 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main]
-  workflow_dispatch:
-    inputs:
-      base_url:
-        description: 'Target URL for load tests'
-        required: false
-        default: 'http://localhost:4000'
 
 jobs:
   contracts:
