@@ -25,7 +25,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 const pinoHttp = require("pino-http");
 const rateLimit = require("express-rate-limit");
-const { limitHandler } = require("./middleware/rateLimit");
+const { strictLimiter, createInstrumentedLimiter } = require("./middleware/rateLimit");
 const Sentry = require("@sentry/node");
 const { formatErrorResponse, ERROR_CODES } = require("../../shared/errorCodes");
 
@@ -41,7 +41,6 @@ const tipsRoutes = require("./routes/tips");
 const webhookRoutes = require("./routes/webhooks");
 const { restoreWebhooks } = require("./services/webhookService");
 const parsePaymentRoutes = require("./routes/parsePayment");
-const { strictLimiter, createInstrumentedLimiter } = require("./middleware/rateLimit");
 const scheduledTransactionRoutes = require("./routes/scheduledTransactions");
 const sep24Routes = require("./routes/sep24");
 const sep12Routes = require("./routes/sep12");
@@ -66,7 +65,7 @@ const { validateEnv, parseAllowedOrigins } = require("./config/validateEnv");
 const { requireJsonContentType } = require("./middleware/bodyParsing");
 const { trackHttpMetrics } = require("./middleware/metrics");
 const metricsRoutes = require("./routes/metrics");
-const { correlationMiddleware } = require("./utils/correlationId");
+const { correlationMiddleware, getRequestId } = require("./utils/correlationId");
 const { errorLogFields } = require("./utils/errorResponse");
 const { initRedis, closeRedis } = require("./services/cacheService");
 const shutdownState = require("./services/shutdownState");
@@ -160,6 +159,7 @@ function getFederationServerUrl(req) {
  * The backend serves no HTML pages of its own except Swagger UI at /api/docs,
  * so the policy is intentionally restrictive.
  */
+// Helmet and rate-limit are configured via securityHeaders + createInstrumentedLimiter
 const securityHeaders = require("./middleware/securityHeaders");
 const corsConfig = require("./middleware/corsConfig");
 
