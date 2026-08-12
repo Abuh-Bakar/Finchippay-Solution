@@ -551,6 +551,7 @@ jobs:
       - name: Start backend
         working-directory: backend
         run: |
+          mkdir -p data
           npm start &
           for i in $(seq 1 30); do
             curl -sf http://localhost:4000/health && echo "Backend ready" && break
@@ -560,6 +561,7 @@ jobs:
         env:
           PORT: 4000
           NODE_ENV: test
+          DB_PROVIDER: sqlite
           STELLAR_NETWORK: testnet
           HORIZON_URL: https://horizon-testnet.stellar.org
           JWT_SECRET: test-secret-for-load-testing-only

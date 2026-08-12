@@ -28,7 +28,9 @@ jobs:
 
       - name: Install backend dependencies
         working-directory: backend
-        run: npm ci
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq build-essential python3
+          npm ci
 
       - name: Start backend for SDK drift check
         working-directory: backend
