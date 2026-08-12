@@ -87,7 +87,7 @@
     "typescript": "^5"
   },
   "engines": {
-    "node": "20.19.5"
+    "node": ">=20.20.2"
   },
   "overrides": {
     "image-size": ">=2.0.2",
