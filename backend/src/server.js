@@ -513,7 +513,7 @@ if (require.main === module) {
     await apolloServer.start();
     apolloServer.applyMiddleware({ app, path: "/api/graphql" });
 
-    const server = app.listen(PORT, () => {
+    const server = app.listen(PORT, async () => {
       logger.info(
         { port: PORT, network: process.env.STELLAR_NETWORK || "testnet" },
         "Finchippay Solution API server started",
