@@ -6,20 +6,20 @@ name: CI Pipeline
 # Runs on every push to main/develop and on every pull-request targeting main.
 #
 # Parallel jobs:
-#   1. frontend          — lint, i18n, type-check, unit tests, build
-#   2. visual-regression — Chromatic Storybook visual regression
-#   3. backend           — format check, lint, unit & integration tests
-#   4. contracts         — cargo check, cargo test, integration tests, WASM build
-#   5. contract-fuzz     — cargo-fuzz coverage-guided fuzz testing
-#   6. contract-bindings — Soroban contract bindings drift check
-#   7. compose           — validate Docker Compose configurations
-#   8. e2e               — Playwright end-to-end tests
-#   9. lighthouse        — Lighthouse & Axe accessibility CI
-#  10. error-docs        — error code documentation drift check
-#  11. validate          — validate config files and secret scanning
-#  12. sbom              — generate SPDX/CycloneDX SBOMs + fail on CRITICAL/HIGH vulns
-#  13. load-test         — k6 load tests (workflow_dispatch only)
-#  14. benchmark          — benchmark regression detection (push to main only)
+#   1. frontend          - lint, i18n, type-check, unit tests, build
+#   2. visual-regression - Chromatic Storybook visual regression
+#   3. backend           - format check, lint, unit & integration tests
+#   4. contracts         - cargo check, cargo test, integration tests, WASM build
+#   5. contract-fuzz     - cargo-fuzz coverage-guided fuzz testing
+#   6. contract-bindings - Soroban contract bindings drift check
+#   7. compose           - validate Docker Compose configurations
+#   8. e2e               - Playwright end-to-end tests
+#   9. lighthouse        - Lighthouse & Axe accessibility CI
+#  10. error-docs        - error code documentation drift check
+#  11. validate          - validate config files and secret scanning
+#  12. sbom              - generate SPDX/CycloneDX SBOMs + fail on CRITICAL/HIGH vulns
+#  13. load-test         - k6 load tests (workflow_dispatch only)
+#  14. benchmark          - benchmark regression detection (push to main only)
 
 
 on:
@@ -35,7 +35,7 @@ on:
         default: 'http://localhost:4000'
 
 jobs:
-  # ─── Frontend ──────────────────────────────────────────────────────────────
+  # ??? Frontend ??????????????????????????????????????????????????????????????
   frontend:
     name: Frontend (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
@@ -45,7 +45,7 @@ jobs:
       matrix:
         node-version: ["22", "24"]
 
-    # Node 24 is a canary — shows compatibility issues but never blocks PRs
+    # Node 24 is a canary - shows compatibility issues but never blocks PRs
     continue-on-error: ${{ matrix.node-version != '22' }}
 
     defaults:
@@ -92,7 +92,7 @@ jobs:
           NEXT_PUBLIC_API_URL: http://localhost:4000
           NEXT_PUBLIC_CONTRACT_ID: CCW67TSZV3SSS2HXMBQ52NVF3FB25GQ2G6E3BGLZ52B7W7TKG4E7SML2
 
-  # ─── Storybook Visual Regression ───────────────────────────────────────────
+  # ??? Storybook Visual Regression ???????????????????????????????????????????
   visual-regression:
     name: Storybook Visual Regression (Chromatic)
     runs-on: ubuntu-latest
@@ -125,7 +125,7 @@ jobs:
           exitZeroOnChanges: false
           autoAcceptChanges: main
 
-  # ─── Backend ───────────────────────────────────────────────────────────────
+  # ??? Backend ???????????????????????????????????????????????????????????????
   backend:
     name: Backend (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
@@ -135,7 +135,7 @@ jobs:
       matrix:
         node-version: ["22", "24"]
 
-    # Node 24 is a canary — shows compatibility issues but never block PRs
+    # Node 24 is a canary - shows compatibility issues but never block PRs
     continue-on-error: ${{ matrix.node-version != '22' }}
 
     defaults:
@@ -194,7 +194,7 @@ jobs:
           ANTHROPIC_API_KEY: test-key-for-ci
           NODE_ENV: test
 
-  # ─── Contracts ─────────────────────────────────────────────────────────────
+  # ??? Contracts ?????????????????????????????????????????????????????????????
   contracts:
     name: Soroban Contracts (Rust ${{ matrix.rust-channel }})
     runs-on: ubuntu-latest
@@ -204,7 +204,7 @@ jobs:
       matrix:
         rust-channel: ["stable", "nightly"]
 
-    # Nightly is a canary — shows future compiler issues but never blocks PRs
+    # Nightly is a canary - shows future compiler issues but never blocks PRs
     continue-on-error: ${{ matrix.rust-channel == 'nightly' }}
 
     defaults:
@@ -249,7 +249,7 @@ jobs:
         if: ${{ matrix.rust-channel == 'stable' }}
         run: cargo build --target wasm32v1-none --release
 
-  # ─── Contract Fuzz Testing ─────────────────────────────────────────────────
+  # ??? Contract Fuzz Testing ?????????????????????????????????????????????????
   contract-fuzz:
     name: Contract Fuzz (libFuzzer)
     runs-on: ubuntu-latest
@@ -281,70 +281,70 @@ jobs:
       - name: Check fuzz targets compile
         run: cargo +nightly fuzz build --fuzz-dir fuzz
 
-      - name: Fuzz — parse_payment
+      - name: Fuzz - parse_payment
         run: |
           cargo +nightly fuzz run fuzz_target_1_parse_payment \
             --fuzz-dir fuzz \
             -- -max_total_time=60 -print_final_stats=1 \
             || (echo "::warning::fuzz_target_1_parse_payment found crashes" && true)
 
-      - name: Fuzz — escrow lifecycle
+      - name: Fuzz - escrow lifecycle
         run: |
           cargo +nightly fuzz run fuzz_target_2_escrow \
             --fuzz-dir fuzz \
             -- -max_total_time=60 -print_final_stats=1 \
             || (echo "::warning::fuzz_target_2_escrow found crashes" && true)
 
-      - name: Fuzz — multi-sig approval
+      - name: Fuzz - multi-sig approval
         run: |
           cargo +nightly fuzz run fuzz_target_3_multisig \
             --fuzz-dir fuzz \
             -- -max_total_time=60 -print_final_stats=1 \
             || (echo "::warning::fuzz_target_3_multisig found crashes" && true)
 
-      - name: Fuzz — batch send
+      - name: Fuzz - batch send
         run: |
           cargo +nightly fuzz run fuzz_target_4_batch_send \
             --fuzz-dir fuzz \
             -- -max_total_time=60 -print_final_stats=1 \
             || (echo "::warning::fuzz_target_4_batch_send found crashes" && true)
 
-      - name: Fuzz — open stream
+      - name: Fuzz - open stream
         run: |
           cargo +nightly fuzz run open_stream \
             --fuzz-dir fuzz \
             -- -max_total_time=60 -print_final_stats=1 \
             || (echo "::warning::open_stream found crashes" && true)
 
-      - name: Fuzz — claim stream
+      - name: Fuzz - claim stream
         run: |
           cargo +nightly fuzz run claim_stream \
             --fuzz-dir fuzz \
             -- -max_total_time=60 -print_final_stats=1 \
             || (echo "::warning::claim_stream found crashes" && true)
 
-      - name: Fuzz — create escrow
+      - name: Fuzz - create escrow
         run: |
           cargo +nightly fuzz run create_escrow \
             --fuzz-dir fuzz \
             -- -max_total_time=60 -print_final_stats=1 \
             || (echo "::warning::create_escrow found crashes" && true)
 
-      - name: Fuzz — claim escrow
+      - name: Fuzz - claim escrow
         run: |
           cargo +nightly fuzz run claim_escrow \
             --fuzz-dir fuzz \
             -- -max_total_time=60 -print_final_stats=1 \
             || (echo "::warning::claim_escrow found crashes" && true)
 
-      - name: Fuzz — create multisig
+      - name: Fuzz - create multisig
         run: |
           cargo +nightly fuzz run create_multisig \
             --fuzz-dir fuzz \
             -- -max_total_time=60 -print_final_stats=1 \
             || (echo "::warning::create_multisig found crashes" && true)
 
-      - name: Fuzz — approve multisig
+      - name: Fuzz - approve multisig
         run: |
           cargo +nightly fuzz run approve_multisig \
             --fuzz-dir fuzz \
@@ -359,7 +359,7 @@ jobs:
           path: contracts/finchippay-contract/fuzz/artifacts/
           retention-days: 30
 
-  # ─── Contract Bindings Drift Detection ───────────────────────────────────────
+  # ??? Contract Bindings Drift Detection ???????????????????????????????????????
   contract-bindings:
     name: Contract Bindings (Drift Check)
     runs-on: ubuntu-latest
@@ -413,9 +413,9 @@ jobs:
 
       - name: Skip bindings check (no CONTRACT_ID)
         if: ${{ secrets.TESTNET_CONTRACT_ID == '' }}
-        run: echo "::notice::Skipping contract bindings drift check — TESTNET_CONTRACT_ID secret not set."
+        run: echo "::notice::Skipping contract bindings drift check - TESTNET_CONTRACT_ID secret not set."
 
-  # ─── Docker Compose Validation ──────────────────────────────────────────────
+  # ??? Docker Compose Validation ??????????????????????????????????????????????
   compose:
     name: Docker Compose Config
     runs-on: ubuntu-latest
@@ -429,7 +429,7 @@ jobs:
       - name: Validate docker-compose.prod.yml (production)
         run: docker compose -f docker-compose.prod.yml config --quiet
 
-  # ─── E2E Tests ─────────────────────────────────────────────────────────────
+  # ??? E2E Tests ?????????????????????????????????????????????????????????????
   e2e:
     name: E2E Tests (Playwright)
     runs-on: ubuntu-latest
@@ -488,7 +488,7 @@ jobs:
           name: playwright-report
           path: frontend/playwright-report/
 
-  # ─── Lighthouse & Accessibility ────────────────────────────────────────────
+  # ??? Lighthouse & Accessibility ????????????????????????????????????????????
   lighthouse:
     name: Lighthouse & Axe a11y CI
     runs-on: ubuntu-latest
@@ -515,11 +515,11 @@ jobs:
       - run: npm run test:a11y:full
       - run: npx lhci autorun
 
-  # ─── Load Tests (k6) — manual trigger only ─────────────────────────────────
+  # ??? Load Tests (k6) - manual trigger only ?????????????????????????????????
   load-test:
     name: Load Tests (k6)
     runs-on: ubuntu-latest
-    # Manual trigger only — load tests are expensive and should not block PRs.
+    # Manual trigger only - load tests are expensive and should not block PRs.
     # Run against staging by setting BASE_URL in the workflow dispatch inputs.
     if: github.event_name == 'workflow_dispatch'
 
@@ -612,7 +612,7 @@ jobs:
           path: k6-results/
           retention-days: 30
 
-  # ─── Error Code Docs Drift Detection ───────────────────────────────────────
+  # ??? Error Code Docs Drift Detection ???????????????????????????????????????
   error-docs:
     name: Error Code Docs (Drift Check)
     runs-on: ubuntu-latest
@@ -640,10 +640,10 @@ jobs:
           MISSING=0
           for file in backend/.env.example frontend/.env.example .nvmrc sdk/package.json scripts/generate-sdk.sh scripts/fuzz-contract.sh; do
             if [ ! -f "$file" ]; then
-              echo "❌ Missing required file: $file"
+              echo "? Missing required file: $file"
               MISSING=1
             else
-              echo "✅ Found: $file"
+              echo "? Found: $file"
             fi
           done
           if [ "$MISSING" -eq 1 ]; then exit 1; fi
@@ -651,7 +651,7 @@ jobs:
       - name: Validate root package.json
         run: |
           if [ -f package.json ]; then
-            node -e "JSON.parse(require('fs').readFileSync('package.json','utf8'))" && echo "✅ package.json is valid JSON"
+            node -e "JSON.parse(require('fs').readFileSync('package.json','utf8'))" && echo "? package.json is valid JSON"
           fi
 
       - name: Check for hardcoded secrets
@@ -664,16 +664,16 @@ jobs:
             --exclude-dir=__tests__ \
             --exclude-dir=e2e \
             . 2>/dev/null; then
-            echo "⚠️  WARNING: Potential hardcoded API keys found above. Review before merging."
+            echo "??  WARNING: Potential hardcoded API keys found above. Review before merging."
           else
-            echo "✅ No suspicious hardcoded secrets detected"
+            echo "? No suspicious hardcoded secrets detected"
           fi
 
-  # ─── Benchmark Regression Detection ───────────────────────────────────────
+  # ??? Benchmark Regression Detection ???????????????????????????????????????
   benchmark:
     name: Benchmark Regression
     runs-on: ubuntu-latest
-    # Only run on pushes to main — benchmarks are too slow for every PR.
+    # Only run on pushes to main - benchmarks are too slow for every PR.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     defaults:
@@ -694,7 +694,7 @@ jobs:
         run: npm ci
 
       - name: Run benchmarks
-        run: npm run benchmark 2>/dev/null || echo "Benchmarks not yet configured — skipping regression check"
+        run: npm run benchmark 2>/dev/null || echo "Benchmarks not yet configured - skipping regression check"
         continue-on-error: true
 
       - name: Compare with baseline
@@ -702,11 +702,11 @@ jobs:
           if [ -f ../benchmarks/current.json ] && [ -f ../benchmarks/base.json ]; then
             node ../scripts/compare-benchmarks.js ../benchmarks/base.json ../benchmarks/current.json
           else
-            echo "No baseline benchmarks found — skipping comparison"
+            echo "No baseline benchmarks found - skipping comparison"
           fi
         continue-on-error: true
 
-  # ─── SBOM Generation & Supply-Chain Vulnerability Scan ──────────────────────
+  # ??? SBOM Generation & Supply-Chain Vulnerability Scan ??????????????????????
   # Generates SPDX + CycloneDX SBOMs for frontend (npm), backend (npm) and the
   # Soroban contract (cargo), uploads them as artifacts, and fails the build on
   # CRITICAL/HIGH vulnerabilities via Grype.
@@ -759,7 +759,7 @@ jobs:
         run: |
           set -e
           for sbom in frontend backend contract; do
-            echo "::group::Grype scan — $sbom"
+            echo "::group::Grype scan - $sbom"
             grype "sbom:sbom/${sbom}.cdx.json" --fail-on critical || {
               echo "::warning::CRITICAL vulnerabilities found in $sbom"
               exit 1
@@ -768,7 +768,7 @@ jobs:
           done
         continue-on-error: true
 
-  # ─── Coverage Report ────────────────────────────────────────────────────
+  # ??? Coverage Report ????????????????????????????????????????????????????
   coverage:
     name: Coverage Report
     runs-on: ubuntu-latest
