@@ -17,14 +17,13 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  BACKEND_IMAGE: ghcr.io/finchippay/finchippay-backend
-  FRONTEND_IMAGE: ghcr.io/finchippay/finchippay-frontend
 
 jobs:
   build-and-push:
     name: Build, Scan & Push Docker Images
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    continue-on-error: true
     permissions:
       contents: read
 
@@ -59,7 +58,7 @@ jobs:
         id: meta-backend
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.BACKEND_IMAGE }}
+          images: ghcr.io/finchippay/finchippay-backend
           tags: |
             type=ref,event=branch
             type=ref,event=tag
@@ -112,7 +111,7 @@ jobs:
         id: meta-frontend
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.FRONTEND_IMAGE }}
+          images: ghcr.io/finchippay/finchippay-frontend
           tags: |
             type=ref,event=branch
             type=ref,event=tag
@@ -170,8 +169,8 @@ jobs:
       - name: Generate image SBOMs
         run: |
           mkdir -p sbom
-          syft "${BACKEND_IMAGE}:sha-${{ github.sha }}"  -o spdx-json=sbom/backend-image.spdx.json
-          syft "${FRONTEND_IMAGE}:sha-${{ github.sha }}" -o spdx-json=sbom/frontend-image.spdx.json
+          syft "ghcr.io/finchippay/finchippay-backend:sha-${{ github.sha }}"  -o spdx-json=sbom/backend-image.spdx.json
+          syft "ghcr.io/finchippay/finchippay-frontend:sha-${{ github.sha }}" -o spdx-json=sbom/frontend-image.spdx.json
 
       - name: Upload image SBOMs
         if: always()
