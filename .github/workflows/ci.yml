@@ -454,6 +454,7 @@ jobs:
       - name: Start backend
         working-directory: backend
         run: |
+          mkdir -p data
           npm ci
           npm start &
           for i in $(seq 1 30); do
@@ -464,6 +465,7 @@ jobs:
         env:
           PORT: 4000
           NODE_ENV: test
+          DB_PROVIDER: sqlite
           STELLAR_NETWORK: testnet
           HORIZON_URL: https://horizon-testnet.stellar.org
           JWT_SECRET: test-secret-for-e2e-testing-only
