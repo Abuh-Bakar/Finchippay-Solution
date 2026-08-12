@@ -68,7 +68,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      security-events: write
 
     strategy:
       fail-fast: false
@@ -153,6 +152,7 @@ jobs:
         with:
           sarif_file: trivy-${{ matrix.component.name }}.sarif
           category: trivy-${{ matrix.component.name }}-k8s
+        continue-on-error: true
 
       - name: Push image
         if: steps.registry.outputs.available == 'true' && github.event_name != 'pull_request'

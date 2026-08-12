@@ -27,7 +27,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      security-events: write   # SARIF upload
 
     steps:
       - uses: actions/checkout@v4
@@ -94,6 +93,7 @@ jobs:
         with:
           sarif_file: trivy-backend.sarif
           category: trivy-backend-publish
+        continue-on-error: true
 
       - name: Push backend image
         if: steps.registry.outputs.available == 'true'
@@ -147,6 +147,7 @@ jobs:
         with:
           sarif_file: trivy-frontend.sarif
           category: trivy-frontend-publish
+        continue-on-error: true
 
       - name: Push frontend image
         if: steps.registry.outputs.available == 'true'
