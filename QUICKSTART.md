@@ -85,9 +85,9 @@ finchippay-solution/
 
 ## 6. Grantfox OSS Program
 
-This project participates in the **Grantfox OSS** program. Contributors can earn rewards for completing issues.
+This project participates in the **Grantfox OSS** program. Contributors can earn rewards for completing issues in the **GrantFox FWC26 (Stellar Wave)** campaign.
 
-1. Browse [Grantfox-tagged issues](https://github.com/FinChippay/Finchippay-Solution/issues?q=label%3A%22GrantFox+OSS%22)
+1. Browse [Grantfox-tagged issues](https://github.com/FinChippay/Finchippay-Solution/issues?q=label%3A%22Official+Campaign+%7C+FWC26%22)
 2. Look for `good first issue` or `help wanted` labels
 3. Comment on the issue to express interest
 4. Follow the PR workflow below

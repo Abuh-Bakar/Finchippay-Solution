@@ -1,74 +1,58 @@
-# OSS Grant Program — Implementation-Ready Issues
+# OSS Grant Program — FWC26 (Stellar Wave) Implementation-Ready Issues
 
-This directory contains **30 implementation-ready issues** for the Finchippay-Solution project, designed for OSS grant programs. Each issue targets **6–10 hours** of engineering work and is detailed enough that an experienced contributor can complete it without asking for clarification.
+This directory holds **12 implementation-ready issues** for the Finchippay-Solution project, prepared for the **GrantFox FWC26 campaign (Stellar Wave)**. Each issue targets **4–10 hours** of engineering work and is scoped so an experienced contributor can complete it without clarification.
 
-## Issue Distribution
+The canonical full-text source is [`GRANTFOX_ISSUES.md`](../GRANTFOX_ISSUES.md) (parsed by `scripts/create-grantfox-issues.js` to create the GitHub issues). The per-issue files below are kept in sync with it.
 
-| Category | Count | Issues |
-|---|---|---|
-| **Smart Contract (Soroban/Rust)** | 10 | #1–#10 |
-| **Frontend (Next.js/TypeScript)** | 10 | #11–#20 |
-| **Backend (Node.js/Express)** | 10 | #21–#30 |
+> ⚠️ **Superseded:** a previous 50-issue set and an earlier 30-issue set were pruned in this refresh — most of those issues had already been implemented in the codebase. This set is rebuilt against the *current* code and reflects only genuinely-open work.
 
-## Structure
+## Campaign labels (required)
 
-Each issue follows this template:
-- **Title** — Clear, action-oriented
-- **Labels** — Categorisation tags
-- **Summary** — One-paragraph overview
-- **Background** — Context from the existing codebase
-- **Problem Statement** — Why this matters
-- **Objectives** — What the contributor should achieve
-- **Scope** — In scope / Out of scope
-- **Detailed Implementation Requirements** — Step-by-step engineering guide
-- **Expected Architecture** — File structure and module design
-- **Acceptance Criteria** — Verifiable checklist for PR review
+To appear inside the FWC26 campaign, every issue must carry the campaign tag **exactly**:
 
-## How to Use
-
-1. Pick an issue from the list below
-2. Fork the repository: `https://github.com/FinChippay/Finchippay-Solution`
-3. Implement following the detailed requirements
-4. Open a PR referencing the issue number
+```
+Official Campaign | FWC26, Stellar Wave, GrantFox OSS, Maybe Rewarded
+```
 
 ## Issue Index
 
 ### Smart Contract (Rust / Soroban)
-- **#1** — Gas Profiling & Optimisation for FinchippayContract
-- **#2** — Property-Based Fuzz Testing for Streaming Payment Arithmetic
-- **#3** — Vesting Schedule Contract Extension
-- **#4** — Merkle-Tree Airdrop Contract Extension
-- **#5** — Admin Multi-Sig for Contract Governance
-- **#6** — Milestone-Based Escrow Releases Extension
-- **#7** — Stream Pause/Resume Functionality
-- **#8** — Soroban Event Indexer & Query Service
-- **#9** — Liquidity Pool Integration via Stellar DEX
-- **#10** — On-Chain Dispute Resolution for Escrow
+- **#1** — [AMM/DeFi Integration for Yield Escrow](001-amm-yield-escrow.md) — *advanced*
+- **#2** — [Stream Pause / Resume Entrypoints](002-stream-pause-resume.md) — *intermediate*
+- **#3** — [Migrate Contract Events to #[contractevent]](003-contractevent-migration.md) — *intermediate*
 
 ### Frontend (Next.js / TypeScript)
-- **#11** — Portfolio Dashboard with Real-Time P&L Tracking
-- **#12** — Multi-Language i18n Expansion (5+ languages)
-- **#13** — Offline-First Capabilities Enhancement
-- **#14** — Address Book with Group Management & Federation
-- **#15** — Notification Preferences UI and Management Dashboard
-- **#16** — Advanced Transaction Filters and Full-Text Search
-- **#17** — Escrow Management Dashboard UI
-- **#18** — Onboarding Tour v2 with Analytics
-- **#19** — Theme Customization (Dark/Light/Accent)
-- **#20** — Accessibility Audit and WCAG 2.1 AA Compliance
+- **#4** — [Multi-Network Switching (Testnet ↔ Mainnet)](004-multi-network-switching.md) — *intermediate*
+- **#5** — [SAC Token (USDC) Support Throughout the UI](005-sac-token-support.md) — *intermediate*
+- **#6** — [DAO Treasury Multi-Sig Management UI](006-dao-treasury-multisig-ui.md) — *advanced*
 
-### Backend (Node.js / Express)
-- **#21** — Refresh Token Rotation for SEP-0010 Sessions
-- **#22** — Data Retention and GDPR Compliance Service
-- **#23** — Email Notification Service Enhancement
-- **#24** — Rate Limiting Dashboard and Analytics
-- **#25** — Webhook Delivery Retry with Exponential Backoff
-- **#26** — API Versioning Strategy Implementation
-- **#27** — Migration of Tips/Username Storage to PostgreSQL
-- **#28** — Prometheus Metrics Export and Grafana Dashboard
-- **#29** — Health Check and Readiness Probe Enhancement
-- **#30** — Load Testing Framework and Performance Baselines
+### SDK / Cross-cutting
+- **#7** — [Multi-Language SDK Generation (Python, Go, Rust)](007-multilang-sdk.md) — *advanced*
+
+### DevOps / QA / Security
+- **#8** — [Mainnet Deployment + On-Chain Verification](008-mainnet-deploy-verification.md) — *intermediate*
+- **#9** — [Integration Tests for Streaming & Multi-Sig Flows](009-streaming-multisig-e2e.md) — *intermediate*
+- **#10** — [Raise Test Coverage to 80%+](010-test-coverage-80.md) — *good first issue*
+- **#11** — [Bundle Size Monitoring](011-bundle-size-monitoring.md) — *intermediate*
+- **#12** — [Third-Party Security Audit Preparation](012-security-audit-prep.md) — *intermediate*
+
+## Structure
+
+Each issue follows the GrantFox FWC26 campaign format:
+- **Description** — one-line campaign framing (`This is a … issue for the GrantFox FWC26 campaign (Stellar Wave)`)
+- **Requirements and Context** — background, why it matters, concrete objectives
+- **Suggested Execution** — fork → branch → implement → test → PR
+- **Acceptance Criteria** — verifiable, quantitative checklist
+- **Guidelines** — domain-specific quality bars
+- **Timeframe** — target hours (48 / 72 / 96)
+
+## How to Use
+
+1. Pick an issue from the index above.
+2. Fork the repository: `https://github.com/FinChippay/Finchippay-Solution`
+3. Implement following the issue's requirements and acceptance criteria.
+4. Open a PR referencing the issue number (`Closes #N`).
 
 ---
 
-*Generated for OSS grant program applications. Issues are sequenced by dependency; earlier issues are better starting points for new contributors.*
+*Prepared for the GrantFox FWC26 (Stellar Wave) campaign. Issues are grounded in the current codebase — each references real files, TODOs, and roadmap items.*
