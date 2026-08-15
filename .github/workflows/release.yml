@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Generate frontend SBOM (CycloneDX)
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@v0.24.0
         with:
           path: ./frontend
           artifact-name: sbom-frontend-cdx.json
@@ -35,7 +35,7 @@ jobs:
           format: cyclonedx-json
 
       - name: Generate frontend SBOM (SPDX)
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@v0.24.0
         with:
           path: ./frontend
           artifact-name: sbom-frontend-spdx.json
@@ -43,7 +43,7 @@ jobs:
           format: spdx-json
 
       - name: Generate backend SBOM (CycloneDX)
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@v0.24.0
         with:
           path: ./backend
           artifact-name: sbom-backend-cdx.json
@@ -51,7 +51,7 @@ jobs:
           format: cyclonedx-json
 
       - name: Generate backend SBOM (SPDX)
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@v0.24.0
         with:
           path: ./backend
           artifact-name: sbom-backend-spdx.json
@@ -59,7 +59,7 @@ jobs:
           format: spdx-json
 
       - name: Generate contracts SBOM (CycloneDX)
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@v0.24.0
         with:
           path: ./contracts/finchippay-contract
           artifact-name: sbom-contract-cdx.json
@@ -67,7 +67,7 @@ jobs:
           format: cyclonedx-json
 
       - name: Generate contracts SBOM (SPDX)
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@v0.24.0
         with:
           path: ./contracts/finchippay-contract
           artifact-name: sbom-contract-spdx.json

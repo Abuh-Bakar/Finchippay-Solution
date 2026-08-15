@@ -78,8 +78,12 @@ const { requestIdMiddleware } = require("./middleware/requestId");
 const traceContextMiddleware = require("./middleware/tracing");
 const crypto = require("crypto");
 
-const { ApolloServer } = require("apollo-server-express");
-const { ApolloServerPluginLandingPageGraphQLPlayground } = require("apollo-server-core");
+const { ApolloServer } = require("@apollo/server");
+const { expressMiddleware } = require("@as-integrations/express4");
+const {
+  ApolloServerPluginLandingPageLocalDefault,
+  ApolloServerPluginLandingPageDisabled,
+} = require("@apollo/server/plugin/landingPage/default");
 const typeDefs = require("./graphql/schema");
 const resolvers = require("./graphql/resolvers");
 
@@ -467,37 +471,43 @@ if (require.main === module) {
     const apolloServer = new ApolloServer({
       typeDefs,
       resolvers,
-      context: ({ req }) => {
-        let user = null;
-        const authHeader = req.headers.authorization;
-        if (authHeader && authHeader.startsWith("Bearer ")) {
-          try {
-            const token = authHeader.split(" ")[1];
-            const jwt = require("jsonwebtoken");
-            const jwtSecret = process.env.JWT_SECRET || null;
-            if (!jwtSecret) {
-              // JWT_SECRET is not configured — skip token decoding
-              return { user: null };
-            }
-            const decoded = jwt.verify(token, jwtSecret);
-            if (decoded.publicKey && /^G[A-Z0-9]{55}$/.test(decoded.publicKey)) {
-              user = decoded;
-            }
-          } catch {
-            // invalid token — context.user stays null
-          }
-        }
-        return { user };
-      },
       introspection: process.env.NODE_ENV !== "production",
-      plugins:
+      plugins: [
         process.env.NODE_ENV !== "production"
-          ? [ApolloServerPluginLandingPageGraphQLPlayground()]
-          : [],
+          ? ApolloServerPluginLandingPageLocalDefault({ footer: false })
+          : ApolloServerPluginLandingPageDisabled(),
+      ],
     });
 
     await apolloServer.start();
-    apolloServer.applyMiddleware({ app, path: "/api/graphql" });
+    app.use(
+      "/api/graphql",
+      express.json(),
+      expressMiddleware(apolloServer, {
+        context: async ({ req }) => {
+          let user = null;
+          const authHeader = req.headers.authorization;
+          if (authHeader && authHeader.startsWith("Bearer ")) {
+            try {
+              const token = authHeader.split(" ")[1];
+              const jwt = require("jsonwebtoken");
+              const jwtSecret = process.env.JWT_SECRET || null;
+              if (!jwtSecret) {
+                // JWT_SECRET is not configured — skip token decoding
+                return { user: null };
+              }
+              const decoded = jwt.verify(token, jwtSecret);
+              if (decoded.publicKey && /^G[A-Z0-9]{55}$/.test(decoded.publicKey)) {
+                user = decoded;
+              }
+            } catch {
+              // invalid token — context.user stays null
+            }
+          }
+          return { user };
+        },
+      }),
+    );
 
     const server = app.listen(PORT, async () => {
       logger.info(
