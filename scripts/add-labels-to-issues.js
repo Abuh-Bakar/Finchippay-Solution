@@ -20,7 +20,6 @@ const CAMPAIGN_LABELS = [
   "GrantFox OSS",
   "Maybe Rewarded",
   "Official Campaign | FWC26",
-  "Stellar Wave",
 ];
 
 function parseIssues(content) {
