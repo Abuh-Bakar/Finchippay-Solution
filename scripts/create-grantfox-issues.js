@@ -12,7 +12,10 @@ const fs = require("fs");
 const path = require("path");
 const { execSync } = require("child_process");
 
-const ISSUES_FILE = path.join(__dirname, "..", "GRANTFOX_ISSUES.md");
+const fileArg = process.argv.find((a) => a.startsWith("--file="));
+const ISSUES_FILE = fileArg
+  ? path.resolve(fileArg.split("=")[1])
+  : path.join(__dirname, "..", "GRANTFOX_ISSUES.md");
 const REPO = "FinChippay/Finchippay-Solution";
 const DRY_RUN = process.argv.includes("--dry-run");
 const startArg = process.argv.find((a) => a.startsWith("--start="));
