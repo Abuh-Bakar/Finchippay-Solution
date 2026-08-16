@@ -112,6 +112,12 @@ pub enum ContractError {
     ProposalAlreadyExecuted = 26,
     /// The yield escrow has not reached its release ledger.
     ReleaseLedgerNotReached = 27,
+    /// A mutating entry point was re-entered while a previous call to the same
+    /// contract was still mid-flight. Raised by the non-reentrancy guard before
+    /// any state is read or written, so a hostile token contract cannot
+    /// double-claim, double-drain, or double-swap funds by calling back into
+    /// this contract from inside `token.transfer`.
+    ReentrantCall = 28,
 }
 
 // ─── Shared data types ────────────────────────────────────────────────────────
@@ -551,6 +557,11 @@ pub enum DataKey {
     // Swap / DEX configuration
     SwapFee,
     FeeCollector,
+    /// Non-reentrancy lock. Set for the duration of every value-transferring
+    /// entry point and removed on return (or rolled back on panic). Stored in
+    /// *instance* storage since it is transient per-invocation state, not
+    /// durable contract data.
+    Reentrant,
 }
 
 // ─── Helpers (TTL primitives re-exported from storage module) ────────────────
@@ -1068,6 +1079,9 @@ impl FinchippayContract {
         action_type: Symbol,
         action_data: Vec<Val>,
     ) -> u64 {
+        // The `rescue_tokens` admin action transfers funds, so the whole
+        // propose (and any auto-execution) is non-reentrant.
+        let _guard = ReentrancyGuard::acquire(&env);
         require_initialized(&env);
         proposer.require_auth();
 
@@ -1146,6 +1160,7 @@ impl FinchippayContract {
     /// When approvals reach the threshold, the action is auto-executed
     /// immediately.
     pub fn approve_admin_action(env: Env, proposal_id: u64, approver: Address) {
+        let _guard = ReentrancyGuard::acquire(&env);
         approver.require_auth();
 
         // Validate signer
@@ -1650,6 +1665,7 @@ impl FinchippayContract {
         amount: i128,
         to: Address,
     ) {
+        let _guard = ReentrancyGuard::acquire(&env);
         admin.require_auth();
         let stored = get_admin(&env);
         if admin != stored {
@@ -1753,6 +1769,7 @@ impl FinchippayContract {
     /// reaches the configured threshold AND the activation ledger has passed,
     /// the withdrawal executes automatically.
     pub fn approve_emergency_withdrawal(env: Env, id: u32, signer: Address) {
+        let _guard = ReentrancyGuard::acquire(&env);
         require_not_paused(&env);
         signer.require_auth();
 
@@ -1791,27 +1808,38 @@ impl FinchippayContract {
         if withdrawal.approvals.len() >= withdrawal.threshold
             && env.ledger().sequence() >= withdrawal.activation_ledger
         {
-            let token = get_token_client(&env, &withdrawal.token);
+            // Checks-effects-interactions: commit the executed state *before*
+            // the external transfer, so a re-entrant call cannot observe a
+            // still-pending withdrawal. (Emergency withdrawals move only
+            // *unlocked* tokens, so `LockedBalance` is untouched.)
             let to = withdrawal.to.clone();
             let amount = withdrawal.amount;
-            contract_transfer_out(&env, &token, &to, &amount);
             withdrawal.status = EmergencyWithdrawalStatus::Executed;
+
+            env.storage()
+                .persistent()
+                .set(&DataKey::EmergencyWithdrawal(id), &withdrawal);
+            bump(&env, &DataKey::EmergencyWithdrawal(id));
+
+            let token = get_token_client(&env, &withdrawal.token);
+            contract_transfer_out(&env, &token, &to, &amount);
             env.events().publish(
                 (Symbol::new(&env, "emergency_withdrawal_executed"), id),
                 (to, amount),
             );
+        } else {
+            env.storage()
+                .persistent()
+                .set(&DataKey::EmergencyWithdrawal(id), &withdrawal);
+            bump(&env, &DataKey::EmergencyWithdrawal(id));
         }
-
-        env.storage()
-            .persistent()
-            .set(&DataKey::EmergencyWithdrawal(id), &withdrawal);
-        bump(&env, &DataKey::EmergencyWithdrawal(id));
     }
 
     /// Execute a pending emergency withdrawal. Can only be called after both the
     /// activation ledger has been reached AND the approval threshold is met.
     /// Anyone may call this — the actual authorization was done via approvals.
     pub fn execute_emergency_withdrawal(env: Env, id: u32) {
+        let _guard = ReentrancyGuard::acquire(&env);
         require_not_paused(&env);
 
         let mut withdrawal: EmergencyWithdrawal = env
@@ -1830,14 +1858,18 @@ impl FinchippayContract {
             panic!("insufficient admin approvals");
         }
 
-        let token = get_token_client(&env, &withdrawal.token);
-        contract_transfer_out(&env, &token, &withdrawal.to, &withdrawal.amount);
+        // Checks-effects-interactions: commit the executed state before the
+        // external transfer so a re-entrant call is rejected by the guard and,
+        // even if the guard were bypassed, would see an already-executed record.
         withdrawal.status = EmergencyWithdrawalStatus::Executed;
 
         env.storage()
             .persistent()
             .set(&DataKey::EmergencyWithdrawal(id), &withdrawal);
         bump(&env, &DataKey::EmergencyWithdrawal(id));
+
+        let token = get_token_client(&env, &withdrawal.token);
+        contract_transfer_out(&env, &token, &withdrawal.to, &withdrawal.amount);
 
         env.events().publish(
             (Symbol::new(&env, "emergency_withdrawal_executed"), id),
@@ -1933,6 +1965,10 @@ impl FinchippayContract {
         amount: i128,
         memo: Symbol,
     ) {
+        // Non-reentrancy: every token.transfer is a call into an untrusted
+        // contract, so hold the lock for the entire call (checks → effects →
+        // interactions) to prevent a hostile token from re-entering `send_tip`.
+        let _guard = ReentrancyGuard::acquire(&env);
         require_initialized(&env);
         require_not_paused(&env);
         from.require_auth();
@@ -2644,6 +2680,7 @@ impl FinchippayContract {
         min_amount_out: i128,
         path: Vec<Address>,
     ) -> Result<i128, ContractError> {
+        let _guard = ReentrancyGuard::acquire(&env);
         require_initialized(&env);
         require_not_paused(&env);
         caller.require_auth();
@@ -2710,6 +2747,7 @@ impl FinchippayContract {
         max_amount_in: i128,
         path: Vec<Address>,
     ) -> Result<i128, ContractError> {
+        let _guard = ReentrancyGuard::acquire(&env);
         require_initialized(&env);
         require_not_paused(&env);
         caller.require_auth();
