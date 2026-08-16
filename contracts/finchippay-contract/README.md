@@ -41,6 +41,7 @@ Recipients can call `claim_stream` at any time to drain accrued tokens. Payers c
 - All arithmetic uses `checked_add` / `checked_sub` / `checked_mul`; overflows panic rather than silently wrap.
 - Storage TTLs are bumped on every read and write to prevent ledger expiry.
 - `EscrowStatus`, `MultiSigStatus`, and `closed` fields prevent double-claim and double-cancel attacks.
+- **Reentrancy guard**: every value-transferring entry point acquires a non-reentrancy lock (a transient flag in instance storage) and follows checks-effects-interactions ordering, so a hostile token contract cannot double-claim, double-drain, or double-swap funds by calling back into the contract from inside `token.transfer`. Nested calls abort with `ContractError::ReentrantCall`.
 - **RBAC**: A separate `pauser` role can freeze/unfreeze operations without admin upgrade rights via `set_pauser`.
 - **Upgradability**: admin can call `upgrade(new_wasm_hash)` to deploy security patches without migrating state. Version is tracked and incremented on each upgrade.
 - **Bounded inputs**:
