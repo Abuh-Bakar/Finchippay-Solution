@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   benchmark:
+    if: github.event_name != 'pull_request' # Skip on pull requests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

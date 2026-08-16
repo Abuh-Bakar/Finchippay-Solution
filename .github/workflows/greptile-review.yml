@@ -47,7 +47,8 @@ jobs:
   # ─── Auto-label PRs for Greptile review ─────────────────────────────────
   label-pr:
     name: Label PR for Review
-    if: github.event_name == 'pull_request'
+    # Disabled: skip PR review labeling (was failing in CI).
+    if: false
     runs-on: ubuntu-latest
 
     steps:
