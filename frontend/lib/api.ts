@@ -39,45 +39,21 @@ export async function apiFetch(
   });
 }
 
-// Automatically patch global fetch in the browser/client-side and Node environment.
-// Uses a self-executing function to avoid top-level typeof checks that conflict
-// with certain tsconfig lib configurations.
-(function patchGlobalFetch() {
-  const globalObj = (
-    typeof window !== 'undefined' ? window : globalThis
-  ) as typeof globalThis & { __fetchPatched?: boolean };
+import { FinchippayClient, ApiHttpError, type FinchippayClientOptions } from "@finchippay/sdk";
+import { ensureAccessToken } from "./auth";
 
-  if (globalObj && !(globalObj as any).__fetchPatched) {
-    const originalFetch = globalObj.fetch?.bind(globalObj);
-    if (originalFetch) {
-      (globalObj as any).fetch = async function (
-        input: RequestInfo | URL,
-        init?: RequestInit
-      ) {
-        const urlStr =
-          typeof input === 'string'
-            ? input
-            : input instanceof URL
-              ? input.href
-              : (input as Request).url;
+export * from "@finchippay/sdk";
+export { FinchippayClient, ApiHttpError };
 
-        // Only inject traceparent headers for relative paths or API endpoints
-        const isBackendApi = urlStr.includes('/api/') || !urlStr.startsWith('http');
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 
-        if (isBackendApi) {
-          const headers = new Headers(init?.headers);
-          if (!headers.has('traceparent')) {
-            headers.set('traceparent', generateTraceParent());
-          }
-          return originalFetch(input, {
-            ...init,
-            headers,
-          });
-        }
-
-        return originalFetch(input, init);
-      };
-      (globalObj as any).__fetchPatched = true;
-    }
-  }
-})();
+/**
+ * Shared, authenticated FinchippayClient instance dogfooded by all frontend modules.
+ * Automatically injects W3C traceparent headers and handles token management.
+ */
+export const apiClient = new FinchippayClient({
+  baseUrl: API_BASE_URL,
+  fetch: apiFetch,
+  getAuthToken: () => ensureAccessToken(),
+});
