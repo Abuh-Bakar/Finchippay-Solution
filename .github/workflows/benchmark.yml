@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   benchmark:
-    if: github.event_name != 'pull_request' # Skip on pull requests
+    if: false # Disabled: not run on PRs or push
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

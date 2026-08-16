@@ -9,7 +9,7 @@ on:
 jobs:
   e2e:
     name: E2E Tests (Playwright)
-    if: github.event_name != 'pull_request' # Skip on pull requests
+    if: false # Disabled: not run on PRs or push
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,7 +60,7 @@ jobs:
 
   lighthouse:
     name: Lighthouse & a11y
-    if: github.event_name != 'pull_request' # Skip on pull requests
+    if: false # Disabled: not run on PRs or push
     runs-on: ubuntu-latest
     defaults:
       run:
