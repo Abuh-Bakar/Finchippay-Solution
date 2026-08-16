@@ -21,9 +21,7 @@
 "use strict";
 
 const { NodeSDK } = require("@opentelemetry/sdk-node");
-const {
-  getNodeAutoInstrumentations,
-} = require("@opentelemetry/auto-instrumentations-node");
+const { getNodeAutoInstrumentations } = require("@opentelemetry/auto-instrumentations-node");
 const { OTLPTraceExporter } = require("@opentelemetry/exporter-trace-otlp-http");
 const { diag, DiagConsoleLogger, DiagLogLevel, trace } = require("@opentelemetry/api");
 const logger = require("../utils/logger");
@@ -37,9 +35,7 @@ let sdk = null;
 if (NODE_ENV === "test") {
   logger.info("OpenTelemetry tracing disabled (NODE_ENV=test)");
 } else if (!OTLP_ENDPOINT) {
-  logger.info(
-    "OpenTelemetry tracing disabled (OTEL_EXPORTER_OTLP_ENDPOINT not set)",
-  );
+  logger.info("OpenTelemetry tracing disabled (OTEL_EXPORTER_OTLP_ENDPOINT not set)");
 } else {
   // ─── OTel internal diagnostics ───────────────────────────────────────────
   // Log OTel SDK warnings/errors via pino so they appear in structured logs.

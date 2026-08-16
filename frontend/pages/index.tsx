@@ -9,6 +9,7 @@ import { useRouter } from "next/router";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import WalletConnect from "@/components/WalletConnect";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { useWallet } from "@/lib/useWallet";
 
 const FEATURE_KEYS = [
@@ -29,6 +30,10 @@ export default function Home() {
   const router = useRouter();
   const { t } = useTranslation("common");
   const [showConnect, setShowConnect] = useState(false);
+  const connectPanelRef = useFocusTrap<HTMLDivElement>({
+    active: showConnect,
+    onEscape: () => setShowConnect(false),
+  });
 
   const handleWalletConnect = (_publicKey: string) => {
     setShowConnect(false);
@@ -40,7 +45,7 @@ export default function Home() {
       <Head>
         <title>Home | Finchippay-Solution</title>
         <meta name="description" content="Experience lightning-fast payments on the Stellar network. Send funds globally with streaming, escrow, multi-sig, and batch payments — non-custodial and secure." />
-        <link rel="canonical" href="https://finchippay.vercel.app/" />
+        
       </Head>
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[400px] bg-stellar-500/5 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute top-20 right-0 w-[300px] h-[300px] bg-stellar-600/5 rounded-full blur-2xl pointer-events-none" />
@@ -135,7 +140,7 @@ export default function Home() {
                 <div className="font-display text-3xl font-bold text-gradient mb-1">
                   {stat.prefix || ""}{formatValue()}{stat.suffix || ""}
                 </div>
-                <div className="text-slate-400 text-sm">{t(`home.stats.${stat.key}` as any)}</div>
+                <div className="text-slate-400 text-sm">{String(t(`home.stats.${stat.key}`))}</div>
               </div>
             );
           })}
@@ -146,9 +151,9 @@ export default function Home() {
             <div key={f.key} className="card hover:border-stellar-500/30 transition-colors group cursor-default">
               <div className="text-2xl mb-3">{f.icon}</div>
               <h3 className="font-display font-semibold text-slate-900 dark:text-white mb-2 group-hover:text-stellar-700 dark:group-hover:text-stellar-300 transition-colors">
-                {t(`home.features.${f.key}.title` as any)}
+                {String(t(`home.features.${f.key}.title`))}
               </h3>
-              <p className="text-slate-600 dark:text-slate-400 text-sm leading-relaxed">{t(`home.features.${f.key}.desc` as any)}</p>
+              <p className="text-slate-600 dark:text-slate-400 text-sm leading-relaxed">{String(t(`home.features.${f.key}.desc`))}</p>
             </div>
           ))}
         </div>
@@ -266,8 +271,18 @@ export default function Home() {
         </section>
 
         {showConnect && !publicKey && (
-          <div className="fixed inset-0 z-50 bg-cosmos-900/90 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="w-full max-w-md">
+          <div
+            className="fixed inset-0 z-50 bg-cosmos-900/90 backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={(e) => { if (e.target === e.currentTarget) setShowConnect(false); }}
+          >
+            <div
+              ref={connectPanelRef}
+              tabIndex={-1}
+              role="dialog"
+              aria-modal="true"
+              aria-label={t("home.connectWallet") || "Connect wallet"}
+              className="w-full max-w-md outline-none"
+            >
               <WalletConnect onConnectSuccess={handleWalletConnect} />
               <button onClick={() => setShowConnect(false)} className="mt-4 w-full text-center text-sm text-slate-400 hover:text-slate-300 transition-colors cursor-pointer">
                 {t("home.cancel")}
@@ -282,6 +297,10 @@ export default function Home() {
             <a href="https://github.com/FinChippay/Finchippay-Solution" target="_blank" rel="noopener noreferrer" className="hover:text-stellar-700 dark:hover:text-stellar-400 transition-colors cursor-pointer">
               {t("home.footerContribute")}
             </a>
+            {" · "}
+            <Link href="/accessibility" className="hover:text-stellar-700 dark:hover:text-stellar-400 transition-colors cursor-pointer">
+              Accessibility
+            </Link>
           </p>
         </div>
       </div>

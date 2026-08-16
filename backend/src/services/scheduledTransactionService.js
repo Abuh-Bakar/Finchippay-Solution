@@ -1,28 +1,28 @@
+/**
+ * src/services/scheduledTransactionService.js
+ *
+ * Scheduled Stellar transactions: cron-based execution that produces an
+ * unsigned XDR and waits for the owner to sign via Freighter. The signed
+ * transaction is then submitted to Horizon.
+ *
+ * Storage: Knex (SQLite in development, PostgreSQL in production).
+ */
+
 "use strict";
 const crypto = require("crypto");
 const cron = require("node-cron");
+const { Asset, Memo, Networks, Operation, TransactionBuilder } = require("@stellar/stellar-sdk");
 
-const {
-  Asset,
-  Memo,
-  Networks,
-  Operation,
-  TransactionBuilder,
-} = require("@stellar/stellar-sdk");
-
-const db = require("../db");
+const knex = require("../db/connection");
 const { server } = require("../config/stellar");
 const { validatePublicKey } = require("./stellarService");
-const webhookService = require("./webhookService");
+const webhookService = require("./webhookSubscriptionService");
 const logger = require("../utils/logger");
 
 const NETWORK_PASSPHRASE =
   process.env.STELLAR_NETWORK === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
 
-// scheduleId -> node-cron task handle
 const activeCronJobs = new Map();
-
-// ─── Helpers ──────────────────────────────────────────────────────────────
 
 function toAsset(assetStr) {
   if (!assetStr || assetStr === "XLM") return Asset.native();
@@ -68,7 +68,7 @@ function estimateNextRun(frequency, fromDate) {
   if (frequency === "daily") next.setUTCDate(next.getUTCDate() + 1);
   else if (frequency === "weekly") next.setUTCDate(next.getUTCDate() + 7);
   else if (frequency === "monthly") next.setUTCMonth(next.getUTCMonth() + 1);
-  else return null; // raw cron: fired by node-cron directly, not tracked here
+  else return null;
   return next.toISOString();
 }
 
@@ -93,15 +93,11 @@ async function buildUnsignedPaymentXDR({ ownerPk, recipient, amount, asset, memo
   return tx.toXDR();
 }
 
-// ─── Cron registry ────────────────────────────────────────────────────────
-
 function registerCronJob(schedule) {
   unregisterCronJob(schedule.id);
-  const task = cron.schedule(
-    schedule.cron_expression,
-    () => executeSchedule(schedule.id),
-    { timezone: "UTC" },
-  );
+  const task = cron.schedule(schedule.cron_expression, () => executeSchedule(schedule.id), {
+    timezone: "UTC",
+  });
   activeCronJobs.set(schedule.id, task);
 }
 
@@ -113,18 +109,17 @@ function unregisterCronJob(id) {
   }
 }
 
-function loadActiveSchedules() {
-  const rows = db.prepare("SELECT * FROM scheduled_transactions WHERE status = 'active'").all();
+async function loadActiveSchedules() {
+  const rows = await knex("scheduled_transactions").where("status", "active");
   for (const schedule of rows) {
     registerCronJob(schedule);
   }
   logger.info({ count: rows.length }, "Loaded active scheduled transactions");
 }
 
-// ─── Execution ────────────────────────────────────────────────────────────
-
 async function notifyOwner(schedule, pendingId) {
-  const hooks = webhookService.getWebhooksByPublicKey(schedule.owner_pk);
+  const hooks = await webhookService.getWebhooksByPublicKey(schedule.owner_pk);
+
   const payload = {
     event: "scheduled_transaction.pending_signature",
     scheduleId: schedule.id,
@@ -133,13 +128,19 @@ async function notifyOwner(schedule, pendingId) {
     amount: schedule.amount,
     asset: schedule.asset,
   };
-  await Promise.allSettled(hooks.map((h) => webhookService.deliverWebhook(h, payload)));
+  await Promise.allSettled(
+    hooks.map((hook) =>
+      webhookService.deliverWebhook(hook, payload, "scheduled_transaction.pending_signature"),
+    ),
+  );
 }
 
 async function executeSchedule(scheduleId) {
-  const schedule = db
-    .prepare("SELECT * FROM scheduled_transactions WHERE id = ? AND status = 'active'")
-    .get(scheduleId);
+  const schedule = await knex("scheduled_transactions")
+    .where("id", scheduleId)
+    .andWhere("status", "active")
+    .first();
+
   if (!schedule) return;
 
   try {
@@ -152,26 +153,24 @@ async function executeSchedule(scheduleId) {
     });
 
     const pendingId = crypto.randomUUID();
-    db.prepare(
-      `INSERT INTO pending_executions (id, schedule_id, owner_pk, unsigned_xdr, status)
-       VALUES (?, ?, ?, ?, 'awaiting_signature')`,
-    ).run(pendingId, schedule.id, schedule.owner_pk, xdr);
+    await knex("pending_executions").insert({
+      id: pendingId,
+      schedule_id: schedule.id,
+      owner_pk: schedule.owner_pk,
+      unsigned_xdr: xdr,
+      status: "awaiting_signature",
+    });
 
     await notifyOwner(schedule, pendingId);
 
     const nextRun = estimateNextRun(schedule.frequency, new Date());
-    db.prepare("UPDATE scheduled_transactions SET next_run_at = ? WHERE id = ?").run(
-      nextRun,
-      schedule.id,
-    );
+    await knex("scheduled_transactions").where("id", schedule.id).update({ next_run_at: nextRun });
   } catch (err) {
     logger.error({ err, scheduleId }, "Failed to execute scheduled transaction");
   }
 }
 
-// ─── CRUD ─────────────────────────────────────────────────────────────────
-
-function createSchedule(body) {
+async function createSchedule(body) {
   const {
     ownerPk,
     recipient,
@@ -195,37 +194,33 @@ function createSchedule(body) {
   const id = crypto.randomUUID();
   const nextRunAt = estimateNextRun(frequency, new Date(startDate)) || startDate;
 
-  db.prepare(
-    `INSERT INTO scheduled_transactions
-      (id, owner_pk, recipient, amount, asset, memo, frequency, cron_expression, start_date, next_run_at, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
-  ).run(
+  await knex("scheduled_transactions").insert({
     id,
-    ownerPk,
+    owner_pk: ownerPk,
     recipient,
-    String(amount),
+    amount: String(amount),
     asset,
-    memo || null,
+    memo: memo || null,
     frequency,
-    resolvedCron,
-    startDate,
-    nextRunAt,
-  );
+    cron_expression: resolvedCron,
+    start_date: startDate,
+    next_run_at: nextRunAt,
+    status: "active",
+  });
 
-  const schedule = db.prepare("SELECT * FROM scheduled_transactions WHERE id = ?").get(id);
+  const schedule = await knex("scheduled_transactions").where("id", id).first();
   registerCronJob(schedule);
   return schedule;
 }
 
-function listSchedules(ownerPk) {
+async function listSchedules(ownerPk) {
   validatePublicKey(ownerPk);
-  return db
-    .prepare("SELECT * FROM scheduled_transactions WHERE owner_pk = ? ORDER BY created_at DESC")
-    .all(ownerPk);
+  return knex("scheduled_transactions").where("owner_pk", ownerPk).orderBy("created_at", "desc");
 }
 
-function updateSchedule(id, updates) {
-  const existing = db.prepare("SELECT * FROM scheduled_transactions WHERE id = ?").get(id);
+async function updateSchedule(id, updates) {
+  const existing = await knex("scheduled_transactions").where("id", id).first();
+
   if (!existing) {
     const err = new Error("Scheduled transaction not found");
     err.status = 404;
@@ -242,22 +237,19 @@ function updateSchedule(id, updates) {
         )
       : existing.cron_expression;
 
-  db.prepare(
-    `UPDATE scheduled_transactions
-     SET recipient = ?, amount = ?, asset = ?, memo = ?, frequency = ?, cron_expression = ?, status = ?
-     WHERE id = ?`,
-  ).run(
-    merged.recipient,
-    String(merged.amount),
-    merged.asset,
-    merged.memo || null,
-    merged.frequency,
-    resolvedCron,
-    merged.status,
-    id,
-  );
+  await knex("scheduled_transactions")
+    .where("id", id)
+    .update({
+      recipient: merged.recipient,
+      amount: String(merged.amount),
+      asset: merged.asset,
+      memo: merged.memo || null,
+      frequency: merged.frequency,
+      cron_expression: resolvedCron,
+      status: merged.status,
+    });
 
-  const updated = db.prepare("SELECT * FROM scheduled_transactions WHERE id = ?").get(id);
+  const updated = await knex("scheduled_transactions").where("id", id).first();
 
   if (updated.status === "active") {
     registerCronJob(updated);
@@ -268,29 +260,27 @@ function updateSchedule(id, updates) {
   return updated;
 }
 
-function deleteSchedule(id) {
-  const existing = db.prepare("SELECT * FROM scheduled_transactions WHERE id = ?").get(id);
+async function deleteSchedule(id) {
+  const existing = await knex("scheduled_transactions").where("id", id).first();
   if (!existing) return false;
   unregisterCronJob(id);
-  db.prepare("DELETE FROM scheduled_transactions WHERE id = ?").run(id);
+  await knex("scheduled_transactions").where("id", id).del();
   return true;
 }
 
-function listPendingExecutions(ownerPk) {
+async function listPendingExecutions(ownerPk) {
   validatePublicKey(ownerPk);
-  return db
-    .prepare(
-      `SELECT pe.*, st.recipient, st.amount, st.asset
-       FROM pending_executions pe
-       JOIN scheduled_transactions st ON st.id = pe.schedule_id
-       WHERE pe.owner_pk = ? AND pe.status = 'awaiting_signature'
-       ORDER BY pe.created_at DESC`,
-    )
-    .all(ownerPk);
+  return knex("pending_executions as pe")
+    .join("scheduled_transactions as st", "st.id", "pe.schedule_id")
+    .where("pe.owner_pk", ownerPk)
+    .andWhere("pe.status", "awaiting_signature")
+    .orderBy("pe.created_at", "desc")
+    .select("pe.*", "st.recipient", "st.amount", "st.asset");
 }
 
 async function submitPendingExecution(id, signedXDR) {
-  const pending = db.prepare("SELECT * FROM pending_executions WHERE id = ?").get(id);
+  const pending = await knex("pending_executions").where("id", id).first();
+
   if (!pending) {
     const err = new Error("Pending execution not found");
     err.status = 404;
@@ -305,14 +295,18 @@ async function submitPendingExecution(id, signedXDR) {
   try {
     const tx = TransactionBuilder.fromXDR(signedXDR, NETWORK_PASSPHRASE);
     const result = await server.submitTransaction(tx);
-    db.prepare(
-      "UPDATE pending_executions SET status = 'submitted', submitted_hash = ?, resolved_at = CURRENT_TIMESTAMP WHERE id = ?",
-    ).run(result.hash, id);
+    await knex("pending_executions").where("id", id).update({
+      status: "submitted",
+      submitted_hash: result.hash,
+      resolved_at: new Date().toISOString(),
+    });
     return { status: "submitted", hash: result.hash };
   } catch (err) {
-    db.prepare(
-      "UPDATE pending_executions SET status = 'failed', error = ?, resolved_at = CURRENT_TIMESTAMP WHERE id = ?",
-    ).run(err.message, id);
+    await knex("pending_executions").where("id", id).update({
+      status: "failed",
+      error: err.message,
+      resolved_at: new Date().toISOString(),
+    });
     const wrapped = new Error(`Submission failed: ${err.message}`);
     wrapped.status = 400;
     throw wrapped;
@@ -327,4 +321,6 @@ module.exports = {
   listPendingExecutions,
   submitPendingExecution,
   loadActiveSchedules,
+  buildUnsignedPaymentXDR,
+  estimateNextRun,
 };

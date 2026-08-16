@@ -3,6 +3,8 @@
  * Authentication helpers for API calls.
  */
 
+import { logger } from "@/lib/logger";
+
 let inMemoryAccessToken: string | null = null;
 let refreshPromise: Promise<string | null> | null = null;
 
@@ -68,7 +70,7 @@ async function performRefresh(): Promise<string | null> {
       }
     }
   } catch (err) {
-    console.error("Token refresh failed:", err);
+    logger.error("Token refresh failed", { apiUrl: API_URL }, err instanceof Error ? err : new Error(String(err)));
   }
 
   clearJwtToken();
@@ -107,8 +109,8 @@ export async function ensureAccessToken(): Promise<string | null> {
  */
 export function withAuth(fetchFn: typeof fetch): typeof fetch {
   return async (input, init) => {
-    let reqInit = init || {};
-    let headers = new Headers(reqInit.headers || {});
+    const reqInit = init || {};
+    const headers = new Headers(reqInit.headers || {});
 
     // Try to pre-populate Authorization if we have access token in memory
     if (!headers.has("Authorization") && inMemoryAccessToken) {
@@ -124,13 +126,13 @@ export function withAuth(fetchFn: typeof fetch): typeof fetch {
     }
 
     reqInit.headers = headers;
-    let response = await fetchFn(input, reqInit);
+    const response = await fetchFn(input, reqInit);
 
     // If unauthorized, attempt to refresh and retry
     if (response.status === 401) {
       const freshToken = await refreshTokens();
       if (freshToken) {
-        let retryHeaders = new Headers(reqInit.headers);
+        const retryHeaders = new Headers(reqInit.headers);
         retryHeaders.set("Authorization", `Bearer ${freshToken}`);
         reqInit.headers = retryHeaders;
         return await fetchFn(input, reqInit);
@@ -145,3 +147,95 @@ export function withAuth(fetchFn: typeof fetch): typeof fetch {
     return response;
   };
 }
+
+/**
+ * Return a guaranteed valid access token, refreshing automatically if needed.
+ */
+export async function getAccessToken(): Promise<string | null> {
+  return ensureAccessToken();
+}
+
+export interface SessionInfo {
+  id: number;
+  publicKey: string;
+  deviceInfo?: string;
+  ipAddress?: string;
+  createdAt: string;
+  lastUsedAt?: string;
+  expiresAt: string;
+}
+
+/**
+ * Get active sessions for current user
+ */
+export async function getSessions(): Promise<SessionInfo[]> {
+  const token = await ensureAccessToken();
+  if (!token) return [];
+
+  const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/+$/, "");
+  try {
+    const res = await fetch(`${API_URL}/api/auth/sessions`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.sessions || [];
+    }
+  } catch (err) {
+    logger.error("Failed to fetch sessions", {}, err instanceof Error ? err : undefined);
+  }
+  return [];
+}
+
+/**
+ * Revoke specific session by session ID
+ */
+export async function revokeSession(sessionId: number | string): Promise<boolean> {
+  const token = await ensureAccessToken();
+  const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/+$/, "");
+  try {
+    const res = await fetch(`${API_URL}/api/auth/revoke`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ sessionId }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return Boolean(data.success);
+    }
+  } catch (err) {
+    logger.error("Failed to revoke session", { sessionId: String(sessionId) }, err instanceof Error ? err : undefined);
+  }
+  return false;
+}
+
+/**
+ * Revoke all active sessions for current user
+ */
+export async function revokeAllSessions(): Promise<boolean> {
+  const token = await ensureAccessToken();
+  const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/+$/, "");
+  try {
+    const res = await fetch(`${API_URL}/api/auth/revoke`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ all: true }),
+    });
+    if (res.ok) {
+      clearJwtToken();
+      return true;
+    }
+  } catch (err) {
+    logger.error("Failed to revoke all sessions", {}, err instanceof Error ? err : undefined);
+  }
+  return false;
+}
+

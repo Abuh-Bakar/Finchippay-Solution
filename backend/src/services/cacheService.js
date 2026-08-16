@@ -132,6 +132,22 @@ function getRedisStatus() {
   return redisStatus;
 }
 
+/**
+ * Ping the Redis server directly (bypasses the LRU fallback) — used by the
+ * readiness/dependency health checks to measure real round-trip latency.
+ *
+ * @returns {Promise<string|null>} "PONG", or null when REDIS_URL is not configured.
+ */
+async function ping() {
+  if (!REDIS_URL) {
+    return null;
+  }
+  if (!redis || !redisReady) {
+    throw new Error("Redis client is not connected");
+  }
+  return redis.ping();
+}
+
 // ─── In-memory LRU fallback ──────────────────────────────────────────────────
 
 /** @type {Map<string, { value: string, expiresAt: number }>} */
@@ -179,9 +195,7 @@ function lruDelPattern(pattern) {
 // ─── Pattern-to-regex helper ─────────────────────────────────────────────────
 
 function patternToRegex(pattern) {
-  const escaped = pattern
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*/g, ".*");
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
   return new RegExp(`^${escaped}$`);
 }
 
@@ -340,13 +354,7 @@ async function delPattern(pattern) {
       try {
         let cursor = "0";
         do {
-          const [nextCursor, keys] = await redis.scan(
-            cursor,
-            "MATCH",
-            pattern,
-            "COUNT",
-            100,
-          );
+          const [nextCursor, keys] = await redis.scan(cursor, "MATCH", pattern, "COUNT", 100);
           cursor = nextCursor;
           if (keys && keys.length > 0) {
             await redis.del(...keys);
@@ -387,6 +395,7 @@ module.exports = {
   initRedis,
   closeRedis,
   getRedisStatus,
+  ping,
   get,
   set,
   del,

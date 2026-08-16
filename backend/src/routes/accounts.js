@@ -8,9 +8,17 @@
 const express = require("express");
 const router = express.Router();
 const { strictLimiter, sensitiveLimiter } = require("../middleware/rateLimit");
+const { userLimiter } = require("../middleware/userRateLimit");
 const { sanitizePublicKey, sanitizeUsername } = require("../middleware/sanitization");
 const { verifyJWT } = require("../middleware/auth");
+const { validate } = require("../validation/middleware");
+const {
+  publicKeyParamSchema,
+  usernameParamSchema,
+  registerUsernameSchema,
+} = require("../validation/schemas");
 const accountController = require("../controllers/accountController");
+const { sendError } = require("../utils/errorResponse");
 
 /**
  * Restrict account-data routes to the authenticated account holder (#278).
@@ -18,9 +26,9 @@ const accountController = require("../controllers/accountController");
  */
 function requireOwnAccount(req, res, next) {
   if (req.user?.publicKey !== req.params.publicKey) {
-    return res
-      .status(403)
-      .json({ error: "Forbidden: you may only access your own account data" });
+    return sendError(res, "AUTH_FORBIDDEN", {
+      message: "Forbidden: you may only access your own account data.",
+    });
   }
   next();
 }
@@ -43,19 +51,43 @@ function acceptTokenFromQuery(req, res, next) {
  * Resolve a username to a Stellar public key.
  * Must be registered before /:publicKey or Express matches it as a key.
  */
-router.get("/resolve/:username", sensitiveLimiter, sanitizeUsername, accountController.resolveUsername);
+router.get(
+  "/resolve/:username",
+  sensitiveLimiter,
+  sanitizeUsername,
+  validate(usernameParamSchema, "params"),
+  accountController.resolveUsername,
+);
 
 /**
  * GET /api/accounts/:publicKey
  * Fetch account info and balances from Horizon.
  */
-router.get("/:publicKey", sensitiveLimiter, verifyJWT, sanitizePublicKey, requireOwnAccount, accountController.getAccount);
+router.get(
+  "/:publicKey",
+  sensitiveLimiter,
+  userLimiter,
+  verifyJWT,
+  sanitizePublicKey,
+  validate(publicKeyParamSchema, "params"),
+  requireOwnAccount,
+  accountController.getAccount,
+);
 
 /**
  * GET /api/accounts/:publicKey/balance
  * Fetch just the XLM balance for an account.
  */
-router.get("/:publicKey/balance", sensitiveLimiter, verifyJWT, sanitizePublicKey, requireOwnAccount, accountController.getBalance);
+router.get(
+  "/:publicKey/balance",
+  sensitiveLimiter,
+  userLimiter,
+  verifyJWT,
+  sanitizePublicKey,
+  validate(publicKeyParamSchema, "params"),
+  requireOwnAccount,
+  accountController.getBalance,
+);
 
 /**
  * GET /api/accounts/:publicKey/stream
@@ -78,6 +110,41 @@ router.get(
  * POST /api/accounts/register
  * Register a new username with a public key.
  */
-router.post("/register", strictLimiter, accountController.registerUsername);
+router.post(
+  "/register",
+  strictLimiter,
+  validate(registerUsernameSchema),
+  accountController.registerUsername,
+);
+
+/**
+ * POST /api/accounts/:publicKey/gdpr-delete
+ * Anonymize stored off-chain data for the account (GDPR/CCPA #76).
+ */
+router.post(
+  "/:publicKey/gdpr-delete",
+  sensitiveLimiter,
+  userLimiter,
+  verifyJWT,
+  sanitizePublicKey,
+  validate(publicKeyParamSchema, "params"),
+  requireOwnAccount,
+  accountController.gdprDelete,
+);
+
+/**
+ * GET /api/accounts/:publicKey/gdpr-export
+ * Return all stored off-chain data for the account as JSON (GDPR/CCPA #76).
+ */
+router.get(
+  "/:publicKey/gdpr-export",
+  sensitiveLimiter,
+  userLimiter,
+  verifyJWT,
+  sanitizePublicKey,
+  validate(publicKeyParamSchema, "params"),
+  requireOwnAccount,
+  accountController.gdprExport,
+);
 
 module.exports = router;

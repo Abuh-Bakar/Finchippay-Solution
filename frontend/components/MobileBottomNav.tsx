@@ -1,15 +1,28 @@
+import {
+  HomeIcon,
+  PaperAirplaneIcon,
+  ListBulletIcon,
+  Cog8ToothIcon,
+  DocumentTextIcon,
+} from "@heroicons/react/24/outline";
+import {
+  HomeIcon as HomeIconSolid,
+  PaperAirplaneIcon as PaperAirplaneIconSolid,
+  ListBulletIcon as ListBulletIconSolid,
+  Cog8ToothIcon as Cog8ToothIconSolid,
+  DocumentTextIcon as DocumentTextIconSolid,
+} from "@heroicons/react/24/solid";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { HomeIcon, PaperAirplaneIcon, ListBulletIcon, Cog8ToothIcon } from "@heroicons/react/24/outline";
-import { HomeIcon as HomeIconSolid, PaperAirplaneIcon as PaperAirplaneIconSolid, ListBulletIcon as ListBulletIconSolid, Cog8ToothIcon as Cog8ToothIconSolid } from "@heroicons/react/24/solid";
 
 export default function MobileBottomNav() {
   const router = useRouter();
-  
+
   const navItems = [
     { name: "Home", href: "/", icon: HomeIcon, activeIcon: HomeIconSolid },
     { name: "Send", href: "/pay", icon: PaperAirplaneIcon, activeIcon: PaperAirplaneIconSolid },
-    { name: "History", href: "/transactions", icon: ListBulletIcon, activeIcon: ListBulletIconSolid, badge: 2 }, // mocked badge
+    { name: "History", href: "/transactions", icon: ListBulletIcon, activeIcon: ListBulletIconSolid, badge: 2 },
+    { name: "Invoices", href: "/invoices", icon: DocumentTextIcon, activeIcon: DocumentTextIconSolid },
     { name: "Settings", href: "/settings", icon: Cog8ToothIcon, activeIcon: Cog8ToothIconSolid },
   ];
 

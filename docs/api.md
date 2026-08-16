@@ -1318,3 +1318,25 @@ When `TURRETS_PORT` is set (default `4100`), a separate process exposes:
 | * | `http://localhost:4100/tx-functions/*` | Same txFunction routes as `/api/turrets/*` on the main server |
 
 The main API on port **4000** mounts turrets at `/api/turrets`; prefer that URL for application integration.
+
+## SEP Compliance Verification
+
+To verify SEP endpoint compliance:
+
+```bash
+# SEP-0001 (stellar.toml)
+curl -s https://your-domain.com/.well-known/stellar.toml | grep -E 'FEDERATION|TRANSFER|WEB_AUTH'
+
+# SEP-0002 (Federation)
+curl -s 'https://your-domain.com/api/v1/federation?q=alice*finchippay.com&type=name'
+
+# SEP-0010 (Web Auth)
+curl -s https://your-domain.com/api/v1/auth -H 'Content-Type: application/json' \
+  -d '{"publicKey":"G...","homeDomain":"finchippay.com"}'
+
+# SEP-0038 (RFQ)
+curl -s 'https://your-domain.com/api/v1/sep38/price?asset_code=USDC&amount=100'
+```
+
+All SEP endpoints return `application/json` with proper CORS headers. Error
+responses follow the shared error code format from `shared/errorCodes.js`.

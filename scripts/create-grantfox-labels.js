@@ -10,10 +10,13 @@ const { execSync } = require("child_process");
 
 const REPO = "FinChippay/Finchippay-Solution";
 
-// All labels used across the 50 issues (deduplicated)
+// All labels used across the FWC26 issues (deduplicated).
+// Campaign labels must match the active GrantFox campaign tag EXACTLY.
 const LABELS = [
+  "GrantFox OSS", "Maybe Rewarded", "Official Campaign | FWC26",
   "contract", "optimization", "soroban",
-  "testing", "security",
+  "testing", "security", "defi", "amm", "streaming", "network", "events", "multisig",
+  "coverage", "audit", "documentation", "good first issue", "help wanted",
   "indexer", "new-service",
   "feature", "vesting", "airdrop",
   "governance",

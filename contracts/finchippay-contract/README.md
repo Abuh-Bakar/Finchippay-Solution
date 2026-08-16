@@ -109,3 +109,24 @@ bash ../../scripts/deploy-contract.sh
 ## License
 
 MIT
+
+## Contract Event Migration
+
+This contract currently uses the legacy `publish()` API for emitting contract
+events. The Soroban SDK has deprecated `publish()` in favor of the
+`#[contractevent]` attribute macro.
+
+### Migration Steps
+
+1. Replace all `env.events().publish(...)` calls with `#[contractevent]`
+   struct definitions and `env.events().publish(&event)` invocations.
+2. Bump `STORAGE_LAYOUT_VERSION` and ensure the new event types are documented.
+3. Update the event indexer (`backend/src/services/eventIndexer.js`) to parse
+   the new topic format (the `#[contractevent]` macro generates a 16-byte topic
+   hash from the struct name).
+4. Re-deploy and verify with `soroban contract invoke --id <C> -- events`.
+
+### Tracking
+
+- Issue: `#amm-integration` (yield_escrow.rs TODOs)
+- Contract version in Cargo.toml and on-chain `get_version()` must stay in sync.

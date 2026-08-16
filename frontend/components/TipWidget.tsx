@@ -2,9 +2,10 @@ import clsx from "clsx";
 import { useEffect, useRef, useState } from "react";
 import SendPaymentForm from "@/components/SendPaymentForm";
 import WalletConnect from "@/components/WalletConnect";
+import { logger } from "@/lib/logger";
 import { getXLMBalance, shortenAddress } from "@/lib/stellar";
-import { formatXLM } from "@/utils/format";
 import { useWallet } from "@/lib/useWallet";
+import { formatXLM } from "@/utils/format";
 
 interface TipWidgetProps {
   creatorUsername: string;
@@ -100,7 +101,7 @@ export default function TipWidget({
     // Record tip in backend
     try {
       const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "";
-      await fetch(`${apiBase}/api/tips`, {
+      await fetch(`${apiBase}/api/v1/tips`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -111,7 +112,7 @@ export default function TipWidget({
         }),
       });
     } catch (err) {
-      console.error("Failed to record tip:", err);
+      logger.error("Failed to record tip:", err);
     }
   };
 

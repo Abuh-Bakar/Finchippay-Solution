@@ -1,6 +1,7 @@
-import React, { useState, useRef } from "react";
 import clsx from "clsx";
 import { QRCodeCanvas } from "qrcode.react";
+import React, { useState, useRef } from "react";
+import { logger } from "@/lib/logger";
 import { buildPaymentLinkUrl, rememberPaymentLink } from "@/lib/paymentLinks";
 
 export default function PaymentRequestGenerator() {
@@ -41,7 +42,7 @@ export default function PaymentRequestGenerator() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
-      console.error("Failed to copy!", err);
+      logger.error("Failed to copy!", err);
     }
   };
 

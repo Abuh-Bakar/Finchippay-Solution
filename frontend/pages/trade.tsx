@@ -1,3 +1,5 @@
+import { Asset } from "@stellar/stellar-sdk";
+import { format } from "date-fns";
 import Head from "next/head";
 /**
  * pages/trade.tsx
@@ -5,7 +7,11 @@ import Head from "next/head";
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { Asset } from "@stellar/stellar-sdk";
+import Toast from "@/components/Toast";
+import TradeForm from "@/components/TradeForm";
+import WalletConnect from "@/components/WalletConnect";
+import { FeatureGate } from "@/lib/FeatureFlags";
+import { logger } from "@/lib/logger";
 import {
   fetchOrderbook,
   fetchTradeAggregations,
@@ -18,12 +24,7 @@ import {
   TradeAggregation,
   OpenOffer,
 } from "@/lib/stellar";
-import TradeForm from "@/components/TradeForm";
-import Toast from "@/components/Toast";
-import WalletConnect from "@/components/WalletConnect";
 import { useWallet } from "@/lib/useWallet";
-import { FeatureGate } from "@/lib/FeatureFlags";
-import { format } from "date-fns";
 
 export default function Trade() {
   const { publicKey } = useWallet();
@@ -40,7 +41,7 @@ export default function Trade() {
       const data = await fetchOrderbook(USDC, Asset.native(), 10);
       setOrderbook(data);
     } catch (error) {
-      console.error("Failed to load orderbook:", error);
+      logger.error("Failed to load orderbook:", error);
     }
   }, []);
 
@@ -60,7 +61,7 @@ export default function Trade() {
       );
       setTradeHistory(data);
     } catch (error) {
-      console.error("Failed to load trade history:", error);
+      logger.error("Failed to load trade history:", error);
     }
   }, []);
 
@@ -71,7 +72,7 @@ export default function Trade() {
       const offers = await fetchOpenOffers(publicKey);
       setOpenOffers(offers);
     } catch (error) {
-      console.error("Failed to load open offers:", error);
+      logger.error("Failed to load open offers:", error);
     }
   }, [publicKey]);
 
@@ -102,7 +103,7 @@ export default function Trade() {
       showToast("Offer cancelled successfully!", "success");
       loadOpenOffers(); // Reload offers
     } catch (error) {
-      console.error("Failed to cancel offer:", error);
+      logger.error("Failed to cancel offer:", error);
       showToast(error instanceof Error ? error.message : "Failed to cancel offer", "error");
     } finally {
       setIsLoading(false);

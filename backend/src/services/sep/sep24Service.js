@@ -57,8 +57,7 @@ const PUBLIC_KEY_RE = /^G[A-Z0-9]{55}$/;
  * @returns {string}
  */
 function _buildInteractiveUrl({ id, assetCode, account, kind, anchorBaseUrl }) {
-  const base =
-    anchorBaseUrl || process.env.TRANSFER_SERVER_URL || "http://localhost:4000";
+  const base = anchorBaseUrl || process.env.TRANSFER_SERVER_URL || "http://localhost:4000";
   return (
     `${base}/kyc` +
     `?transaction_id=${encodeURIComponent(id)}` +
@@ -83,9 +82,7 @@ function _validateInput({ assetCode, account }) {
   }
 
   if (!ASSET_CODE_RE.test(assetCode)) {
-    const err = new Error(
-      "Invalid asset_code format: must be 1–12 alphanumeric characters",
-    );
+    const err = new Error("Invalid asset_code format: must be 1–12 alphanumeric characters");
     err.status = 400;
     throw err;
   }
@@ -204,9 +201,7 @@ function updateTransactionStatus(id, status, errorReason) {
   }
 
   if (status !== "completed" && status !== "error") {
-    const err = new Error(
-      `Invalid status transition: "${status}". Allowed: completed, error`,
-    );
+    const err = new Error(`Invalid status transition: "${status}". Allowed: completed, error`);
     err.status = 400;
     throw err;
   }
@@ -253,16 +248,20 @@ async function callAnchorDeposit({ account, assetCode, assetIssuer, amount, anch
   _validateInput({ assetCode, account });
   const anchor = getAnchor(anchorName);
 
-  const form = _buildForm({ asset_code: assetCode, account, asset_issuer: assetIssuer, amount });
+  const form = _buildForm({
+    asset_code: assetCode,
+    account,
+    asset_issuer: assetIssuer,
+    amount,
+  });
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
   let response;
   try {
-    response = await axios.post(
-      `${anchor.sep24Url}/transactions/deposit/interactive`,
-      form,
-      { headers, timeout: 10_000 },
-    );
+    response = await axios.post(`${anchor.sep24Url}/transactions/deposit/interactive`, form, {
+      headers,
+      timeout: 10_000,
+    });
   } catch (err) {
     const upstreamStatus = err.response?.status;
     const wrapped = new Error(
@@ -311,11 +310,10 @@ async function callAnchorWithdraw({
 
   let response;
   try {
-    response = await axios.post(
-      `${anchor.sep24Url}/transactions/withdraw/interactive`,
-      form,
-      { headers, timeout: 10_000 },
-    );
+    response = await axios.post(`${anchor.sep24Url}/transactions/withdraw/interactive`, form, {
+      headers,
+      timeout: 10_000,
+    });
   } catch (err) {
     const upstreamStatus = err.response?.status;
     const wrapped = new Error(

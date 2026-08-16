@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/integration-sep12.test.js
  * Integration tests for the SEP-12 KYC proxy service and API.
@@ -25,8 +26,7 @@ app.use("/api/sep12", sep12Routes);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const TEST_PUBLIC_KEY =
-  "GB2JLUHNVHL64FKADLJVH5TMUWTS6P5BS4Y3WJT6KU7FRXBFQM5PGGVV";
+const TEST_PUBLIC_KEY = "GB2JLUHNVHL64FKADLJVH5TMUWTS6P5BS4Y3WJT6KU7FRXBFQM5PGGVV";
 
 function authToken(pk = TEST_PUBLIC_KEY) {
   return jwt.sign({ publicKey: pk }, JWT_SECRET, { expiresIn: "15m" });
@@ -64,7 +64,8 @@ describe("SEP-12 KYC Integration", () => {
         .send({ fields: { first_name: "John" } });
 
       expect(res.status).toBe(400);
-      expect(res.body.error).toContain("anchorName");
+      // Zod validation returns { error: "...", details: {...} } format.
+      expect(res.body.error).toBe("anchorName is required");
     });
 
     it("returns 400 when fields is missing", async () => {
@@ -139,17 +140,13 @@ describe("SEP-12 KYC Integration", () => {
 
   describe("GET /api/sep12/customer", () => {
     it("returns 401 when no auth header is provided", async () => {
-      const res = await request(app).get(
-        "/api/sep12/customer?anchorName=anchorusd_testnet",
-      );
+      const res = await request(app).get("/api/sep12/customer?anchorName=anchorusd_testnet");
 
       expect(res.status).toBe(401);
     });
 
     it("returns 400 when anchorName is missing", async () => {
-      const res = await request(app)
-        .get("/api/sep12/customer")
-        .set("Authorization", authHeader());
+      const res = await request(app).get("/api/sep12/customer").set("Authorization", authHeader());
 
       expect(res.status).toBe(400);
     });
@@ -180,9 +177,7 @@ describe("SEP-12 KYC Integration", () => {
 
   describe("GET /api/sep12/customer/status", () => {
     it("returns 401 when no auth header is provided", async () => {
-      const res = await request(app).get(
-        "/api/sep12/customer/status?anchorName=anchorusd_testnet",
-      );
+      const res = await request(app).get("/api/sep12/customer/status?anchorName=anchorusd_testnet");
 
       expect(res.status).toBe(401);
     });

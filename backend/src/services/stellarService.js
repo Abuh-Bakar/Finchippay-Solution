@@ -9,6 +9,7 @@
 const { server, HORIZON_URL } = require("../config/stellar");
 const logger = require("../utils/logger");
 const metrics = require("./metricsService");
+const { getRequestId, getRequestIdHeader } = require("../utils/correlationId");
 const tracer = require("../config/tracing").getTracer("stellar-service");
 
 // Lazy-loaded cache service (avoids circular dependency at parse time)
@@ -93,10 +94,25 @@ async function withTimeoutAndRetry(fn, timeoutMs = DEFAULT_TIMEOUT_MS) {
  * @returns {Promise<any>}
  */
 async function withTracedSpan(operation, description, fn) {
+  const requestId = getRequestId();
+  // Horizon's public API does not accept custom client headers via the
+  // Stellar SDK Server, so we log the correlation ID alongside every call
+  // and attach it to the OTel span for cross-system joins.
+  logger.info(
+    {
+      requestId,
+      correlationHeaders: getRequestIdHeader(),
+      horizonUrl: HORIZON_URL,
+      horizonOperation: operation,
+    },
+    "Horizon API call",
+  );
+
   const span = tracer.startSpan(description, {
     attributes: {
       "horizon.url": HORIZON_URL,
       "horizon.operation": operation,
+      ...(requestId ? { "request.id": requestId } : {}),
     },
   });
 
@@ -132,15 +148,16 @@ async function getAccount(publicKey) {
     const cacheKey = `account:${publicKey}`;
     const cached = await cache.get(cacheKey);
     if (cached) {
-      metrics.horizonRequestsTotal.inc({ operation: "loadAccount", status: "cache_hit" });
+      metrics.horizonRequestsTotal.inc({
+        operation: "loadAccount",
+        status: "cache_hit",
+      });
       return cached;
     }
 
     try {
-      const account = await withTracedSpan(
-        "loadAccount",
-        "Horizon.loadAccount",
-        () => withTimeoutAndRetry(() => server.loadAccount(publicKey)),
+      const account = await withTracedSpan("loadAccount", "Horizon.loadAccount", () =>
+        withTimeoutAndRetry(() => server.loadAccount(publicKey)),
       );
 
       const balances = account.balances.map((b) => {
@@ -165,7 +182,10 @@ async function getAccount(publicKey) {
       await cache.set(cacheKey, result, ACCOUNT_CACHE_TTL_SEC);
       return result;
     } catch (err) {
-      metrics.horizonRequestsTotal.inc({ operation: "loadAccount", status: "error" });
+      metrics.horizonRequestsTotal.inc({
+        operation: "loadAccount",
+        status: "error",
+      });
       if (err?.response?.status === 404) {
         const error = new Error(
           "Account not found. It may not be funded yet. Use Friendbot on testnet.",
@@ -221,25 +241,22 @@ async function getPayments(publicKey, { limit = 20, cursor } = {}) {
   if (shouldCache) {
     const cached = await cache.get(paymentsCacheKey);
     if (cached) {
-      metrics.horizonRequestsTotal.inc({ operation: "getPayments", status: "cache_hit" });
+      metrics.horizonRequestsTotal.inc({
+        operation: "getPayments",
+        status: "cache_hit",
+      });
       return cached;
     }
   }
 
-  let query = server
-    .payments()
-    .forAccount(publicKey)
-    .limit(limit)
-    .order("desc");
+  let query = server.payments().forAccount(publicKey).limit(limit).order("desc");
 
   if (cursor) {
     query = query.cursor(cursor);
   }
 
-  const result = await withTracedSpan(
-    "getPayments",
-    "Horizon.getPayments",
-    () => withTimeoutAndRetry(() => query.call()),
+  const result = await withTracedSpan("getPayments", "Horizon.getPayments", () =>
+    withTimeoutAndRetry(() => query.call()),
   );
 
   const payments = [];
@@ -259,23 +276,17 @@ async function getPayments(publicKey, { limit = 20, cursor } = {}) {
 
     let assetCode;
     if (isPathPayment && !isSent) {
-      assetCode =
-        op.dest_asset_type === "native"
-          ? "XLM"
-          : op.dest_asset_code || "UNKNOWN";
+      assetCode = op.dest_asset_type === "native" ? "XLM" : op.dest_asset_code || "UNKNOWN";
     } else {
-      assetCode =
-        op.asset_type === "native" ? "XLM" : op.asset_code || "UNKNOWN";
+      assetCode = op.asset_type === "native" ? "XLM" : op.asset_code || "UNKNOWN";
     }
 
     const amount = isPathPayment && !isSent ? op.dest_amount : op.amount;
 
     let memo;
     try {
-      const tx = await withTracedSpan(
-        "getTransaction",
-        "Horizon.getTransaction",
-        () => withTimeoutAndRetry(() => op.transaction()),
+      const tx = await withTracedSpan("getTransaction", "Horizon.getTransaction", () =>
+        withTimeoutAndRetry(() => op.transaction()),
       );
       if (tx.memo_type === "text" && tx.memo) {
         memo = tx.memo;
@@ -314,6 +325,58 @@ async function getPayments(publicKey, { limit = 20, cursor } = {}) {
   return payments;
 }
 
+// Payment-type operations counted for pagination totals (mirrors getPayments).
+const COUNTED_PAYMENT_TYPES = new Set([
+  "payment",
+  "path_payment_strict_send",
+  "path_payment_strict_receive",
+]);
+
+/**
+ * Approximate, bounded count of an account's payment operations for the
+ * `X-Total-Count` header. Horizon exposes no total, and paging through the
+ * whole history would reintroduce the memory/latency problem cursor pagination
+ * is meant to avoid — so this makes a single lean Horizon call (no per-op memo
+ * fetch, unlike getPayments) capped at `cap` (Horizon's max page size, 200).
+ *
+ * The result is a floor: if it equals `cap` the true total may be higher. Cached
+ * with the same short TTL as the payments list.
+ *
+ * @param {string} publicKey
+ * @param {{ cap?: number }} [options]
+ * @returns {Promise<number>} count of payment-type ops, at most `cap`.
+ */
+async function countPaymentsApprox(publicKey, { cap = 200 } = {}) {
+  validatePublicKey(publicKey);
+
+  const cache = getCache();
+  const cacheKey = `payments:count:${publicKey}:${cap}`;
+  const cached = await cache.get(cacheKey);
+  if (cached !== undefined && cached !== null) {
+    metrics.horizonRequestsTotal.inc({
+      operation: "countPayments",
+      status: "cache_hit",
+    });
+    return cached;
+  }
+
+  const result = await withTracedSpan("countPayments", "Horizon.countPayments", () =>
+    withTimeoutAndRetry(() =>
+      server.payments().forAccount(publicKey).limit(cap).order("desc").call(),
+    ),
+  );
+
+  const total = result.records.filter((op) => COUNTED_PAYMENT_TYPES.has(op.type)).length;
+
+  try {
+    await cache.set(cacheKey, total, PAYMENTS_CACHE_TTL_SEC);
+  } catch (err) {
+    logger.warn({ err }, "Failed to cache payment count");
+  }
+
+  return total;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function validatePublicKey(publicKey) {
@@ -328,5 +391,6 @@ module.exports = {
   getAccount,
   getXLMBalance,
   getPayments,
+  countPaymentsApprox,
   validatePublicKey,
 };

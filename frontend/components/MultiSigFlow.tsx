@@ -7,21 +7,28 @@
  *  1. Build  — initiator fills in destination, amount, memo, and required
  *              signature threshold (≥ 2). Triggered automatically when the
  *              payment amount exceeds MULTISIG_THRESHOLD_XLM.
- *  2. Sign   — initiator signs first with their own Freighter wallet.
- *  3. Share  — a shareable URL containing the unsigned XDR is generated so
+ *  2. Preview — simulation preview shows balance changes, fees, and
+ *              contract errors before signing (Issue #151).
+ *  3. Sign   — initiator signs first with their own Freighter wallet.
+ *  4. Share  — a shareable URL containing the unsigned XDR is generated so
  *              co-signers can open /multi-sig-sign in their own browser.
- *  4. Collect — initiator pastes each co-signer's signed XDR back in.
+ *  5. Collect — initiator pastes each co-signer's signed XDR back in.
  *              Signature hints are shown so the initiator can verify who signed.
- *  5. Submit — once the threshold is met the combined XDR is submitted to
+ *  6. Submit — once the threshold is met the combined XDR is submitted to
  *              Stellar Horizon.
  *
  * Stellar multi-sig reference:
  *  https://developers.stellar.org/docs/learn/encyclopedia/security/signatures-multisig
  */
 
-import { useState, useCallback } from "react";
 import { Transaction } from "@stellar/stellar-sdk";
 import clsx from "clsx";
+import { useState, useCallback, useRef, useEffect } from "react";
+import TransactionSimulationPreview from "@/components/TransactionSimulationPreview";
+import {
+  useTransactionSimulation,
+  type SimulationResult,
+} from "@/hooks/useTransactionSimulation";
 import {
   buildPaymentTransaction,
   collectSignatures,
@@ -38,7 +45,7 @@ export const MULTISIG_THRESHOLD_XLM = 100;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Step = "build" | "sign" | "share" | "collect" | "submit" | "success";
+type Step = "build" | "preview" | "sign" | "share" | "collect" | "submit" | "success";
 
 interface MultiSigFlowProps {
   publicKey: string;
@@ -79,6 +86,19 @@ export default function MultiSigFlow({
   services,
 }: MultiSigFlowProps) {
   const [step, setStep] = useState<Step>("build");
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Focus management when step changes
+  useEffect(() => {
+    // Focus the first heading or button in the new step
+    const container = containerRef.current;
+    if (container) {
+      const focusable = container.querySelector<HTMLElement>(
+        "button, input, [tabindex]:not([tabindex='-1'])",
+      );
+      focusable?.focus();
+    }
+  }, [step]);
 
   // Build step
   const [destination, setDestination] = useState(prefill?.destination ?? "");
@@ -98,6 +118,10 @@ export default function MultiSigFlow({
   const [copied, setCopied] = useState(false);
   const [xdrCopied, setXdrCopied] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
+
+  // Transaction simulation
+  const sim = useTransactionSimulation({ publicKey });
+  const [showPreview, setShowPreview] = useState(false);
 
   const balance = parseFloat(xlmBalance);
   const amountNum = parseFloat(amount);
@@ -125,14 +149,26 @@ export default function MultiSigFlow({
         amount: amountNum.toFixed(7),
         memo: memo.trim() || undefined,
       });
-      setUnsignedXDR(tx.toXDR());
-      setStep("sign");
+      const xdr = tx.toXDR();
+      setUnsignedXDR(xdr);
+
+      // Run simulation before proceeding to sign
+      await sim.simulate(xdr);
+      setShowPreview(true);
+      setStep("preview");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to build transaction");
     } finally {
       setLoading(false);
     }
   };
+
+  // ── From Preview → Sign ──────────────────────────────────────────────────
+
+  const handleProceedFromPreview = useCallback(() => {
+    setShowPreview(false);
+    setStep("sign");
+  }, []);
 
   // ── Step 2: Initiator signs first ─────────────────────────────────────────
 
@@ -141,7 +177,9 @@ export default function MultiSigFlow({
     setLoading(true);
     setError(null);
     try {
-      const { signedXDR, error: signError } = await signTransactionWithWallet(unsignedXDR);
+      // Use the prepared XDR from simulation if available
+      const txToSign = sim.result?.preparedTransactionXdr ?? unsignedXDR;
+      const { signedXDR, error: signError } = await signTransactionWithWallet(txToSign);
       if (signError || !signedXDR) throw new Error(signError || "Signing rejected");
       setInitiatorSignedXDR(signedXDR);
       setStep("share");
@@ -219,13 +257,16 @@ export default function MultiSigFlow({
     setPastedXDR("");
     setError(null);
     setTxHash(null);
+    setShowPreview(false);
+    sim.reset();
   };
 
-  const STEPS: Step[] = ["build", "sign", "share", "collect", "submit"];
+  const STEPS: Step[] = ["build", "preview", "sign", "share", "collect", "submit"];
   const stepIndex = STEPS.indexOf(step === "success" ? "submit" : step);
 
   const stepLabels: Record<Step, string> = {
     build: "Build",
+    preview: "Preview",
     sign: "Sign",
     share: "Share",
     collect: "Collect",
@@ -251,46 +292,48 @@ export default function MultiSigFlow({
       </p>
 
       {/* Step indicator */}
-      <div className="flex items-center mb-6 overflow-x-auto pb-1">
-        {STEPS.map((s, i) => (
-          <div key={s} className="flex items-center flex-shrink-0">
-            <div
-              className={clsx(
-                "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors",
-                i < stepIndex
-                  ? "bg-stellar-500 text-black"
-                  : i === stepIndex
-                  ? "bg-stellar-400 text-black ring-2 ring-stellar-400/30"
-                  : "bg-slate-100 dark:bg-white/10 text-slate-500"
-              )}
-            >
-              {i < stepIndex ? <CheckSmallIcon className="w-3.5 h-3.5" /> : i + 1}
-            </div>
-            <span
-              className={clsx(
-                "ml-1 text-xs hidden sm:block",
-                i === stepIndex ? "text-stellar-300" : "text-slate-500"
-              )}
-            >
-              {stepLabels[s]}
-            </span>
-            {i < STEPS.length - 1 && (
+      <nav aria-label="Progress" className="flex items-center mb-6 overflow-x-auto pb-1 rtl:flex-row-reverse">
+        <ol className="flex items-center">
+          {STEPS.map((s, i) => (
+            <li key={s} className="flex items-center flex-shrink-0 rtl:flex-row-reverse" aria-current={i === stepIndex ? "step" : undefined}>
               <div
                 className={clsx(
-                  "w-6 h-px mx-2",
-                  i < stepIndex ? "bg-stellar-500" : "bg-white/10"
+                  "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors",
+                  i < stepIndex
+                    ? "bg-stellar-500 text-black"
+                    : i === stepIndex
+                    ? "bg-stellar-400 text-black ring-2 ring-stellar-400/30"
+                    : "bg-slate-100 dark:bg-white/10 text-slate-500"
                 )}
-              />
-            )}
-          </div>
-        ))}
-      </div>
+              >
+                {i < stepIndex ? <CheckSmallIcon className="w-3.5 h-3.5" /> : i + 1}
+              </div>
+              <span
+                className={clsx(
+                  "ml-1 text-xs hidden sm:block rtl:ml-0 rtl:mr-1",
+                  i === stepIndex ? "text-stellar-300" : "text-slate-500"
+                )}
+              >
+                {stepLabels[s]}
+              </span>
+              {i < STEPS.length - 1 && (
+                <div
+                  className={clsx(
+                    "w-6 h-px mx-2",
+                    i < stepIndex ? "bg-stellar-500" : "bg-white/10"
+                  )}
+                />
+              )}
+            </li>
+          ))}
+        </ol>
+      </nav>
 
       {/* ── Step: Build ── */}
       {step === "build" && (
         <div className="space-y-4">
           <div>
-            <label className="label">Recipient Address</label>
+            <label className="label rtl:text-right">Recipient Address</label>
             <input
               type="text"
               value={destination}
@@ -300,7 +343,7 @@ export default function MultiSigFlow({
             />
           </div>
           <div>
-            <label className="label">Amount (XLM)</label>
+            <label className="label rtl:text-right">Amount (XLM)</label>
             <input
               type="number"
               value={amount}
@@ -318,7 +361,7 @@ export default function MultiSigFlow({
             )}
           </div>
           <div>
-            <label className="label">Memo (optional)</label>
+            <label className="label rtl:text-right">Memo (optional)</label>
             <input
               type="text"
               value={memo}
@@ -328,25 +371,42 @@ export default function MultiSigFlow({
             />
           </div>
           <div>
-            <label className="label">
+            <label className="label rtl:text-right">
               Required Signatures
               <span className="ml-1 text-slate-500 font-normal">(minimum 2)</span>
             </label>
             <input
+              id="multisig-threshold"
               type="number"
               value={threshold}
               onChange={(e) => setThreshold(Math.max(2, parseInt(e.target.value) || 2))}
               min="2"
-              className="input-field"
+              className="input-field focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stellar-400/60"
             />
           </div>
           <button
             onClick={handleBuild}
             disabled={!canBuild || loading}
-            className="btn-primary w-full py-2.5 flex items-center justify-center gap-2"
+            aria-busy={loading}
+            className="btn-primary w-full py-2.5 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stellar-400/60"
           >
-            {loading ? <Spinner /> : null}
+            {loading ? <Spinner aria-hidden="true" /> : null}
             {loading ? "Building..." : "Build Transaction"}
+          </button>
+        </div>
+      )}
+
+      {/* ── Step: Preview (simulation shown before signing) ── */}
+      {step === "preview" && (
+        <div className="space-y-4">
+          <p className="text-slate-600 dark:text-slate-400 text-sm">
+            Review the simulated result before signing with your wallet.
+          </p>
+          <button
+            onClick={handleProceedFromPreview}
+            className="btn-primary w-full py-2.5"
+          >
+            Review Simulation →
           </button>
         </div>
       )}
@@ -442,12 +502,13 @@ export default function MultiSigFlow({
           {!thresholdMet && (
             <>
               <div>
-                <label className="label">Paste Signed XDR from Co-Signer</label>
+                <label className="label rtl:text-right">Paste Signed XDR from Co-Signer</label>
                 <textarea
                   value={pastedXDR}
                   onChange={(e) => setPastedXDR(e.target.value)}
                   placeholder="AAAA..."
-                  className="input-field h-24 font-mono text-xs"
+                  aria-label="Paste signed XDR from co-signer"
+                  className="input-field h-24 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stellar-400/60"
                 />
               </div>
               <button
@@ -461,12 +522,12 @@ export default function MultiSigFlow({
           )}
 
           {thresholdMet && (
-            <button
-              onClick={() => setStep("submit")}
-              className="btn-primary w-full py-2.5"
-            >
-              Proceed to Submit →
-            </button>
+          <button
+            onClick={() => setStep("submit")}
+            className="btn-primary w-full py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stellar-400/60"
+          >
+            Proceed to Submit →
+          </button>
           )}
         </div>
       )}
@@ -511,9 +572,10 @@ export default function MultiSigFlow({
             href={`https://stellar.expert/explorer/testnet/tx/${txHash}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="btn-secondary w-full py-2.5 flex items-center justify-center gap-2"
+            aria-label={`View transaction on Stellar Explorer: ${txHash}`}
+            className="btn-secondary w-full py-2.5 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stellar-400/60"
           >
-            View on Explorer <ExternalLinkIcon className="w-4 h-4" />
+            View on Explorer <ExternalLinkIcon className="w-4 h-4" aria-hidden="true" />
           </a>
           <button onClick={handleReset} className="btn-primary w-full py-2.5">
             New Multi-Sig Payment
@@ -522,11 +584,25 @@ export default function MultiSigFlow({
       )}
 
       {error && (
-        <p className="text-red-400 text-sm mt-4 flex items-start gap-1.5">
+        <p role="alert" aria-live="polite" className="text-red-400 text-sm mt-4 flex items-start gap-1.5">
           <WarnIcon className="w-4 h-4 flex-shrink-0 mt-0.5" />
           {error}
         </p>
       )}
+
+      {/* Transaction Simulation Preview Modal */}
+      <TransactionSimulationPreview
+        isOpen={showPreview}
+        onClose={() => { setShowPreview(false); sim.reset(); }}
+        onProceed={handleProceedFromPreview}
+        simulation={sim.result}
+        loading={sim.loading}
+        error={sim.error}
+        warning={sim.warning}
+        proceedLabel="I've Reviewed — Sign Now"
+        title="Multi-Sig Transaction Preview"
+        description="Review the simulated effects of this multi-signature payment before signing."
+      />
     </div>
   );
 }

@@ -1,21 +1,22 @@
 /**
+
  * pages/transactions.tsx
  * Full transaction history page with UX cursor fixes.
  */
 
 import Head from "next/head";
 import Link from "next/link";
-import WalletConnect from "@/components/WalletConnect";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import TransactionList, {
   filterPayments,
   TransactionDirectionFilter,
   TransactionFilters,
 } from "@/components/TransactionList";
+import WalletConnect from "@/components/WalletConnect";
 import { NETWORK, shortenAddress, PaymentRecord } from "@/lib/stellar";
-import { formatAsset, formatDate } from "@/utils/format";
-import { generateCSV, downloadCSV, generatePDF, downloadPDF, type ExportFormat } from "@/utils/export";
 import { useWallet } from "@/lib/useWallet";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { generateCSV, downloadCSV, generatePDF, downloadPDF, type ExportFormat } from "@/utils/export";
+import { formatAsset, formatDate } from "@/utils/format";
 
 const TRANSACTION_FILTERS_STORAGE_KEY = "finchippay:transaction-filters";
 
@@ -155,7 +156,7 @@ export default function Transactions() {
           downloadPDF(blob, dateStamp);
         }
       } catch (err) {
-        console.error(`Failed to export ${format}:`, err);
+        logger.error(`Failed to export ${format}:`, err);
       } finally {
         setExporting(false);
         setExportFormat(null);
@@ -227,7 +228,7 @@ export default function Transactions() {
       <Head>
         <title>Transaction History | Finchippay-Solution</title>
         <meta name="description" content="View your full Stellar transaction history, export data as CSV or JSON, and print payment receipts. Secure and transparent." />
-        <link rel="canonical" href="https://finchippay.vercel.app/transactions" />
+        
       </Head>
       {/* Header */}
       <div className="flex items-center justify-between mb-8">

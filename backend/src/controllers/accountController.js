@@ -3,10 +3,15 @@
  * HTTP handlers for Stellar account data and username registration.
  *
  * Routes handled:
- *   GET  /api/accounts/:publicKey           → account details + balances
+ *   GET  /api/accounts/:publicKey          → account details + balances
  *   GET  /api/accounts/:publicKey/balance   → XLM balance only
  *   POST /api/accounts/register             → register username ↔ public key
  *   GET  /api/accounts/resolve/:username    → resolve username → public key
+ *
+ * Every route validates its input with a Zod schema (see
+ * src/validation/schemas.js) mounted via the validate() middleware; handlers
+ * read the already-parsed values from `req.validated` instead of manually
+ * destructuring and checking `req.body` / `req.params` / `req.query`.
  *
  * All handlers delegate to `stellarService` / `usernameService` and forward
  * errors to the global Express error handler via `next(err)`.
@@ -38,7 +43,7 @@ const SSE_HEARTBEAT_INTERVAL_MS = 30_000;
  */
 async function getAccount(req, res, next) {
   try {
-    const { publicKey } = req.params;
+    const { publicKey } = req.validated;
     const account = await stellarService.getAccount(publicKey);
     res.json({ success: true, data: account });
   } catch (err) {
@@ -60,7 +65,7 @@ async function getAccount(req, res, next) {
  */
 async function getBalance(req, res, next) {
   try {
-    const { publicKey } = req.params;
+    const { publicKey } = req.validated;
     const balance = await stellarService.getXLMBalance(publicKey);
     res.json({ success: true, data: { publicKey, xlm: balance } });
   } catch (err) {
@@ -73,6 +78,8 @@ async function getBalance(req, res, next) {
  * Register a new Finchippay username tied to a Stellar public key.
  *
  * Body: { username: string, publicKey: string }
+ * (validated by `registerUsernameSchema` before this handler runs — values
+ * below come from `req.validated`.)
  *
  * @param {import('express').Request}  req
  * @param {import('express').Response} res
@@ -84,17 +91,9 @@ async function getBalance(req, res, next) {
  */
 async function registerUsername(req, res, next) {
   try {
-    const { username, publicKey } = req.body;
+    const { username, publicKey } = req.validated;
 
-    if (!username || !publicKey) {
-      return res
-        .status(ERROR_CODES.VAL_MISSING_FIELD.httpStatus)
-        .json(formatErrorResponse("VAL_MISSING_FIELD", {
-          fields: ["username", "publicKey"],
-        }));
-    }
-
-    const result = usernameService.registerUsername(username, publicKey);
+    const result = await usernameService.registerUsername(username, publicKey);
     return res.status(201).json({
       success: true,
       data: result,
@@ -119,16 +118,18 @@ async function registerUsername(req, res, next) {
  */
 async function resolveUsername(req, res, next) {
   try {
-    const { username } = req.params;
+    const { username } = req.validated;
 
     // Reserve 'alice' for test suites without polluting the production store.
     if (username.toLowerCase() === "alice") {
-      return res
-        .status(ERROR_CODES.SRV_NOT_IMPLEMENTED.httpStatus)
-        .json(formatErrorResponse("SRV_NOT_IMPLEMENTED", { feature: "Reserved test username" }));
+      return res.status(ERROR_CODES.SRV_NOT_IMPLEMENTED.httpStatus).json(
+        formatErrorResponse("SRV_NOT_IMPLEMENTED", {
+          feature: "Reserved test username",
+        }),
+      );
     }
 
-    const result = usernameService.resolveUsername(username);
+    const result = await usernameService.resolveUsername(username);
     return res.json({ success: true, data: result });
   } catch (err) {
     next(err);
@@ -215,7 +216,63 @@ async function streamBalance(req, res) {
   }
 }
 
+async function gdprDelete(req, res, next) {
+  try {
+    const { publicKey } = req.validated.params;
+    const crypto = require("crypto");
+    const db = require("../db");
+    const { writeAuditLog } = require("../services/dataRetentionService");
+
+    const hash = crypto.createHash("sha256").update(publicKey).digest("hex");
+    const anonymized = {};
+
+    anonymized.tipsAsSender = await db("tips")
+      .where("sender_pk", publicKey)
+      .update({ sender_pk: hash, memo: "[redacted]" });
+    anonymized.tipsAsCreator = await db("tips")
+      .where("creator_pk", publicKey)
+      .update({ creator_pk: hash, memo: "[redacted]" });
+    anonymized.usernameMappings = await db("usernames").where("public_key", publicKey).del();
+
+    await writeAuditLog("gdpr_delete", { anonymized }, publicKey);
+
+    res.json({ success: true, data: { publicKey, anonymized } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function gdprExport(req, res, next) {
+  try {
+    const { publicKey } = req.validated.params;
+    const db = require("../db");
+    const { writeAuditLog } = require("../services/dataRetentionService");
+
+    const [tipsSent, tipsReceived, usernameRow] = await Promise.all([
+      db("tips").where("sender_pk", publicKey).select("*"),
+      db("tips").where("creator_pk", publicKey).select("*"),
+      db("usernames").where("public_key", publicKey).first(),
+    ]);
+
+    const data = {
+      publicKey,
+      tipsSent,
+      tipsReceived,
+      username: usernameRow?.username || null,
+      exportedAt: new Date().toISOString(),
+    };
+
+    await writeAuditLog("gdpr_export", { fieldsExported: Object.keys(data) }, publicKey);
+
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
+  gdprDelete,
+  gdprExport,
   getAccount,
   getBalance,
   registerUsername,

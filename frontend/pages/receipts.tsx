@@ -1,11 +1,12 @@
-import { useEffect, useState, useCallback } from "react";
 import Head from "next/head";
-import { useWallet } from "@/lib/useWallet";
-import { getReceiptCount, getReceipt, type ReceiptMetadata } from "@/lib/stellar";
+import { useEffect, useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import ReceiptCard from "@/components/ReceiptCard";
 import ReceiptDetail from "@/components/ReceiptDetail";
 import Skeleton from "@/components/Skeleton";
-import { useTranslation } from "react-i18next";
+import { logger } from "@/lib/logger";
+import { getReceiptCount, getReceipt, type ReceiptMetadata } from "@/lib/stellar";
+import { useWallet } from "@/lib/useWallet";
 
 export default function ReceiptsPage() {
   const { t } = useTranslation("common");
@@ -55,7 +56,7 @@ export default function ReceiptsPage() {
 
       setReceipts(startPage === 1 ? validResults : [...currentReceipts, ...validResults]);
     } catch (err) {
-      console.error("Failed to fetch receipts:", err);
+      logger.error("Failed to fetch receipts:", err);
     } finally {
       setLoading(false);
     }
@@ -122,7 +123,7 @@ export default function ReceiptsPage() {
           </div>
           <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">No receipts minted yet.</h2>
           <p className="text-slate-500 dark:text-slate-400 max-w-sm mx-auto">
-            You can mint NFT receipts when sending payments. Check the "Mint NFT Receipt" option next time you send XLM!
+            You can mint NFT receipts when sending payments. Check the &quot;Mint NFT Receipt&quot; option next time you send XLM!
           </p>
         </div>
       ) : (

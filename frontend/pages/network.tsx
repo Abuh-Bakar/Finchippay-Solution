@@ -1,10 +1,11 @@
 import Head from "next/head";
+import { useState, useEffect, useCallback } from "react";
+import { logger } from "@/lib/logger";
 /**
  * pages/network.tsx
  * Stellar network statistics page with live data from Horizon API.
  */
 
-import { useState, useEffect, useCallback } from "react";
 import { fetchNetworkStats, NetworkStats } from "@/lib/stellar";
 
 export default function Network() {
@@ -28,7 +29,7 @@ export default function Network() {
       setStats(newStats);
       setPreviousLedgerSequence(newStats.latestLedgerSequence);
     } catch (err) {
-      console.error("Failed to load network stats:", err);
+      logger.error("Failed to load network stats:", err);
       setError(err instanceof Error ? err.message : "Failed to load network statistics");
     } finally {
       setLoading(false);

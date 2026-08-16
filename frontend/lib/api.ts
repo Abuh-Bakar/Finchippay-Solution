@@ -39,39 +39,45 @@ export async function apiFetch(
   });
 }
 
-// Automatically patch global fetch in the browser/client-side and Node environment
-const globalObj = typeof window !== "undefined" ? window : globalThis;
-if (globalObj && !((globalObj as any).__fetchPatched)) {
-  const originalFetch = globalObj.fetch;
-  if (originalFetch) {
-    globalObj.fetch = async function (
-      this: any,
-      input: RequestInfo | URL,
-      init?: RequestInit
-    ) {
-      const urlStr =
-        typeof input === "string"
-          ? input
-          : input instanceof URL
-          ? input.href
-          : input.url;
+// Automatically patch global fetch in the browser/client-side and Node environment.
+// Uses a self-executing function to avoid top-level typeof checks that conflict
+// with certain tsconfig lib configurations.
+(function patchGlobalFetch() {
+  const globalObj = (
+    typeof window !== 'undefined' ? window : globalThis
+  ) as typeof globalThis & { __fetchPatched?: boolean };
 
-      // Only inject traceparent headers for relative paths or API endpoints belonging to our backend
-      const isBackendApi = urlStr.includes("/api/") || !urlStr.startsWith("http");
+  if (globalObj && !(globalObj as any).__fetchPatched) {
+    const originalFetch = globalObj.fetch?.bind(globalObj);
+    if (originalFetch) {
+      (globalObj as any).fetch = async function (
+        input: RequestInfo | URL,
+        init?: RequestInit
+      ) {
+        const urlStr =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.href
+              : (input as Request).url;
 
-      if (isBackendApi) {
-        const headers = new Headers(init?.headers);
-        if (!headers.has("traceparent")) {
-          headers.set("traceparent", generateTraceParent());
+        // Only inject traceparent headers for relative paths or API endpoints
+        const isBackendApi = urlStr.includes('/api/') || !urlStr.startsWith('http');
+
+        if (isBackendApi) {
+          const headers = new Headers(init?.headers);
+          if (!headers.has('traceparent')) {
+            headers.set('traceparent', generateTraceParent());
+          }
+          return originalFetch(input, {
+            ...init,
+            headers,
+          });
         }
-        return originalFetch.call(this, input, {
-          ...init,
-          headers,
-        });
-      }
 
-      return originalFetch.call(this, input, init);
-    };
-    (globalObj as any).__fetchPatched = true;
+        return originalFetch(input, init);
+      };
+      (globalObj as any).__fetchPatched = true;
+    }
   }
-}
+})();

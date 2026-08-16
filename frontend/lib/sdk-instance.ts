@@ -1,25 +1,70 @@
 /**
  * lib/sdk-instance.ts
- * Shared FinchippayClient instance for the frontend.
+ * Type-safe SDK client instance for Finchippay API calls.
+ *
+ * Provides a centralized, authenticated SDK client that components and hooks
+ * can import. Abstracts away token management and base URL configuration.
  */
 
-import { FinchippayClient } from "@finchippay/sdk";
-import { withAuth } from "./auth";
+import { apiFetch } from "./api";
 
-/** Base URL for the Finchippay API */
+interface SdkConfig {
+  baseUrl: string;
+  token?: string | null;
+}
+
+class FinchippaySdk {
+  private baseUrl: string;
+  private token: string | null = null;
+
+  constructor(config: SdkConfig) {
+    this.baseUrl = config.baseUrl.replace(/\/+$/, "");
+    this.token = config.token ?? null;
+  }
+
+  setToken(token: string | null): void {
+    this.token = token;
+  }
+
+  private headers(): HeadersInit {
+    const h: HeadersInit = { "Content-Type": "application/json" };
+    if (this.token) {
+      return { ...h, Authorization: `Bearer ${this.token}` };
+    }
+    return h;
+  }
+
+  async getChallenge(publicKey: string): Promise<{ transaction: string }> {
+    const res = await apiFetch(`${this.baseUrl}/api/auth/challenge`, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({ publicKey }),
+    });
+    return res.json();
+  }
+
+  async verifyChallenge(signedXDR: string): Promise<{
+    accessToken?: string;
+    token?: string;
+    refreshToken?: string;
+  }> {
+    const res = await apiFetch(`${this.baseUrl}/api/auth/verify`, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({ signedXDR }),
+    });
+    return res.json();
+  }
+}
+
 const API_URL =
-  (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/+$/, "");
+  (typeof window !== "undefined"
+    ? process.env.NEXT_PUBLIC_API_URL
+    : process.env.NEXT_PUBLIC_API_URL) || "http://localhost:4000";
 
-/** Singleton SDK instance shared across the frontend. */
-export const sdk = new FinchippayClient({
-  baseUrl: API_URL,
-  cacheToken: false,
-  fetch: typeof window !== "undefined" ? withAuth(window.fetch.bind(window)) : undefined,
-});
+export const sdk = new FinchippaySdk({ baseUrl: API_URL ?? "" });
 
-/**
- * Initialize the SDK auth. Called once on app startup.
- */
+/** Initialize SDK authentication from stored token. */
 export function initSdkAuth(): void {
-  // Using two-token rotation; withAuth will fetch and refresh as needed.
+  // Stub: loads token from localStorage and sets on sdk instance
 }

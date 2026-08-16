@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /**
  * __tests__/federation.test.js
  * Integration tests for federation endpoints per SEP-0002.
@@ -17,7 +18,7 @@ describe("Federation API", () => {
   beforeAll(async () => {
     // Register a test user
     try {
-      usernameService.registerUsername(testUsername, testPublicKey);
+      await usernameService.registerUsername(testUsername, testPublicKey);
     } catch (err) {
       // User might already exist
     }
@@ -27,7 +28,7 @@ describe("Federation API", () => {
     // Clean up
     nock.cleanAll();
     try {
-      usernameService.removeUsername(testUsername);
+      await usernameService.removeUsername(testUsername);
     } catch (err) {
       // User might not exist
     }
@@ -121,7 +122,7 @@ describe("Federation API", () => {
           .expect(502);
 
         expect(response.body.error.details.reason).toBe(
-          "Invalid Stellar address returned from federation server"
+          "Invalid Stellar address returned from federation server",
         );
       });
     });
@@ -133,12 +134,16 @@ describe("Federation API", () => {
           .query({ q: testPublicKey, type: "id" })
           .expect(200);
 
-        expect(response.body).toHaveProperty("stellar_address", `${testUsername}*stellarfinchippay.io`);
+        expect(response.body).toHaveProperty(
+          "stellar_address",
+          `${testUsername}*stellarfinchippay.io`,
+        );
         expect(response.body).toHaveProperty("account_id", testPublicKey);
       });
 
       it("should return 404 for non-existent account ID", async () => {
-        const unknownPublicKey = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+        const unknownPublicKey =
+          "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
 
         const response = await request(app)
           .get("/federation")
@@ -150,9 +155,7 @@ describe("Federation API", () => {
     });
 
     it("should return 400 for missing parameters", async () => {
-      const response = await request(app)
-        .get("/federation")
-        .expect(400);
+      const response = await request(app).get("/federation").expect(400);
 
       expect(response.body.error.code).toBe("VAL_MISSING_FIELD");
     });
