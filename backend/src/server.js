@@ -273,6 +273,9 @@ const limiter = createInstrumentedLimiter(
 );
 app.use(limiter);
 
+const paginationMiddleware = require("./middleware/pagination");
+app.use(paginationMiddleware);
+
 // ─── Routes ──────────────────────────────────────────────────────────────────
 // Versioned API (v1) plus legacy /api/* aliases with Deprecation header (#83).
 
@@ -284,6 +287,9 @@ const apiRouteMounts = [
   { path: "/analytics", router: analyticsRoutes },
   { path: "/turrets", router: turretsRoutes },
   { path: "/tips", router: tipsRoutes },
+  { path: "/events", router: eventRoutes },
+  { path: "/scheduled", router: scheduledTransactionRoutes },
+  { path: "/scheduled-transactions", router: scheduledTransactionRoutes },
   { path: "/parse-payment", router: parsePaymentRoutes },
   { path: "/scheduled-txns", router: scheduledTransactionRoutes },
   { path: "/sep24", router: sep24Routes },
@@ -302,6 +308,7 @@ app.use("/api/analytics", analyticsRoutes);
 app.use("/api/turrets", turretsRoutes);
 app.use("/api/tips", tipsRoutes);
 app.use("/api/parse-payment", strictLimiter, parsePaymentRoutes);
+app.use("/api/scheduled", scheduledTransactionRoutes);
 app.use("/api/scheduled-transactions", scheduledTransactionRoutes);
 app.use("/api/events", eventRoutes);
 app.use("/api/notifications", notificationRoutes);
