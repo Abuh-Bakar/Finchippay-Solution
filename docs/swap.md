@@ -211,7 +211,7 @@ This makes the contract path a legitimate fee-collecting, slippage-protected set
 
 | File | Change |
 |---|---|
-| `contracts/finchippay-contract/src/lib.rs` | **Added** — `swap_exact_tokens_for_tokens`, `swap_tokens_for_exact_tokens`, fee-collector/fee-bps admin functions, 15 new tests |
+| `contracts/finchippay-contract/src/lib.rs` | **Hardened**: measured fee-on-transfer inputs, stale-path checks, swap events, and 19 hardening tests |
 | `frontend/hooks/useContractSwap.ts` | **Created** — drives the on-chain swap transaction |
 | `frontend/components/TradeForm.tsx` | **Updated** — Horizon/Contract swap toggle |
 | `frontend/lib/contract-bindings/index.ts` | **Updated** — swap + fee-admin client methods |
