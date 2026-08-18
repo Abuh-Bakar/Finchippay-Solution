@@ -403,6 +403,56 @@ fn custom_fee_collector_receives_protocol_fee() {
 }
 
 #[test]
+fn zero_bps_fee_sends_full_received_amount_to_output() {
+    let env = Env::default();
+    let (contract_id, client) = deploy(&env);
+    let admin = client.get_admin();
+    let caller = Address::generate(&env);
+    let collector = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.set_fee_collector(&admin, &collector);
+    client.set_swap_fee(&admin, &0);
+
+    let token_in = create_sac(&env, &admin, &caller, 1_000);
+    let token_out = create_sac(&env, &admin, &contract_id, 2_000);
+    let token_in_client = token::Client::new(&env, &token_in);
+    let path = direct_path(&env, &token_in, &token_out);
+
+    let amount_out =
+        client.swap_exact_tokens_for_tokens(&caller, &token_in, &token_out, &1_000, &1_000, &path);
+
+    assert_eq!(amount_out, 1_000);
+    assert_eq!(token_in_client.balance(&collector), 0);
+    assert_eq!(token_in_client.balance(&contract_id), 1_000);
+}
+
+#[test]
+fn max_bps_fee_accrues_ten_percent_to_collector() {
+    let env = Env::default();
+    let (contract_id, client) = deploy(&env);
+    let admin = client.get_admin();
+    let caller = Address::generate(&env);
+    let collector = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.set_fee_collector(&admin, &collector);
+    client.set_swap_fee(&admin, &1_000);
+
+    let token_in = create_sac(&env, &admin, &caller, 1_000);
+    let token_out = create_sac(&env, &admin, &contract_id, 2_000);
+    let token_in_client = token::Client::new(&env, &token_in);
+    let path = direct_path(&env, &token_in, &token_out);
+
+    let amount_out =
+        client.swap_exact_tokens_for_tokens(&caller, &token_in, &token_out, &1_000, &900, &path);
+
+    assert_eq!(amount_out, 900);
+    assert_eq!(token_in_client.balance(&collector), 100);
+    assert_eq!(token_in_client.balance(&contract_id), 900);
+}
+
+#[test]
 fn swap_event_records_requested_actual_fee_output_and_path_length() {
     let env = Env::default();
     let (contract_id, client) = deploy(&env);
