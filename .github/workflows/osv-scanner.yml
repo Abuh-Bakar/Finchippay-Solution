@@ -57,17 +57,26 @@ jobs:
             echo "::group::Scanning $lock"
             osv-scanner scan source --lockfile="$lock" \
               --format=json --output-file="$out" || true
-            osv-scanner scan source --lockfile="$lock" || true
+            # Human-readable table for the log, and its summary line
+            # is also our severity source of truth (see below).
+            TABLE_OUT=$(osv-scanner scan source --lockfile="$lock" || true)
+            echo "$TABLE_OUT"
             echo "::endgroup::"
 
-            # Count vulnerability groups whose CVSS base score is
-            # High (>=7.0) or Critical. Unscored findings are listed
-            # in the summary but don't fail the build on their own.
-            COUNT=$(jq '[.results[]?.packages[]?.groups[]?
-              | select(.max_severity != "" and (.max_severity | tonumber) >= 7.0)
-            ] | length' "$out")
-            echo "$lock: $COUNT High/Critical finding(s)"
-            if [ "$COUNT" -gt 0 ]; then
+            # osv-scanner itself buckets each finding into Critical/
+            # High/Medium/Low/Unknown via its own CVSS parsing and
+            # prints the totals in one summary line, e.g.:
+            #   Total 1 package affected by 2 known vulnerabilities
+            #   (0 Critical, 2 High, 0 Medium, 0 Low, 0 Unknown) ...
+            # Reusing that count avoids re-parsing raw CVSS vectors
+            # ourselves, which the JSON output does not pre-compute.
+            SUMMARY=$(echo "$TABLE_OUT" | grep -oE '\([0-9]+ Critical, [0-9]+ High,' || true)
+            CRIT=$(echo "$SUMMARY" | grep -oE '^[(][0-9]+' | tr -d '(')
+            HIGH=$(echo "$SUMMARY" | grep -oE '[0-9]+ High' | grep -oE '^[0-9]+')
+            CRIT="${CRIT:-0}"
+            HIGH="${HIGH:-0}"
+            echo "$lock: $CRIT Critical, $HIGH High"
+            if [ "$CRIT" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
               FOUND_HIGH_CRIT=1
             fi
           done
