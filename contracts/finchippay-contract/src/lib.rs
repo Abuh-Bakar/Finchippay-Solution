@@ -4,6 +4,7 @@
     clippy::len_zero,
     clippy::manual_is_multiple_of,
     clippy::manual_saturating_arithmetic,
+    clippy::manual_unwrap_or,
     clippy::manual_unwrap_or_default,
     clippy::needless_borrows_for_generic_args,
     clippy::too_many_arguments,
