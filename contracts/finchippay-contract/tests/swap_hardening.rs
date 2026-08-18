@@ -153,7 +153,12 @@ fn rejects_stale_path_that_repeats_a_token() {
     let token_out = create_sac(&env, &admin, &contract_id, 1_000);
     let path = Vec::from_array(
         &env,
-        [token_in.clone(), token_out.clone(), token_in.clone(), token_out.clone()],
+        [
+            token_in.clone(),
+            token_out.clone(),
+            token_in.clone(),
+            token_out.clone(),
+        ],
     );
 
     let err = client
@@ -215,14 +220,8 @@ fn exact_input_swap_uses_actual_received_for_fee_on_transfer_token() {
     let token_out_client = token::Client::new(&env, &token_out);
     let path = direct_path(&env, &token_in, &token_out);
 
-    let amount_out = client.swap_exact_tokens_for_tokens(
-        &caller,
-        &token_in,
-        &token_out,
-        &1_000,
-        &898,
-        &path,
-    );
+    let amount_out =
+        client.swap_exact_tokens_for_tokens(&caller, &token_in, &token_out, &1_000, &898, &path);
 
     assert_eq!(amount_out, 898);
     assert_eq!(token_in_client.balance(&contract_id), 898);

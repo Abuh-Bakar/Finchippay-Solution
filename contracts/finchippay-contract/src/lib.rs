@@ -41,8 +41,8 @@ pub mod streams;
 pub mod yield_escrow;
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env,
-    Symbol, TryIntoVal, Val, Vec,
+    contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Symbol,
+    TryIntoVal, Val, Vec,
 };
 
 use crate::storage::{MIN_TTL_LEDGERS, TTL_CLASS_COUNT};
@@ -1130,7 +1130,11 @@ impl FinchippayContract {
         // (fast hot-key path). Admin-initiated pausing goes through
         // `propose_admin_action`, so no single key can freeze the contract.
         let stored_pauser: Option<Address> = env.storage().persistent().get(&DataKey::Pauser);
-        if stored_pauser.as_ref().map(|p| p == &caller).unwrap_or(false) {
+        if stored_pauser
+            .as_ref()
+            .map(|p| p == &caller)
+            .unwrap_or(false)
+        {
             env.storage().persistent().set(&DataKey::Paused, &true);
             bump_to_floor(&env, &DataKey::Paused);
             env.events().publish((Symbol::new(&env, "paused"),), ());
@@ -1149,7 +1153,11 @@ impl FinchippayContract {
         // Mirror `pause`: only the designated pauser lifts the circuit breaker
         // directly; admin-initiated unpausing uses `propose_admin_action`.
         let stored_pauser: Option<Address> = env.storage().persistent().get(&DataKey::Pauser);
-        if stored_pauser.as_ref().map(|p| p == &caller).unwrap_or(false) {
+        if stored_pauser
+            .as_ref()
+            .map(|p| p == &caller)
+            .unwrap_or(false)
+        {
             env.storage().persistent().set(&DataKey::Paused, &false);
             bump_to_floor(&env, &DataKey::Paused);
             env.events().publish((Symbol::new(&env, "unpaused"),), ());
@@ -1362,7 +1370,8 @@ impl FinchippayContract {
                 .expect("invalid set_pauser payload");
             env.storage().persistent().set(&DataKey::Pauser, &pauser);
             bump_to_floor(env, &DataKey::Pauser);
-            env.events().publish((Symbol::new(env, "pauser_set"),), pauser);
+            env.events()
+                .publish((Symbol::new(env, "pauser_set"),), pauser);
         } else if action == &Symbol::new(env, "upgrade") {
             let wasm_hash: BytesN<32> = proposal
                 .action_data
@@ -1379,7 +1388,8 @@ impl FinchippayContract {
             // Reject downgrades before touching the WASM (same guard as the
             // legacy single-admin `upgrade` entrypoint).
             Self::validate_storage_compatibility(env.clone(), layout_version);
-            env.deployer().update_current_contract_wasm(wasm_hash.clone());
+            env.deployer()
+                .update_current_contract_wasm(wasm_hash.clone());
             let current_ver: u32 = env
                 .storage()
                 .persistent()
@@ -1471,7 +1481,10 @@ impl FinchippayContract {
             storage::bump_if_present(env, &key);
         }
         env.events().publish(
-            (Symbol::new(env, "balance_reconciled"), token_address.clone()),
+            (
+                Symbol::new(env, "balance_reconciled"),
+                token_address.clone(),
+            ),
             (old, new),
         );
     }
@@ -2857,13 +2870,7 @@ impl FinchippayContract {
                 token_in.clone(),
                 token_out.clone(),
             ),
-            (
-                amount_in,
-                actual_amount_in,
-                amount_out,
-                fee,
-                path.len(),
-            ),
+            (amount_in, actual_amount_in, amount_out, fee, path.len()),
         );
 
         Ok(amount_out)
@@ -2921,12 +2928,8 @@ impl FinchippayContract {
             if additional_request <= 0 {
                 return Err(ContractError::ExcessiveAmountIn);
             }
-            let additional_received = transfer_to_contract_measured(
-                &env,
-                &token_in_client,
-                &caller,
-                &additional_request,
-            );
+            let additional_received =
+                transfer_to_contract_measured(&env, &token_in_client, &caller, &additional_request);
             requested_amount_in = requested_amount_in
                 .checked_add(additional_request)
                 .expect("overflow");
@@ -3650,15 +3653,9 @@ mod tests {
         let mut signers = Vec::new(&env);
         signers.push_back(admin.clone());
         signers.push_back(signer_b);
-        let data: Vec<Val> = Vec::from_array(
-            &env,
-            [signers.into_val(&env), 2u32.into_val(&env)],
-        );
-        let pid = client.propose_admin_action(
-            &admin,
-            &Symbol::new(&env, "set_admin_signers"),
-            &data,
-        );
+        let data: Vec<Val> = Vec::from_array(&env, [signers.into_val(&env), 2u32.into_val(&env)]);
+        let pid =
+            client.propose_admin_action(&admin, &Symbol::new(&env, "set_admin_signers"), &data);
 
         // Threshold-1 deploy auto-executes the rotation on propose.
         assert!(client.get_admin_action_proposal(&pid).executed);
@@ -3681,11 +3678,8 @@ mod tests {
         proposed.push_back(signer_a.clone());
         proposed.push_back(new_signer);
         let data: Vec<Val> = Vec::from_array(&env, [proposed.into_val(&env), 2u32.into_val(&env)]);
-        let pid = client.propose_admin_action(
-            &signer_a,
-            &Symbol::new(&env, "set_admin_signers"),
-            &data,
-        );
+        let pid =
+            client.propose_admin_action(&signer_a, &Symbol::new(&env, "set_admin_signers"), &data);
         assert!(!client.get_admin_action_proposal(&pid).executed);
         assert_eq!(client.get_admin_signers().len(), 2);
         assert_eq!(client.get_admin_signers_threshold(), 2);
