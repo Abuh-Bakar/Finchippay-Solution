@@ -220,11 +220,106 @@ fn exact_input_swap_uses_actual_received_for_fee_on_transfer_token() {
         &token_in,
         &token_out,
         &1_000,
-        &873,
+        &898,
         &path,
     );
 
-    assert_eq!(amount_out, 873);
-    assert_eq!(token_in_client.balance(&contract_id), 873);
-    assert_eq!(token_out_client.balance(&caller), 873);
+    assert_eq!(amount_out, 898);
+    assert_eq!(token_in_client.balance(&contract_id), 898);
+    assert_eq!(token_out_client.balance(&caller), 898);
+}
+
+#[test]
+fn exact_input_respects_min_amount_out_at_rounding_boundary() {
+    let env = Env::default();
+    let (contract_id, client) = deploy(&env);
+    let admin = client.get_admin();
+    let caller = Address::generate(&env);
+    env.mock_all_auths();
+
+    let token_in = create_sac(&env, &admin, &caller, 1_000);
+    let token_out = create_sac(&env, &admin, &contract_id, 2_000);
+    let path = direct_path(&env, &token_in, &token_out);
+
+    let amount_out =
+        client.swap_exact_tokens_for_tokens(&caller, &token_in, &token_out, &1_000, &997, &path);
+
+    assert_eq!(amount_out, 997);
+}
+
+#[test]
+fn exact_input_rejects_min_amount_out_above_rounded_output() {
+    let env = Env::default();
+    let (contract_id, client) = deploy(&env);
+    let admin = client.get_admin();
+    let caller = Address::generate(&env);
+    env.mock_all_auths();
+
+    let token_in = create_sac(&env, &admin, &caller, 1_000);
+    let token_out = create_sac(&env, &admin, &contract_id, 2_000);
+    let path = direct_path(&env, &token_in, &token_out);
+
+    let err = client
+        .try_swap_exact_tokens_for_tokens(&caller, &token_in, &token_out, &1_000, &998, &path)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, ContractError::SlippageExceeded);
+}
+
+#[test]
+fn exact_output_uses_ceiling_rounding_for_required_input() {
+    let env = Env::default();
+    let (contract_id, client) = deploy(&env);
+    let admin = client.get_admin();
+    let caller = Address::generate(&env);
+    env.mock_all_auths();
+
+    let token_in = create_sac(&env, &admin, &caller, 2_000);
+    let token_out = create_sac(&env, &admin, &contract_id, 2_000);
+    let path = direct_path(&env, &token_in, &token_out);
+
+    let amount_in =
+        client.swap_tokens_for_exact_tokens(&caller, &token_in, &token_out, &998, &1_002, &path);
+
+    assert_eq!(amount_in, 1_002);
+}
+
+#[test]
+fn exact_output_rejects_max_amount_in_below_ceiling_requirement() {
+    let env = Env::default();
+    let (contract_id, client) = deploy(&env);
+    let admin = client.get_admin();
+    let caller = Address::generate(&env);
+    env.mock_all_auths();
+
+    let token_in = create_sac(&env, &admin, &caller, 2_000);
+    let token_out = create_sac(&env, &admin, &contract_id, 2_000);
+    let path = direct_path(&env, &token_in, &token_out);
+
+    let err = client
+        .try_swap_tokens_for_exact_tokens(&caller, &token_in, &token_out, &998, &1_001, &path)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, ContractError::ExcessiveAmountIn);
+}
+
+#[test]
+fn exact_output_uses_max_slippage_buffer_for_fee_on_transfer_input() {
+    let env = Env::default();
+    let (contract_id, client) = deploy(&env);
+    let admin = client.get_admin();
+    let caller = Address::generate(&env);
+    env.mock_all_auths();
+
+    let (token_in, token_in_client) = create_fee_token(&env, &caller, 2_000, 1_000);
+    let token_out = create_sac(&env, &admin, &contract_id, 2_000);
+    let token_out_client = token::Client::new(&env, &token_out);
+    let path = direct_path(&env, &token_in, &token_out);
+
+    let amount_in =
+        client.swap_tokens_for_exact_tokens(&caller, &token_in, &token_out, &998, &1_120, &path);
+
+    assert_eq!(amount_in, 1_120);
+    assert_eq!(token_in_client.balance(&contract_id), 1_006);
+    assert_eq!(token_out_client.balance(&caller), 998);
 }
