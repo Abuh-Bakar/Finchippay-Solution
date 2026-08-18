@@ -1,8 +1,10 @@
 /**
  * @file lib/api.ts
- * @description API utilities, cursor-based pagination primitives, and traceparent
- * context propagation for frontend HTTP requests.
+ * @description API utilities, cursor-based pagination primitives, traceparent,
+ * and correlation-ID context propagation for frontend HTTP requests.
  */
+
+import { withCorrelation } from "./correlation";
 
 /**
  * Generates a standard W3C traceparent header.
@@ -35,23 +37,24 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
   if (!headers.has("traceparent")) {
     headers.set("traceparent", generateTraceParent());
   }
-  return fetch(input, {
+  return withCorrelation(fetch)(input, {
     ...init,
     headers,
   });
 }
 
-// Automatically patch global fetch in the browser/client-side and Node environment.
+// Automatically patch global fetch for backend API calls made outside apiFetch.
 // Uses a self-executing function to avoid top-level typeof checks that conflict
 // with certain tsconfig lib configurations.
 (function patchGlobalFetch() {
   const globalObj = (typeof window !== "undefined" ? window : globalThis) as typeof globalThis & {
-    __fetchPatched?: boolean;
+    __correlationFetchPatched?: boolean;
   };
 
-  if (globalObj && !globalObj.__fetchPatched) {
+  if (globalObj && !globalObj.__correlationFetchPatched) {
     const originalFetch = globalObj.fetch?.bind(globalObj);
     if (originalFetch) {
+      const correlatedFetch = withCorrelation(originalFetch);
       globalObj.fetch = async function (input: RequestInfo | URL, init?: RequestInit) {
         const urlStr =
           typeof input === "string"
@@ -68,7 +71,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
           if (!headers.has("traceparent")) {
             headers.set("traceparent", generateTraceParent());
           }
-          return originalFetch(input, {
+          return correlatedFetch(input, {
             ...init,
             headers,
           });
@@ -76,7 +79,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
 
         return originalFetch(input, init);
       };
-      globalObj.__fetchPatched = true;
+      globalObj.__correlationFetchPatched = true;
     }
   }
 })();
