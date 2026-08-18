@@ -22,9 +22,7 @@ require("./config/fetchInterceptor");
 
 const express = require("express");
 const cors = require("cors");
-const helmet = require("helmet");
 const pinoHttp = require("pino-http");
-const rateLimit = require("express-rate-limit");
 const { strictLimiter, createInstrumentedLimiter } = require("./middleware/rateLimit");
 const Sentry = require("@sentry/node");
 const { formatErrorResponse, ERROR_CODES } = require("../../shared/errorCodes");
@@ -51,7 +49,6 @@ const featuresRoutes = require("./routes/features");
 const adminFeatureFlagsRoutes = require("./routes/adminFeatureFlags");
 const tokensRoutes = require("./routes/tokens");
 const pushRoutes = require("./routes/push");
-const contactRoutes = require("./routes/contacts");
 const emailRoutes = require("./routes/emails");
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./swagger");
@@ -66,7 +63,7 @@ const { validateEnv, parseAllowedOrigins } = require("./config/validateEnv");
 const { requireJsonContentType } = require("./middleware/bodyParsing");
 const { trackHttpMetrics } = require("./middleware/metrics");
 const metricsRoutes = require("./routes/metrics");
-const { correlationMiddleware, getRequestId } = require("./utils/correlationId");
+const { getRequestId } = require("./utils/correlationId");
 const { errorLogFields } = require("./utils/errorResponse");
 const { initRedis, closeRedis } = require("./services/cacheService");
 const shutdownState = require("./services/shutdownState");
@@ -230,11 +227,12 @@ app.use(
       "Content-Type",
       "Authorization",
       "X-Request-ID",
+      "X-Correlation-ID",
       "X-Session-ID",
       "traceparent",
       "tracestate",
     ],
-    exposedHeaders: ["X-Request-ID", "X-Session-ID"],
+    exposedHeaders: ["X-Request-ID", "X-Correlation-ID", "X-Session-ID"],
     credentials: true,
   }),
 );
