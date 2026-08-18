@@ -106,6 +106,9 @@ pub enum ContractError {
     ExcessiveAmountIn = 23,
     /// `new_fee_bps` exceeds `MAX_SWAP_FEE_BPS`.
     InvalidFeeBps = 24,
+    /// The supplied swap `path` references stale liquidity, such as a repeated
+    /// token or a hop whose contract-side reserve is empty.
+    StalePath = 29,
     /// The referenced admin action proposal does not exist.
     ProposalNotFound = 25,
     /// The admin action proposal has already been executed.
@@ -701,6 +704,25 @@ pub(crate) fn require_transfer_succeeded(
     }
 }
 
+pub(crate) fn transfer_to_contract_measured(
+    env: &Env,
+    token: &token::Client,
+    from: &Address,
+    requested_amount: &i128,
+) -> i128 {
+    let contract_address = env.current_contract_address();
+    let balance_before = get_contract_balance(env, token);
+    token.transfer(from, &contract_address, requested_amount);
+    let balance_after = token.balance(&contract_address);
+    if balance_after <= balance_before {
+        panic!("TransferFailed");
+    }
+    set_contract_balance(env, &token.address, balance_after);
+    balance_after
+        .checked_sub(balance_before)
+        .expect("contract balance decreased during inbound transfer")
+}
+
 pub(crate) fn contract_transfer_out(env: &Env, token: &token::Client, to: &Address, amount: &i128) {
     token.transfer(&env.current_contract_address(), to, amount);
     let key = DataKey::LastContractBalance(token.address.clone());
@@ -773,6 +795,41 @@ pub(crate) fn validate_swap_path(
         || path.get(path.len() - 1).unwrap() != token_out.clone()
     {
         return Err(ContractError::InvalidPath);
+    }
+    for i in 0..path.len() {
+        let current = path.get(i).unwrap();
+        for j in (i + 1)..path.len() {
+            if current == path.get(j).unwrap() {
+                return Err(ContractError::StalePath);
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_swap_path_liquidity(
+    env: &Env,
+    path: &Vec<Address>,
+) -> Result<(), ContractError> {
+    let contract_address = env.current_contract_address();
+    for i in 1..path.len() {
+        let token_address = path.get(i).unwrap();
+        let token_client = get_token_client(env, &token_address);
+        if token_client.balance(&contract_address) <= 0 {
+            return Err(ContractError::StalePath);
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn ensure_swap_reserve(
+    env: &Env,
+    token_address: &Address,
+    amount: i128,
+) -> Result<(), ContractError> {
+    let token_client = get_token_client(env, token_address);
+    if token_client.balance(&env.current_contract_address()) < amount {
+        return Err(ContractError::StalePath);
     }
     Ok(())
 }
@@ -2771,28 +2828,24 @@ impl FinchippayContract {
             return Err(ContractError::InvalidPath);
         }
         validate_swap_path(&path, &token_in, &token_out)?;
+        validate_swap_path_liquidity(&env, &path)?;
 
         let fee_bps = get_swap_fee_bps(&env);
-        let (fee, amount_to_swap) = compute_swap_fee(amount_in, fee_bps);
+        let token_in_client = get_token_client(&env, &token_in);
+        let actual_amount_in =
+            transfer_to_contract_measured(&env, &token_in_client, &caller, &amount_in);
+        let (fee, amount_to_swap) = compute_swap_fee(actual_amount_in, fee_bps);
         let amount_out = amount_to_swap;
 
         if amount_out < min_amount_out {
             return Err(ContractError::SlippageExceeded);
         }
+        ensure_swap_reserve(&env, &token_out, amount_out)?;
 
-        let token_in_client = get_token_client(&env, &token_in);
         if fee > 0 {
             let collector = get_fee_collector_address(&env);
-            require_transfer_succeeded(&env, &token_in_client, &caller, &collector, &fee);
+            contract_transfer_out(&env, &token_in_client, &collector, &fee);
         }
-        let contract_address = env.current_contract_address();
-        require_transfer_succeeded(
-            &env,
-            &token_in_client,
-            &caller,
-            &contract_address,
-            &amount_to_swap,
-        );
 
         let token_out_client = get_token_client(&env, &token_out);
         contract_transfer_out(&env, &token_out_client, &caller, &amount_out);
@@ -2804,7 +2857,13 @@ impl FinchippayContract {
                 token_in.clone(),
                 token_out.clone(),
             ),
-            (amount_in, amount_out, fee),
+            (
+                amount_in,
+                actual_amount_in,
+                amount_out,
+                fee,
+                path.len(),
+            ),
         );
 
         Ok(amount_out)
@@ -2838,6 +2897,7 @@ impl FinchippayContract {
             return Err(ContractError::InvalidPath);
         }
         validate_swap_path(&path, &token_in, &token_out)?;
+        validate_swap_path_liquidity(&env, &path)?;
 
         let fee_bps = get_swap_fee_bps(&env);
         let amount_in = compute_required_amount_in(amount_out, fee_bps);
@@ -2846,25 +2906,44 @@ impl FinchippayContract {
             return Err(ContractError::ExcessiveAmountIn);
         }
 
-        let (fee, amount_to_swap) = compute_swap_fee(amount_in, fee_bps);
-        // Ceiling division in compute_required_amount_in can leave a few
-        // extra units in amount_to_swap versus amount_out; that dust stays
-        // in the contract's reserves rather than shorting the caller.
-        debug_assert!(amount_to_swap >= amount_out);
+        ensure_swap_reserve(&env, &token_out, amount_out)?;
 
         let token_in_client = get_token_client(&env, &token_in);
-        if fee > 0 {
-            let collector = get_fee_collector_address(&env);
-            require_transfer_succeeded(&env, &token_in_client, &caller, &collector, &fee);
+        let mut requested_amount_in = amount_in;
+        let mut actual_amount_in =
+            transfer_to_contract_measured(&env, &token_in_client, &caller, &amount_in);
+        let (mut actual_fee, mut actual_amount_to_swap) =
+            compute_swap_fee(actual_amount_in, fee_bps);
+        if actual_amount_to_swap < amount_out {
+            let additional_request = max_amount_in
+                .checked_sub(requested_amount_in)
+                .ok_or(ContractError::ExcessiveAmountIn)?;
+            if additional_request <= 0 {
+                return Err(ContractError::ExcessiveAmountIn);
+            }
+            let additional_received = transfer_to_contract_measured(
+                &env,
+                &token_in_client,
+                &caller,
+                &additional_request,
+            );
+            requested_amount_in = requested_amount_in
+                .checked_add(additional_request)
+                .expect("overflow");
+            actual_amount_in = actual_amount_in
+                .checked_add(additional_received)
+                .expect("overflow");
+            let recomputed = compute_swap_fee(actual_amount_in, fee_bps);
+            actual_fee = recomputed.0;
+            actual_amount_to_swap = recomputed.1;
+            if actual_amount_to_swap < amount_out {
+                return Err(ContractError::ExcessiveAmountIn);
+            }
         }
-        let contract_address = env.current_contract_address();
-        require_transfer_succeeded(
-            &env,
-            &token_in_client,
-            &caller,
-            &contract_address,
-            &amount_to_swap,
-        );
+        if actual_fee > 0 {
+            let collector = get_fee_collector_address(&env);
+            contract_transfer_out(&env, &token_in_client, &collector, &actual_fee);
+        }
 
         let token_out_client = get_token_client(&env, &token_out);
         contract_transfer_out(&env, &token_out_client, &caller, &amount_out);
@@ -2876,10 +2955,16 @@ impl FinchippayContract {
                 token_in.clone(),
                 token_out.clone(),
             ),
-            (amount_in, amount_out, fee),
+            (
+                requested_amount_in,
+                actual_amount_in,
+                amount_out,
+                actual_fee,
+                path.len(),
+            ),
         );
 
-        Ok(amount_in)
+        Ok(requested_amount_in)
     }
 }
 
