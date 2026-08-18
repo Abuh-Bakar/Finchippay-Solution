@@ -793,6 +793,39 @@ pub(crate) fn compute_required_amount_in(amount_out: i128, fee_bps: u32) -> i128
         .expect("divide by zero")
 }
 
+pub(crate) fn compute_fee_on_transfer_top_up(
+    required_actual_amount_in: i128,
+    requested_amount_in: i128,
+    actual_amount_in: i128,
+    max_amount_in: i128,
+) -> Result<i128, ContractError> {
+    let actual_deficit = required_actual_amount_in
+        .checked_sub(actual_amount_in)
+        .ok_or(ContractError::ExcessiveAmountIn)?;
+    if actual_deficit <= 0 {
+        return Ok(0);
+    }
+    let remaining_request = max_amount_in
+        .checked_sub(requested_amount_in)
+        .ok_or(ContractError::ExcessiveAmountIn)?;
+    if remaining_request <= 0 || actual_amount_in <= 0 {
+        return Err(ContractError::ExcessiveAmountIn);
+    }
+    let estimated_request = actual_deficit
+        .checked_mul(requested_amount_in)
+        .expect("overflow")
+        .checked_add(actual_amount_in - 1)
+        .expect("overflow")
+        .checked_div(actual_amount_in)
+        .expect("divide by zero")
+        .max(1);
+    Ok(if estimated_request > remaining_request {
+        remaining_request
+    } else {
+        estimated_request
+    })
+}
+
 /// Validate a swap path: at least two hops, first == token_in, last == token_out.
 pub(crate) fn validate_swap_path(
     path: &Vec<Address>,
@@ -2919,6 +2952,7 @@ impl FinchippayContract {
 
         let fee_bps = get_swap_fee_bps(&env);
         let amount_in = compute_required_amount_in(amount_out, fee_bps);
+        let required_actual_amount_in = amount_in;
 
         if amount_in > max_amount_in {
             return Err(ContractError::ExcessiveAmountIn);
@@ -2933,12 +2967,12 @@ impl FinchippayContract {
         let (mut actual_fee, mut actual_amount_to_swap) =
             compute_swap_fee(actual_amount_in, fee_bps);
         if actual_amount_to_swap < amount_out {
-            let additional_request = max_amount_in
-                .checked_sub(requested_amount_in)
-                .ok_or(ContractError::ExcessiveAmountIn)?;
-            if additional_request <= 0 {
-                return Err(ContractError::ExcessiveAmountIn);
-            }
+            let additional_request = compute_fee_on_transfer_top_up(
+                required_actual_amount_in,
+                requested_amount_in,
+                actual_amount_in,
+                max_amount_in,
+            )?;
             let additional_received =
                 transfer_to_contract_measured(&env, &token_in_client, &caller, &additional_request);
             requested_amount_in = requested_amount_in
