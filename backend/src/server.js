@@ -291,6 +291,7 @@ const apiRouteMounts = [
   { path: "/parse-payment", router: parsePaymentRoutes },
   { path: "/scheduled-txns", router: scheduledTransactionRoutes },
   { path: "/sep24", router: sep24Routes },
+  { path: "/sep38", router: sep38Routes },
 ];
 
 for (const { path, router } of apiRouteMounts) {
@@ -312,6 +313,7 @@ app.use("/api/events", eventRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/sep24", sep24Routes);
 app.use("/api/sep12", sep12Routes);
+app.use("/api/sep38", sep38Routes);
 app.use("/sep38", sep38Routes);
 app.use("/api/push", pushRoutes);
 app.use("/api/emails", emailRoutes);
