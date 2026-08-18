@@ -24,12 +24,6 @@ module.exports = {
   },
   globalSetup: "<rootDir>/jest.globalSetup.js",
   setupFilesAfterEnv: [],
-  transform: {
-    "^.+\\.jsx?$": "babel-jest",
-  },
-  transformIgnorePatterns: [
-    "[/\\\\]node_modules[/\\\\](?!.*(@stellar|@noble)).+\\.js$",
-  ],
   verbose: true,
   clearMocks: true,
   restoreMocks: true,
