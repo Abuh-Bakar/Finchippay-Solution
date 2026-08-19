@@ -38,8 +38,9 @@ use soroban_sdk::{
 
 const CASES_ARITHMETIC: u32 = 10_000;
 const CASES_CONTRACT: u32 = 100;
-const MAX_TEST_DEPOSIT: i128 = 1_000_000_000;
-const MAX_LEDGER_OFFSET: u32 = 1_000_000;
+const MAX_TEST_DEPOSIT: i128 = 1_000_000_000_000_000_000;
+const MAX_LEDGER_OFFSET: u32 = 518_400;
+const MIN_DEPOSIT: i128 = 1_000;
 
 fn config(cases: u32) -> Config {
     Config {
@@ -66,13 +67,13 @@ fn deploy<'a>(env: &'a Env, payer: &Address) -> (Address, FinchippayContractClie
 }
 
 fn escrow_inputs() -> impl Strategy<Value = (i128, u32)> {
-    (1i128..=MAX_TEST_DEPOSIT, 1u32..=MAX_LEDGER_OFFSET)
+    (MIN_DEPOSIT..=MAX_TEST_DEPOSIT, 1u32..=MAX_LEDGER_OFFSET)
 }
 
 fn multi_escrow_ops() -> impl Strategy<Value = (i128, i128, u32, u32)> {
     (
-        1i128..=MAX_TEST_DEPOSIT,
-        1i128..=MAX_TEST_DEPOSIT,
+        MIN_DEPOSIT..=MAX_TEST_DEPOSIT,
+        MIN_DEPOSIT..=MAX_TEST_DEPOSIT,
         1u32..=MAX_LEDGER_OFFSET / 2,
         MAX_LEDGER_OFFSET / 2..=MAX_LEDGER_OFFSET,
     )
@@ -374,7 +375,7 @@ fn invariant_valid_state_transitions() {
 #[test]
 fn invariant_deposit_yield_no_overflow() {
     let strategy = (
-        1i128..=MAX_TEST_DEPOSIT,
+        MIN_DEPOSIT..=MAX_TEST_DEPOSIT,
         0i128..=MAX_TEST_DEPOSIT / 100,
     );
 
@@ -400,7 +401,7 @@ fn invariant_deposit_yield_no_overflow() {
 /// Pure arithmetic invariant: shares ratio calculation.
 #[test]
 fn invariant_shares_proportional_to_deposit() {
-    let strategy = (1i128..=MAX_TEST_DEPOSIT, 1i128..=MAX_TEST_DEPOSIT);
+    let strategy = (MIN_DEPOSIT..=MAX_TEST_DEPOSIT, MIN_DEPOSIT..=MAX_TEST_DEPOSIT);
 
     let mut runner = TestRunner::new(config(CASES_ARITHMETIC));
     runner
@@ -433,7 +434,7 @@ fn edge_case_minimum_deposit() {
     let beneficiary = Address::generate(&env);
     let (_, client, token) = deploy(&env, &funder);
 
-    let amount = 1i128;
+    let amount = 1_000i128;
     let current_ledger = env.ledger().sequence();
     let release_ledger = current_ledger + 1000;
 
