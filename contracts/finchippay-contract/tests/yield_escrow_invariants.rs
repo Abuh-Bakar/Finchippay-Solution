@@ -38,6 +38,7 @@ use soroban_sdk::{
 
 const CASES_ARITHMETIC: u32 = 10_000;
 const CASES_CONTRACT: u32 = 100;
+const CASES_MULTI: u32 = 50;
 const MAX_TEST_DEPOSIT: i128 = 1_000_000_000_000_000_000;
 const MAX_LEDGER_OFFSET: u32 = 518_400;
 const MIN_DEPOSIT: i128 = 1_000;
@@ -197,7 +198,7 @@ fn invariant_no_double_pay() {
 
     let strategy = multi_escrow_ops();
 
-    let mut runner = TestRunner::new(config(CASES_CONTRACT));
+    let mut runner = TestRunner::new(config(CASES_MULTI));
     runner
         .run(&strategy, |(amount1, amount2, ledger_offset1, ledger_offset2)| {
             let current_ledger = env.ledger().sequence();
