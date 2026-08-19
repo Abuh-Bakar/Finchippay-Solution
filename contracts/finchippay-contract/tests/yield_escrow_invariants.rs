@@ -27,7 +27,8 @@
 //! Contract-based tests (with real token transfers) use lower case counts
 //! to stay within CI time budgets, while arithmetic-only tests use higher counts.
 
-use finchippay_contract::{FinchippayContract, FinchippayContractClient, YieldEscrow};
+use finchippay_contract::{FinchippayContract, FinchippayContractClient};
+use finchippay_contract::yield_escrow::{YieldEscrow, YieldEscrowStatus};
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestRunner};
 use soroban_sdk::{
@@ -473,7 +474,7 @@ fn invariant_valid_state_transitions() {
             let escrow: YieldEscrow = client.get_yield_escrow(&escrow_id);
             assert_eq!(
                 escrow.status,
-                finchippay_contract::YieldEscrowStatus::Pending,
+                YieldEscrowStatus::Pending,
                 "New escrow should be in Pending state"
             );
 
@@ -484,7 +485,7 @@ fn invariant_valid_state_transitions() {
             let escrow: YieldEscrow = client.get_yield_escrow(&escrow_id);
             assert_eq!(
                 escrow.status,
-                finchippay_contract::YieldEscrowStatus::Cancelled,
+                YieldEscrowStatus::Cancelled,
                 "Cancelled escrow should be in Cancelled state"
             );
 
