@@ -72,7 +72,7 @@ fn deploy<'a>(env: &'a Env, payer: &Address) -> (Address, FinchippayContractClie
 
     let sac_b = env.register_stellar_asset_contract_v2(admin.clone());
     let token_b = sac_b.address();
-    let token_admin_b = token::StellarAssetClient::new(env, &token_b);
+    let _token_admin_b = token::StellarAssetClient::new(env, &token_b);
 
     // Fund payer with enough tokens for all test cases
     token_admin_a.mint(payer, &(MAX_TEST_DEPOSIT.saturating_mul(CASES_CONTRACT as i128 + 10)));
