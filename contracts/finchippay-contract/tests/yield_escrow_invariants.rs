@@ -114,7 +114,7 @@ fn create_escrow(
     release_ledger: u32,
 ) -> u64 {
     let memo = Symbol::new(env, "test");
-    client.create_yield_escrow(
+    client.create_escrow(
         token_a,
         token_b,
         from,
@@ -166,7 +166,7 @@ fn invariant_payout_never_exceeds_deposit() {
             );
 
             // Get escrow details
-            let escrow: YieldEscrow = client.get_yield_escrow(&escrow_id);
+            let escrow: YieldEscrow = client.get_escrow(&escrow_id);
 
             // Invariant: shares_received >= amount (should be equal in current impl)
             assert!(
@@ -230,7 +230,7 @@ fn invariant_payout_never_exceeds_deposit_plus_yield() {
             );
 
             // Get escrow details
-            let escrow: YieldEscrow = client.get_yield_escrow(&escrow_id);
+            let escrow: YieldEscrow = client.get_escrow(&escrow_id);
 
             // Calculate expected yield (0 in current impl, but test the logic)
             let accrued_yield: i128 = 0; // Placeholder: yield not yet implemented
@@ -302,23 +302,23 @@ fn invariant_no_double_pay() {
             advance_ledger(&env, release_ledger1);
 
             // Claim first escrow
-            let payout1 = client.claim_yield_escrow(&escrow_id1);
+            let payout1 = client.claim_escrow(&escrow_id1);
             assert_eq!(payout1, amount1, "First escrow payout should equal deposit");
 
             // Try to claim first escrow again (should panic)
-            let result = client.try_claim_yield_escrow(&escrow_id1);
+            let result = client.try_claim_escrow(&escrow_id1);
             assert!(result.is_err(), "Double-claim should panic");
 
             // Cancel second escrow (different from first)
-            let refund = client.cancel_yield_escrow(&escrow_id2);
+            let refund = client.cancel_escrow(&escrow_id2);
             assert_eq!(refund, amount2, "Second escrow refund should equal deposit");
 
             // Try to cancel second escrow again (should panic)
-            let result = client.try_cancel_yield_escrow(&escrow_id2);
+            let result = client.try_cancel_escrow(&escrow_id2);
             assert!(result.is_err(), "Double-cancel should panic");
 
             // Try to claim cancelled escrow (should panic)
-            let result = client.try_claim_yield_escrow(&escrow_id2);
+            let result = client.try_claim_escrow(&escrow_id2);
             assert!(result.is_err(), "Claiming cancelled escrow should panic");
 
             Ok(())
@@ -363,7 +363,7 @@ fn invariant_shares_never_negative() {
             );
 
             // Get escrow details
-            let escrow: YieldEscrow = client.get_yield_escrow(&escrow_id);
+            let escrow: YieldEscrow = client.get_escrow(&escrow_id);
 
             // Invariant: shares_received >= 0
             assert!(
@@ -414,7 +414,7 @@ fn invariant_yield_never_negative() {
             );
 
             // Get escrow details
-            let escrow: YieldEscrow = client.get_yield_escrow(&escrow_id);
+            let escrow: YieldEscrow = client.get_escrow(&escrow_id);
 
             // Invariant: yield (placeholder: 0) >= 0
             // In current impl, we verify that amount == shares_received (1:1)
@@ -471,7 +471,7 @@ fn invariant_valid_state_transitions() {
                 release_ledger,
             );
 
-            let escrow: YieldEscrow = client.get_yield_escrow(&escrow_id);
+            let escrow: YieldEscrow = client.get_escrow(&escrow_id);
             assert_eq!(
                 escrow.status,
                 YieldEscrowStatus::Pending,
@@ -479,10 +479,10 @@ fn invariant_valid_state_transitions() {
             );
 
             // Cancel escrow (Pending -> Cancelled)
-            let refund = client.cancel_yield_escrow(&escrow_id);
+            let refund = client.cancel_escrow(&escrow_id);
             assert_eq!(refund, amount, "Refund should equal deposit");
 
-            let escrow: YieldEscrow = client.get_yield_escrow(&escrow_id);
+            let escrow: YieldEscrow = client.get_escrow(&escrow_id);
             assert_eq!(
                 escrow.status,
                 YieldEscrowStatus::Cancelled,
@@ -490,11 +490,11 @@ fn invariant_valid_state_transitions() {
             );
 
             // Try to cancel again (should fail)
-            let result = client.try_cancel_yield_escrow(&escrow_id);
+            let result = client.try_cancel_escrow(&escrow_id);
             assert!(result.is_err(), "Cannot cancel an already cancelled escrow");
 
             // Try to claim (should fail)
-            let result = client.try_claim_yield_escrow(&escrow_id);
+            let result = client.try_claim_escrow(&escrow_id);
             assert!(result.is_err(), "Cannot claim a cancelled escrow");
 
             Ok(())
@@ -606,13 +606,13 @@ fn edge_case_minimum_deposit() {
         release_ledger,
     );
 
-    let escrow: YieldEscrow = client.get_yield_escrow(&escrow_id);
+    let escrow: YieldEscrow = client.get_escrow(&escrow_id);
     assert_eq!(escrow.amount, amount);
     assert_eq!(escrow.shares_received, amount);
 
     // Advance to release and claim
     advance_ledger(&env, release_ledger);
-    let payout = client.claim_yield_escrow(&escrow_id);
+    let payout = client.claim_escrow(&escrow_id);
     assert_eq!(payout, amount);
 }
 
@@ -641,7 +641,7 @@ fn edge_case_minimum_release_ledger() {
 
     // Advance to release and claim
     advance_ledger(&env, release_ledger);
-    let payout = client.claim_yield_escrow(&escrow_id);
+    let payout = client.claim_escrow(&escrow_id);
     assert_eq!(payout, amount);
 }
 
@@ -679,7 +679,7 @@ fn edge_case_multiple_escrows_same_release() {
     // Claim all escrows
     let mut total_payout = 0i128;
     for escrow_id in escrow_ids {
-        let payout = client.claim_yield_escrow(&escrow_id);
+        let payout = client.claim_escrow(&escrow_id);
         total_payout += payout;
     }
 
@@ -715,7 +715,7 @@ fn edge_case_cancel_immediately() {
     );
 
     // Cancel immediately (before advancing ledger)
-    let refund = client.cancel_yield_escrow(&escrow_id);
+    let refund = client.cancel_escrow(&escrow_id);
     assert_eq!(refund, amount, "Immediate cancel should return full deposit");
 }
 
