@@ -28,7 +28,7 @@
 //! to stay within CI time budgets, while arithmetic-only tests use higher counts.
 
 use finchippay_contract::{FinchippayContract, FinchippayContractClient};
-use finchippay_contract::types::{Escrow, EscrowStatus};
+use finchippay_contract::{Escrow, EscrowStatus};
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestRunner};
 use soroban_sdk::{
@@ -92,11 +92,11 @@ fn create_test_escrow(
     release_ledger: u32,
 ) -> u32 {
     let memo = Symbol::new(env, "test");
-    client.create_escrow(token, from, to, &amount, &release_ledger, &memo).unwrap()
+    client.create_escrow(token, from, to, &amount, &release_ledger, &memo)
 }
 
 fn get_escrow_data(client: &FinchippayContractClient, id: u32) -> Escrow {
-    client.get_escrow(&id).unwrap()
+    client.get_escrow(&id)
 }
 
 // ============================================================================
