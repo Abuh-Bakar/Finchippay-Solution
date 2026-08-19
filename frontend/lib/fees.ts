@@ -55,9 +55,7 @@ export function estimateTransactionFee(
   feePerOp: number
 ): string {
   const stroops = BigInt(feePerOp) * BigInt(operationCount);
-  // Convert stroops to XLM (1 XLM = 10,000,000 stroops)
-  const xlm = Number(stroops) / 10_000_000;
-  return xlm.toFixed(7);
+  return formatFeeStroopsToXlm(Number(stroops));
 }
 
 export function getFeeForTier(stats: FeeStats, tier: FeeTier): number {
@@ -74,7 +72,15 @@ export function getFeeForTier(stats: FeeStats, tier: FeeTier): number {
 }
 
 export function formatFeeStroopsToXlm(stroops: number): string {
-  return (stroops / 10_000_000).toFixed(7);
+  const stroopsStr = BigInt(Math.floor(stroops)).toString();
+  const isNegative = stroopsStr.startsWith("-");
+  const absStr = isNegative ? stroopsStr.slice(1) : stroopsStr;
+  const paddedStr = absStr.padStart(8, "0");
+  const len = paddedStr.length;
+  const integerPart = paddedStr.slice(0, len - 7) || "0";
+  const fractionalPart = paddedStr.slice(len - 7);
+  const sign = isNegative ? "-" : "";
+  return `${sign}${integerPart}.${fractionalPart}`;
 }
 
 export const FEE_TIER_LABELS: Record<FeeTier, string> = {
