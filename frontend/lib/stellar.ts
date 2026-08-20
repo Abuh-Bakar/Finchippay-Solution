@@ -276,9 +276,15 @@ export interface FeeEstimate {
  * Converts stroops (1 XLM = 10,000,000 stroops) to a formatted XLM string for UI display.
  */
 export function formatStroopsToXlm(stroops: bigint | number): string {
-  const stroopsBig = BigInt(stroops);
-  const xlm = Number(stroopsBig) / 10_000_000;
-  return xlm.toFixed(7);
+  const stroopsStr = BigInt(stroops).toString();
+  const isNegative = stroopsStr.startsWith("-");
+  const absStr = isNegative ? stroopsStr.slice(1) : stroopsStr;
+  const paddedStr = absStr.padStart(8, "0");
+  const len = paddedStr.length;
+  const integerPart = paddedStr.slice(0, len - 7) || "0";
+  const fractionalPart = paddedStr.slice(len - 7);
+  const sign = isNegative ? "-" : "";
+  return `${sign}${integerPart}.${fractionalPart}`;
 }
 
 /**
@@ -680,8 +686,12 @@ export async function buildPaymentTransaction({
     let destinationExists = true;
     try {
       await server.loadAccount(toPublicKey);
-    } catch {
-      destinationExists = false;
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        destinationExists = false;
+      } else {
+        throw err;
+      }
     }
 
     if (!destinationExists) {
