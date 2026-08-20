@@ -48,12 +48,13 @@ export async function getFeeStats(): Promise<FeeStats> {
   return stats;
 }
 
+export function clearFeeStatsCache(): void {
+  cachedStats = null;
+}
+
 export type FeeTier = "economy" | "standard" | "priority";
 
-export function estimateTransactionFee(
-  operationCount: number,
-  feePerOp: number
-): string {
+export function estimateTransactionFee(operationCount: number, feePerOp: number): string {
   const stroops = BigInt(feePerOp) * BigInt(operationCount);
   // Convert stroops to XLM (1 XLM = 10,000,000 stroops)
   const xlm = Number(stroops) / 10_000_000;

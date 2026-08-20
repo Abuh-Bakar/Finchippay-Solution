@@ -1,5 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { getFeeStats, estimateTransactionFee, getFeeForTier, formatFeeStroopsToXlm } from "../lib/fees";
+import {
+  getFeeStats,
+  estimateTransactionFee,
+  getFeeForTier,
+  formatFeeStroopsToXlm,
+  clearFeeStatsCache,
+} from "../lib/fees";
 
 const mockFeeStats = {
   min_accepted_fee: 100,
@@ -15,12 +20,14 @@ const mockFeeStats = {
 
 describe("fees", () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
+    jest.restoreAllMocks();
+    clearFeeStatsCache();
+    global.fetch = jest.fn();
   });
 
   describe("getFeeStats", () => {
     it("fetches and returns fee stats from Horizon", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve(mockFeeStats),
       } as Response);
@@ -35,10 +42,11 @@ describe("fees", () => {
     });
 
     it("caches fee stats for 60 seconds", async () => {
-      const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      const fetchMock = jest.fn().mockResolvedValue({
         ok: true,
         json: () => Promise.resolve(mockFeeStats),
       } as Response);
+      global.fetch = fetchMock;
 
       await getFeeStats();
       await getFeeStats();
@@ -47,7 +55,7 @@ describe("fees", () => {
     });
 
     it("throws on failed fetch", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
         ok: false,
         statusText: "Not Found",
       } as Response);
