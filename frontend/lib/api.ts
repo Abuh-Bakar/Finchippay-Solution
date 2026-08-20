@@ -43,6 +43,48 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
   });
 }
 
+/**
+ * Determines whether an outgoing request targets the application's own backend
+ * API and is therefore safe to receive W3C `traceparent` context.
+ *
+ * `traceparent` carries internal distributed-tracing context that must never
+ * leave first-party infrastructure. The previous heuristic injected it into any
+ * URL whose string merely *contained* `/api/` (e.g.
+ * `https://api.coingecko.com/api/v3/...`), leaking trace context to third-party
+ * hosts. We now restrict injection to:
+ *   1. relative paths (same-origin to the frontend), and
+ *   2. absolute URLs whose origin exactly matches the configured backend API
+ *      origin (`NEXT_PUBLIC_API_URL`).
+ *
+ * @param urlStr the request URL as a string, URL, or Request
+ */
+function isFirstPartyApiRequest(urlStr: string): boolean {
+  // Relative URLs (e.g. "/api/health") are same-origin to the frontend and are
+  // always treated as first-party.
+  if (!/^https?:\/\//i.test(urlStr)) {
+    return true;
+  }
+
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+  let backendOrigin: string | null = null;
+  try {
+    backendOrigin = new URL(apiUrl).origin;
+  } catch {
+    backendOrigin = null;
+  }
+  if (!backendOrigin) {
+    // Without a resolvable backend origin we must not assume a third-party host
+    // is first-party, so never inject trace context.
+    return false;
+  }
+
+  try {
+    return new URL(urlStr).origin === backendOrigin;
+  } catch {
+    return false;
+  }
+}
+
 // Automatically patch global fetch for backend API calls made outside apiFetch.
 // Uses a self-executing function to avoid top-level typeof checks that conflict
 // with certain tsconfig lib configurations.
@@ -63,10 +105,8 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
               ? input.href
               : (input as Request).url;
 
-        // Only inject traceparent headers for relative paths or API endpoints
-        const isBackendApi = urlStr.includes("/api/") || !urlStr.startsWith("http");
-
-        if (isBackendApi) {
+        // Only inject traceparent headers for first-party backend requests.
+        if (isFirstPartyApiRequest(urlStr)) {
           const headers = new Headers(init?.headers);
           if (!headers.has("traceparent")) {
             headers.set("traceparent", generateTraceParent());
