@@ -10,24 +10,30 @@ import { withCorrelation } from "./correlation";
  * Generates a standard W3C traceparent header.
  * Format: 00-traceid-parentid-traceflags
  */
+// frontend/lib/api.ts
+
+/**
+ * Generates a W3C Traceparent header.
+ * Fixes Issue #725: Implements probabilistic sampling instead of hardcoded '01'.
+ */
 export function generateTraceParent(): string {
   const version = "00";
-  // Generate random 16 bytes (32 hex characters) trace ID
-  const traceId = Array.from({ length: 16 }, () =>
-    Math.floor(Math.random() * 256)
-      .toString(16)
-      .padStart(2, "0"),
-  ).join("");
-  // Generate random 8 bytes (16 hex characters) parent ID (span ID)
-  const parentId = Array.from({ length: 8 }, () =>
-    Math.floor(Math.random() * 256)
-      .toString(16)
-      .padStart(2, "0"),
-  ).join("");
-  const traceFlags = "01"; // Sampled
+  const traceId = Math.random().toString(16).substring(2, 18) + Math.random().toString(16).substring(2, 18);
+  const parentId = Math.random().toString(16).substring(2, 18);
+
+  // Define sampling rate (e.g., 0.1 for 10% of requests, or 1.0 for 100%)
+  // Ideally, this value comes from an environment variable
+  const samplingRate = process.env.NEXT_PUBLIC_TRACE_SAMPLING_RATE 
+    ? parseFloat(process.env.NEXT_PUBLIC_TRACE_SAMPLING_RATE) 
+    : 0.1; // Default to 10% to prevent backend overload
+
+  // Determine trace flags
+  // 01 = Sampled, 00 = Not Sampled
+  const isSampled = Math.random() < samplingRate;
+  const traceFlags = isSampled ? "01" : "00";
+
   return `${version}-${traceId}-${parentId}-${traceFlags}`;
 }
-
 /**
  * A wrapper around the native fetch API that automatically adds
  * traceparent headers for outgoing request tracing.
