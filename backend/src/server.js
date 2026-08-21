@@ -57,7 +57,7 @@ const eventIndexer = require("./services/eventIndexer");
 const {
   startRetryWorker,
   closeAllStreams: closeWebhookStreams,
-} = require("./services/webhookSubscriptionService");
+} = require("./services/webhookService");
 const logger = require("./utils/logger");
 const { validateEnv, parseAllowedOrigins } = require("./config/validateEnv");
 const { requireJsonContentType } = require("./middleware/bodyParsing");
