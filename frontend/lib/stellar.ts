@@ -272,9 +272,15 @@ export interface FeeEstimate {
  * Converts stroops (1 XLM = 10,000,000 stroops) to a formatted XLM string for UI display.
  */
 export function formatStroopsToXlm(stroops: bigint | number): string {
-  const stroopsBig = BigInt(stroops);
-  const xlm = Number(stroopsBig) / 10_000_000;
-  return xlm.toFixed(7);
+  const stroopsStr = BigInt(stroops).toString();
+  const isNegative = stroopsStr.startsWith("-");
+  const absStr = isNegative ? stroopsStr.slice(1) : stroopsStr;
+  const paddedStr = absStr.padStart(8, "0");
+  const len = paddedStr.length;
+  const integerPart = paddedStr.slice(0, len - 7) || "0";
+  const fractionalPart = paddedStr.slice(len - 7);
+  const sign = isNegative ? "-" : "";
+  return `${sign}${integerPart}.${fractionalPart}`;
 }
 
 /**
@@ -732,8 +738,12 @@ export async function buildPaymentTransaction({
     let destinationExists = true;
     try {
       await server.loadAccount(toPublicKey);
-    } catch {
-      destinationExists = false;
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        destinationExists = false;
+      } else {
+        throw err;
+      }
     }
 
     if (!destinationExists) {
@@ -1383,23 +1393,37 @@ export function streamPayments(
   onPayment: PaymentStreamHandler,
   onError?: (error: unknown) => void,
 ): PaymentStreamUnsubscribe {
-  const paymentsBuilder = server.payments().forAccount(publicKey).order("asc").cursor("now");
+  const paymentsBuilder = server
+    .payments()
+    .forAccount(publicKey)
+    .order("asc")
+    .cursor("now")
+    .join("transactions");
 
   const close = paymentsBuilder.stream({
     onmessage: async (op) => {
       if (op.type !== "payment") return;
 
-      const payment = op as Horizon.HorizonApi.PaymentOperationResponse;
+      const payment = op as Horizon.HorizonApi.PaymentOperationResponse & { transaction?: any };
 
-      // Best-effort fetch of the parent transaction memo
+      // Avoid N+1 fetch by using joined transaction data if available
       let memo: string | undefined;
-      try {
-        const tx = await server.transactions().transaction(payment.transaction_hash).call();
-        if (tx.memo && tx.memo_type === "text") {
-          memo = tx.memo;
+      if (payment.transaction) {
+        if (payment.transaction.memo && payment.transaction.memo_type === "text") {
+          memo = payment.transaction.memo;
         }
-      } catch {
-        // memo is optional; ignore failures
+      } else {
+        try {
+          const tx = await server
+            .transactions()
+            .transaction(payment.transaction_hash)
+            .call();
+          if (tx.memo && tx.memo_type === "text") {
+            memo = tx.memo;
+          }
+        } catch {
+          // memo is optional; ignore failures
+        }
       }
 
       const assetCode = payment.asset_type === "native" ? "XLM" : payment.asset_code || "???";
