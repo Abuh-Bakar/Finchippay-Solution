@@ -4974,6 +4974,152 @@ mod tests {
         client.revoke_vesting(&id, &non_admin);
     }
 
+    // ── Vesting locked-balance accounting (#692) ──────────────────────────
+
+    /// A vesting deposit must be counted as locked so the single-admin
+    /// `rescue_tokens` path cannot sweep an active schedule.
+    #[test]
+    #[should_panic(expected = "insufficient unlocked balance")]
+    fn test_vesting_funds_are_locked_against_rescue() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let beneficiary = Address::generate(&env);
+        let to = Address::generate(&env);
+        env.mock_all_auths();
+
+        let token_id = create_token(&env, &admin, &from, 10_000);
+        let amount = 1_000i128;
+        let start = env.ledger().sequence();
+        let cliff = start + 10;
+        let end = start + 30;
+
+        client.create_vesting(&token_id, &from, &beneficiary, &amount, &cliff, &end);
+
+        // The entire on-chain balance is the vesting deposit, so every unit is
+        // locked: rescuing any of it must fail.
+        client.rescue_tokens(&admin, &token_id, &amount, &to);
+    }
+
+    /// The emergency-withdrawal path reads the same locked balance, so it must
+    /// also refuse to initiate a withdrawal of vesting funds.
+    #[test]
+    #[should_panic(expected = "insufficient unlocked balance")]
+    fn test_vesting_funds_are_locked_against_emergency_withdrawal() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let beneficiary = Address::generate(&env);
+        let to = Address::generate(&env);
+        env.mock_all_auths();
+
+        let token_id = create_token(&env, &admin, &from, 10_000);
+        let amount = 1_000i128;
+        let start = env.ledger().sequence();
+        let cliff = start + 10;
+        let end = start + 30;
+
+        client.create_vesting(&token_id, &from, &beneficiary, &amount, &cliff, &end);
+
+        client.initiate_emergency_withdrawal(&admin, &token_id, &amount, &to);
+    }
+
+    /// While a vesting is active only genuinely unlocked funds (e.g. a direct
+    /// donation to the contract address) are rescueable; the vesting deposit
+    /// itself stays protected.
+    #[test]
+    fn test_vesting_rescue_can_sweep_only_unlocked_funds() {
+        let env = Env::default();
+        let (contract_id, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let beneficiary = Address::generate(&env);
+        let to = Address::generate(&env);
+        env.mock_all_auths();
+
+        let token_id = create_token(&env, &admin, &from, 10_000);
+        let amount = 1_000i128;
+        let start = env.ledger().sequence();
+        let cliff = start + 10;
+        let end = start + 30;
+
+        client.create_vesting(&token_id, &from, &beneficiary, &amount, &cliff, &end);
+
+        // 300 untracked tokens land directly on the contract (stray transfer).
+        // Only these are unlocked and therefore rescueable.
+        let sac = token::StellarAssetClient::new(&env, &token_id);
+        sac.mint(&contract_id, &300);
+
+        client.rescue_tokens(&admin, &token_id, &300, &to);
+        assert_eq!(sac.balance(&to), 300);
+    }
+
+    /// After a full claim the locked balance must drop to zero so the claimed
+    /// amount is no longer protected from (and no longer blocks) rescues.
+    #[test]
+    fn test_vesting_claim_releases_locked_balance() {
+        let env = Env::default();
+        let (contract_id, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let beneficiary = Address::generate(&env);
+        let to = Address::generate(&env);
+        env.mock_all_auths();
+
+        let token_id = create_token(&env, &admin, &from, 10_000);
+        let amount = 1_000i128;
+        let start = env.ledger().sequence();
+        let cliff = start + 10;
+        let end = start + 30;
+
+        let id = client.create_vesting(&token_id, &from, &beneficiary, &amount, &cliff, &end);
+
+        // Fully claim the vesting.
+        advance(&env, end + 5);
+        let claimed = client.claim_vesting(&id, &beneficiary);
+        assert_eq!(claimed, amount);
+
+        // Donate 300 untracked tokens; with the locked balance now zero these
+        // are the only funds on the contract and must be rescueable.
+        let sac = token::StellarAssetClient::new(&env, &token_id);
+        sac.mint(&contract_id, &300);
+        client.rescue_tokens(&admin, &token_id, &300, &to);
+        assert_eq!(sac.balance(&to), 300);
+    }
+
+    /// After a revoke the unclaimed remainder is returned to the funder and
+    /// must leave the locked pool, so post-revoke donations stay rescueable.
+    #[test]
+    fn test_vesting_revoke_releases_locked_balance() {
+        let env = Env::default();
+        let (contract_id, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let beneficiary = Address::generate(&env);
+        let to = Address::generate(&env);
+        env.mock_all_auths();
+
+        let token_id = create_token(&env, &admin, &from, 10_000);
+        let amount = 1_000i128;
+        let start = env.ledger().sequence();
+        let cliff = start + 10;
+        let end = start + 30;
+
+        let id = client.create_vesting(&token_id, &from, &beneficiary, &amount, &cliff, &end);
+
+        // Revoke before the cliff: the whole deposit goes back to the funder.
+        client.revoke_vesting(&id, &admin);
+
+        // Donate 300 untracked tokens; with the locked balance now zero these
+        // must be rescueable.
+        let sac = token::StellarAssetClient::new(&env, &token_id);
+        sac.mint(&contract_id, &300);
+        client.rescue_tokens(&admin, &token_id, &300, &to);
+        assert_eq!(sac.balance(&to), 300);
+    }
+
     // ── Emergency withdrawal ──────────────────────────────────────────────
 
     /// Helper: deploy a contract, create a token, mint to contract, and
