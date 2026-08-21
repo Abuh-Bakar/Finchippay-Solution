@@ -302,9 +302,9 @@ pub fn create_vesting(
     let contract_address = env.current_contract_address();
     require_transfer_succeeded(&env, &token_client, &from, &contract_address, &amount);
     // The deposited funds are owed to the beneficiary (or returned on revoke),
-    // so they must be counted as locked or the admin rescue/emergency
-    // withdrawal paths could sweep an active vesting schedule. Mirrors the
-    // escrow/stream/multi-sig accounting.
+    // so they must be counted as locked or the emergency withdrawal path could
+    // sweep an active vesting schedule. Mirrors the escrow/stream/multi-sig
+    // accounting.
     increase_locked_balance(&env, &token, amount);
 
     let next_id: u32 = env
