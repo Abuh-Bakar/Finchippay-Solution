@@ -207,6 +207,51 @@ pub struct Escrow {
     pub dispute_raised_by: Option<Address>,
     /// Ledger at which the dispute was raised.
     pub dispute_raised_at: u32,
+    /// Designated milestone-approval agent (Some → escrow may be milestone-based).
+    pub agent: Option<Address>,
+    /// Milestone schedule for milestone-based escrows; empty for time-locked escrows.
+    pub milestones: Vec<Milestone>,
+    /// True when funds release per approved milestone rather than at a single ledger.
+    pub is_milestone_based: bool,
+}
+
+/// A single conditional release inside a milestone-based escrow. Funds for a
+/// milestone move to the recipient only after the agent or client approves it.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Milestone {
+    /// Index of the milestone within its escrow (assigned by the contract).
+    pub id: u32,
+    /// Short description of the deliverable this milestone pays for.
+    pub description: Symbol,
+    /// Amount released to the recipient when this milestone is claimed.
+    pub amount: i128,
+    /// Whether the agent or client has approved this milestone.
+    pub approved: bool,
+    /// Whether the recipient has claimed (received) this milestone's funds.
+    pub claimed: bool,
+    /// Ledger by which the milestone must be approved; 0 means no deadline.
+    pub approval_deadline_ledger: u32,
+}
+
+/// Aggregated view of an escrow for dashboards and off-chain consumers.
+/// For time-locked escrows `milestone_count`/`approved_milestones`/
+/// `claimed_milestones` are 0 and `released_amount` is the full amount once
+/// the escrow has been released.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct EscrowSummary {
+    pub id: u32,
+    pub total_amount: i128,
+    /// Amount already paid out to the recipient (claimed milestones / released).
+    pub released_amount: i128,
+    /// Amount still held by the contract (`total_amount - released_amount`).
+    pub remaining_amount: i128,
+    pub milestone_count: u32,
+    pub approved_milestones: u32,
+    pub claimed_milestones: u32,
+    pub status: EscrowStatus,
+    pub is_milestone_based: bool,
 }
 
 /// Maximum number of escrows tracked per recipient index (prevents state bloat).
@@ -416,6 +461,8 @@ pub const MAX_STREAM_DEPOSIT: i128 = 1_000_000_000_000_000_000;
 pub const MAX_STREAM_RATE: i128 = 10_000_000_000;
 /// Maximum amount for a single escrow deposit.
 const MAX_ESCROW_AMOUNT: i128 = 1_000_000_000_000_000_000;
+/// Maximum number of milestones allowed in a single milestone-based escrow.
+const MAX_MILESTONES: u32 = 10;
 /// Maximum amount for a single multi-sig proposal.
 const MAX_MULTISIG_AMOUNT: i128 = 1_000_000_000_000_000_000;
 /// Minimum amount for a single escrow deposit (prevents dust attacks).
@@ -2471,6 +2518,51 @@ impl FinchippayContract {
     /// binding for dashboard and analytics consumers.
     pub fn escrow_count(env: Env) -> u32 {
         escrow::escrow_count(env)
+    }
+
+    // ─── Milestone-based escrows ─────────────────────────────────────────────
+
+    /// Create an escrow whose funds release per approved milestone.
+    ///
+    /// `milestones` must contain between 1 and `MAX_MILESTONES` entries, every
+    /// milestone amount must be positive, and the sum of milestone amounts must
+    /// equal `deposit`. Milestone ids are assigned sequentially (0..n) by the
+    /// contract. The `agent` is the designated approver; the client (`from`)
+    /// may also approve. The agent may not be the recipient.
+    pub fn create_milestone_escrow(
+        env: Env,
+        token_address: Address,
+        from: Address,
+        to: Address,
+        agent: Address,
+        milestones: Vec<Milestone>,
+        deposit: i128,
+    ) -> Result<u32, ContractError> {
+        escrow::create_milestone_escrow(env, token_address, from, to, agent, milestones, deposit)
+    }
+
+    /// Approve a milestone for release. Only the escrow agent or the client
+    /// (`from`) may approve. Once approved, the milestone can be claimed by
+    /// the recipient.
+    pub fn approve_milestone(env: Env, escrow_id: u32, milestone_id: u32, approver: Address) {
+        escrow::approve_milestone(env, escrow_id, milestone_id, approver)
+    }
+
+    /// Claim an approved milestone. Only the escrow recipient (`to`) may
+    /// claim. When the last milestone is claimed the escrow is marked
+    /// `Released`.
+    pub fn claim_milestone(env: Env, escrow_id: u32, milestone_id: u32, recipient: Address) {
+        escrow::claim_milestone(env, escrow_id, milestone_id, recipient)
+    }
+
+    /// Return the milestone schedule of a milestone-based escrow.
+    pub fn get_milestones(env: Env, escrow_id: u32) -> Vec<Milestone> {
+        escrow::get_milestones(env, escrow_id)
+    }
+
+    /// Return an aggregated summary of an escrow for dashboards/off-chain consumers.
+    pub fn get_escrow_summary(env: Env, escrow_id: u32) -> EscrowSummary {
+        escrow::get_escrow_summary(env, escrow_id)
     }
 
     // ─── Dispute resolution ──────────────────────────────────────────────────
@@ -5435,6 +5527,416 @@ mod tests {
         let (_, client) = deploy(&env);
         let result = client.try_get_escrow(&999);
         assert_eq!(result.unwrap_err().unwrap(), ContractError::NotFound);
+    }
+
+    // ==================== Milestone-based escrows (#476) ====================
+
+    /// Create a 2-milestone escrow (600 + 400 = 1000) from `from` to `to` with
+    /// `agent` as the designated milestone approver.
+    fn create_milestone_fixture(
+        env: &Env,
+        client: &FinchippayContractClient<'_>,
+        token_id: &Address,
+        from: &Address,
+        to: &Address,
+        agent: &Address,
+    ) -> u32 {
+        let m0 = Milestone {
+            id: 99,
+            description: Symbol::new(env, "milestone_a"),
+            amount: 600,
+            approved: false,
+            claimed: false,
+            approval_deadline_ledger: 0,
+        };
+        let m1 = Milestone {
+            id: 42,
+            description: Symbol::new(env, "milestone_b"),
+            amount: 400,
+            approved: false,
+            claimed: false,
+            approval_deadline_ledger: 0,
+        };
+        client.create_milestone_escrow(token_id, from, to, agent, &vec![env, m0, m1], &1000)
+    }
+
+    #[test]
+    fn test_milestone_escrow_create_holds_deposit_and_assigns_ids() {
+        let env = Env::default();
+        let (contract_id, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        let agent = Address::generate(&env);
+        env.mock_all_auths();
+        let token_id = create_token(&env, &admin, &from, 10_000);
+        let token = token::Client::new(&env, &token_id);
+
+        let id = create_milestone_fixture(&env, &client, &token_id, &from, &to, &agent);
+
+        // Deposit moved to the contract and is counted as locked.
+        assert_eq!(token.balance(&from), 9_000);
+        assert_eq!(token.balance(&contract_id), 1_000);
+
+        let escrow = client.get_escrow(&id);
+        assert!(escrow.is_milestone_based);
+        assert_eq!(escrow.agent, Some(agent.clone()));
+        assert_eq!(escrow.status, EscrowStatus::Pending);
+        assert_eq!(escrow.amount, 1_000);
+
+        // Contract-assigned sequential ids, ignoring caller-supplied ones.
+        let milestones = client.get_milestones(&id);
+        assert_eq!(milestones.len(), 2);
+        assert_eq!(milestones.get(0).unwrap().id, 0);
+        assert_eq!(milestones.get(1).unwrap().id, 1);
+        assert_eq!(milestones.get(0).unwrap().amount, 600);
+        assert_eq!(milestones.get(1).unwrap().amount, 400);
+
+        // Summary reflects the untouched deposit.
+        let summary = client.get_escrow_summary(&id);
+        assert_eq!(summary.total_amount, 1_000);
+        assert_eq!(summary.released_amount, 0);
+        assert_eq!(summary.remaining_amount, 1_000);
+        assert_eq!(summary.milestone_count, 2);
+        assert_eq!(summary.approved_milestones, 0);
+        assert_eq!(summary.claimed_milestones, 0);
+        assert_eq!(summary.status, EscrowStatus::Pending);
+        assert!(summary.is_milestone_based);
+    }
+
+    #[test]
+    fn test_milestone_escrow_approve_and_claim_partial_release() {
+        let env = Env::default();
+        let (contract_id, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        let agent = Address::generate(&env);
+        env.mock_all_auths();
+        let token_id = create_token(&env, &admin, &from, 10_000);
+        let token = token::Client::new(&env, &token_id);
+
+        let id = create_milestone_fixture(&env, &client, &token_id, &from, &to, &agent);
+
+        // Agent approves milestone 0; recipient claims it → partial release.
+        client.approve_milestone(&id, &0, &agent);
+        client.claim_milestone(&id, &0, &to);
+        assert_eq!(token.balance(&to), 600);
+        assert_eq!(token.balance(&contract_id), 400);
+
+        let milestones = client.get_milestones(&id);
+        assert!(milestones.get(0).unwrap().approved);
+        assert!(milestones.get(0).unwrap().claimed);
+        assert!(!milestones.get(1).unwrap().approved);
+        let summary = client.get_escrow_summary(&id);
+        assert_eq!(summary.released_amount, 600);
+        assert_eq!(summary.remaining_amount, 400);
+        assert_eq!(summary.approved_milestones, 1);
+        assert_eq!(summary.claimed_milestones, 1);
+        assert_eq!(summary.status, EscrowStatus::Pending);
+
+        // Client approves milestone 1; claiming it fully releases the escrow.
+        client.approve_milestone(&id, &1, &from);
+        client.claim_milestone(&id, &1, &to);
+        assert_eq!(token.balance(&to), 1_000);
+        assert_eq!(token.balance(&contract_id), 0);
+        assert_eq!(client.get_escrow(&id).status, EscrowStatus::Released);
+        assert_eq!(client.get_escrow_summary(&id).released_amount, 1_000);
+        assert_eq!(client.get_escrow_summary(&id).remaining_amount, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Unauthorized")]
+    fn test_milestone_escrow_approve_unauthorized_panics() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        let agent = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        env.mock_all_auths();
+        let token_id = create_token(&env, &admin, &from, 10_000);
+
+        let id = create_milestone_fixture(&env, &client, &token_id, &from, &to, &agent);
+        client.approve_milestone(&id, &0, &stranger);
+    }
+
+    #[test]
+    #[should_panic(expected = "Unauthorized")]
+    fn test_milestone_escrow_claim_unauthorized_panics() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        let agent = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        env.mock_all_auths();
+        let token_id = create_token(&env, &admin, &from, 10_000);
+
+        let id = create_milestone_fixture(&env, &client, &token_id, &from, &to, &agent);
+        client.approve_milestone(&id, &0, &agent);
+        client.claim_milestone(&id, &0, &stranger);
+    }
+
+    #[test]
+    #[should_panic(expected = "milestone not approved")]
+    fn test_milestone_escrow_claim_before_approval_panics() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        let agent = Address::generate(&env);
+        env.mock_all_auths();
+        let token_id = create_token(&env, &admin, &from, 10_000);
+
+        let id = create_milestone_fixture(&env, &client, &token_id, &from, &to, &agent);
+        client.claim_milestone(&id, &0, &to);
+    }
+
+    #[test]
+    #[should_panic(expected = "milestone already claimed")]
+    fn test_milestone_escrow_claim_twice_panics() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        let agent = Address::generate(&env);
+        env.mock_all_auths();
+        let token_id = create_token(&env, &admin, &from, 10_000);
+
+        let id = create_milestone_fixture(&env, &client, &token_id, &from, &to, &agent);
+        client.approve_milestone(&id, &0, &agent);
+        client.claim_milestone(&id, &0, &to);
+        client.claim_milestone(&id, &0, &to);
+    }
+
+    #[test]
+    fn test_milestone_escrow_cancel_refunds_unclaimed_only() {
+        let env = Env::default();
+        let (contract_id, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        let agent = Address::generate(&env);
+        env.mock_all_auths();
+        let token_id = create_token(&env, &admin, &from, 10_000);
+        let token = token::Client::new(&env, &token_id);
+
+        let id = create_milestone_fixture(&env, &client, &token_id, &from, &to, &agent);
+
+        // Milestone 0 is approved and claimed (600 paid out); cancelling the
+        // escrow must refund only the unclaimed 400 back to the payer.
+        client.approve_milestone(&id, &0, &agent);
+        client.claim_milestone(&id, &0, &to);
+        client.cancel_escrow(&id);
+
+        assert_eq!(token.balance(&to), 600);
+        assert_eq!(token.balance(&from), 9_400);
+        assert_eq!(token.balance(&contract_id), 0);
+        assert_eq!(client.get_escrow(&id).status, EscrowStatus::Cancelled);
+        let summary = client.get_escrow_summary(&id);
+        assert_eq!(summary.released_amount, 600);
+        assert_eq!(summary.remaining_amount, 0);
+        assert_eq!(summary.status, EscrowStatus::Cancelled);
+    }
+
+    #[test]
+    #[should_panic(expected = "milestone escrow must be claimed via claim_milestone")]
+    fn test_milestone_escrow_claim_escrow_blocked() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        let agent = Address::generate(&env);
+        env.mock_all_auths();
+        let token_id = create_token(&env, &admin, &from, 10_000);
+
+        let id = create_milestone_fixture(&env, &client, &token_id, &from, &to, &agent);
+        // The generic claim path must not drain a milestone escrow.
+        client.claim_escrow(&id);
+    }
+
+    #[test]
+    #[should_panic(expected = "milestone amounts must sum to the deposit")]
+    fn test_milestone_escrow_amounts_must_sum_to_deposit() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        let agent = Address::generate(&env);
+        env.mock_all_auths();
+        let token_id = create_token(&env, &admin, &from, 10_000);
+
+        let m0 = Milestone {
+            id: 0,
+            description: Symbol::new(&env, "a"),
+            amount: 600,
+            approved: false,
+            claimed: false,
+            approval_deadline_ledger: 0,
+        };
+        let m1 = Milestone {
+            id: 1,
+            description: Symbol::new(&env, "b"),
+            amount: 400,
+            approved: false,
+            claimed: false,
+            approval_deadline_ledger: 0,
+        };
+        // Milestones sum to 1000 but the deposit is 1500.
+        client.create_milestone_escrow(&token_id, &from, &to, &agent, &vec![&env, m0, m1], &1500);
+    }
+
+    #[test]
+    #[should_panic(expected = "too many milestones")]
+    fn test_milestone_escrow_rejects_more_than_10_milestones() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        let agent = Address::generate(&env);
+        env.mock_all_auths();
+        let token_id = create_token(&env, &admin, &from, 10_000);
+
+        let mut milestones = Vec::new(&env);
+        for i in 0..11u32 {
+            milestones.push_back(Milestone {
+                id: i,
+                description: Symbol::new(&env, "m"),
+                amount: 100,
+                approved: false,
+                claimed: false,
+                approval_deadline_ledger: 0,
+            });
+        }
+        client.create_milestone_escrow(&token_id, &from, &to, &agent, &milestones, &1100);
+    }
+
+    #[test]
+    #[should_panic(expected = "milestone amount must be positive")]
+    fn test_milestone_escrow_zero_amount_milestone_panics() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        let agent = Address::generate(&env);
+        env.mock_all_auths();
+        let token_id = create_token(&env, &admin, &from, 10_000);
+
+        let m0 = Milestone {
+            id: 0,
+            description: Symbol::new(&env, "a"),
+            amount: 0,
+            approved: false,
+            claimed: false,
+            approval_deadline_ledger: 0,
+        };
+        client.create_milestone_escrow(&token_id, &from, &to, &agent, &vec![&env, m0], &1000);
+    }
+
+    #[test]
+    #[should_panic(expected = "agent cannot be the recipient")]
+    fn test_milestone_escrow_agent_cannot_be_recipient() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        env.mock_all_auths();
+        let token_id = create_token(&env, &admin, &from, 10_000);
+
+        let m0 = Milestone {
+            id: 0,
+            description: Symbol::new(&env, "a"),
+            amount: 1000,
+            approved: false,
+            claimed: false,
+            approval_deadline_ledger: 0,
+        };
+        // Agent == recipient would let the recipient self-approve.
+        client.create_milestone_escrow(&token_id, &from, &to, &to, &vec![&env, m0], &1000);
+    }
+
+    #[test]
+    #[should_panic(expected = "approval deadline passed")]
+    fn test_milestone_escrow_approval_deadline_enforced() {
+        let env = Env::default();
+        let (_, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        let agent = Address::generate(&env);
+        env.mock_all_auths();
+        let token_id = create_token(&env, &admin, &from, 10_000);
+
+        let deadline = env.ledger().sequence() + 10;
+        let m0 = Milestone {
+            id: 0,
+            description: Symbol::new(&env, "a"),
+            amount: 1000,
+            approved: false,
+            claimed: false,
+            approval_deadline_ledger: deadline,
+        };
+        let id =
+            client.create_milestone_escrow(&token_id, &from, &to, &agent, &vec![&env, m0], &1000);
+        advance(&env, deadline + 1);
+        client.approve_milestone(&id, &0, &agent);
+    }
+
+    #[test]
+    fn test_milestone_escrow_emits_events() {
+        let env = Env::default();
+        let (contract_id, client) = deploy(&env);
+        let admin = client.get_admin();
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+        let agent = Address::generate(&env);
+        env.mock_all_auths();
+        let token_id = create_token(&env, &admin, &from, 10_000);
+
+        let id = create_milestone_fixture(&env, &client, &token_id, &from, &to, &agent);
+        // The event recorder only surfaces events from the most recent
+        // invocation, so each event is asserted right after its call.
+        let events = env.events().all().filter_by_contract(&contract_id);
+        assert_eq!(
+            events,
+            vec![&env, (
+                contract_id.clone(),
+                (Symbol::new(&env, "milestone_escrow_created"), id).into_val(&env),
+                (2u32).into_val(&env),
+            )]
+        );
+
+        client.approve_milestone(&id, &0, &agent);
+        let events = env.events().all().filter_by_contract(&contract_id);
+        assert_eq!(
+            events,
+            vec![&env, (
+                contract_id.clone(),
+                (Symbol::new(&env, "milestone_approved"), id).into_val(&env),
+                (0u32).into_val(&env),
+            )]
+        );
+
+        client.claim_milestone(&id, &0, &to);
+        let events = env.events().all().filter_by_contract(&contract_id);
+        assert_eq!(
+            events,
+            vec![&env, (
+                contract_id.clone(),
+                (Symbol::new(&env, "milestone_claimed"), id, 0u32).into_val(&env),
+                (600i128).into_val(&env),
+            )]
+        );
     }
 
     #[test]
