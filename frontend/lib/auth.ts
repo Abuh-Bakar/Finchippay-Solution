@@ -18,14 +18,18 @@ export function setJwtToken(token: string | null): void {
 
 export function getRefreshToken(): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem("finchippay_refresh_token");
+  // Return a dummy value if the session flag exists, so the app knows to attempt refresh via httpOnly cookie.
+  return localStorage.getItem("finchippay_has_session") ? "true" : null;
 }
 
 export function setRefreshToken(token: string | null): void {
   if (typeof window !== "undefined") {
     if (token) {
-      localStorage.setItem("finchippay_refresh_token", token);
+      localStorage.setItem("finchippay_has_session", "true");
+      // Clean up the insecure token if it exists
+      localStorage.removeItem("finchippay_refresh_token");
     } else {
+      localStorage.removeItem("finchippay_has_session");
       localStorage.removeItem("finchippay_refresh_token");
     }
   }
@@ -34,6 +38,7 @@ export function setRefreshToken(token: string | null): void {
 export function clearJwtToken(): void {
   inMemoryAccessToken = null;
   if (typeof window !== "undefined") {
+    localStorage.removeItem("finchippay_has_session");
     localStorage.removeItem("finchippay_refresh_token");
   }
 }
@@ -49,10 +54,10 @@ async function performRefresh(): Promise<string | null> {
     const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/+$/, "");
     const res = await fetch(`${API_URL}/api/auth/refresh`, {
       method: "POST",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ refreshToken: rToken }),
     });
 
     if (res.ok) {
@@ -199,6 +204,7 @@ export async function revokeSession(sessionId: number | string): Promise<boolean
   try {
     const res = await fetch(`${API_URL}/api/auth/revoke`, {
       method: "POST",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -224,6 +230,7 @@ export async function revokeAllSessions(): Promise<boolean> {
   try {
     const res = await fetch(`${API_URL}/api/auth/revoke`, {
       method: "POST",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),

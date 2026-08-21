@@ -157,12 +157,9 @@ export async function performSEP0010Auth(
     if (signError || !signedXDR) {
       return { token: null, error: signError || "Failed to sign challenge transaction" };
     }
-    const { accessToken, refreshToken } = await verifyAuthChallenge(signedXDR);
+    const { accessToken } = await verifyAuthChallenge(signedXDR);
     setJwtToken(accessToken);
     persistAuthToken(accessToken);
-    if (typeof window !== "undefined" && refreshToken) {
-      localStorage.setItem("finchippay_refresh_token", refreshToken);
-    }
     return { token: accessToken, error: null };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -233,25 +230,25 @@ export async function reEncryptLocalData(): Promise<void> {
 }
 
 export function disconnectWallet(): void {
-  const rToken = typeof window !== "undefined" ? localStorage.getItem("finchippay_refresh_token") : null;
   const aToken = getJwtToken();
 
-  if (rToken || aToken) {
-    const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/+$/, "");
-    fetch(`${API_URL}/api/auth/logout`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(aToken ? { "Authorization": `Bearer ${aToken}` } : {})
-      },
-      body: JSON.stringify({ refreshToken: rToken }),
-    }).catch((err) => {
-      logger.error("Failed to revoke token family on logout", {}, err instanceof Error ? err : undefined);
-    });
-  }
+  const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/+$/, "");
+  fetch(`${API_URL}/api/auth/logout`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(aToken ? { "Authorization": `Bearer ${aToken}` } : {})
+    },
+  }).catch((err) => {
+    logger.error("Failed to revoke token family on logout", {}, err instanceof Error ? err : undefined);
+  });
 
   setJwtToken(null);
   clearAuthToken();
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("finchippay_refresh_token");
+  }
 }
 
 export { isLedgerSupported, signTransactionWithLedger, getLedgerPublicKey, connectLedger, disconnectLedger } from "./ledger";
