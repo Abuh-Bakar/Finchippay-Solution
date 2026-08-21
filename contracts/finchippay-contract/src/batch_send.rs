@@ -7,9 +7,10 @@
 use soroban_sdk::{Address, Env, Symbol, Vec};
 
 use crate::{
-    get_admin, get_token_client, require_initialized, require_not_paused,
-    require_transfer_succeeded, ContractError, DataKey, SwapItem, TipRecord, TokenTotal,
-    VestingSchedule, MAX_BATCH_SIZE, MAX_VESTING_AMOUNT, MAX_VESTING_DURATION_LEDGERS,
+    decrease_locked_balance, get_admin, get_token_client, increase_locked_balance,
+    require_initialized, require_not_paused, require_transfer_succeeded, ContractError, DataKey,
+    SwapItem, TipRecord, TokenTotal, VestingSchedule, MAX_BATCH_SIZE, MAX_VESTING_AMOUNT,
+    MAX_VESTING_DURATION_LEDGERS,
 };
 
 use crate::storage::*;
@@ -300,6 +301,11 @@ pub fn create_vesting(
     let token_client = get_token_client(&env, &token);
     let contract_address = env.current_contract_address();
     require_transfer_succeeded(&env, &token_client, &from, &contract_address, &amount);
+    // The deposited funds are owed to the beneficiary (or returned on revoke),
+    // so they must be counted as locked or the admin rescue/emergency
+    // withdrawal paths could sweep an active vesting schedule. Mirrors the
+    // escrow/stream/multi-sig accounting.
+    increase_locked_balance(&env, &token, amount);
 
     let next_id: u32 = env
         .storage()
@@ -389,6 +395,7 @@ pub fn claim_vesting(env: Env, id: u32, beneficiary: Address) -> i128 {
         .persistent()
         .set(&DataKey::Vesting(id), &vesting);
     bump(&env, &DataKey::Vesting(id));
+    decrease_locked_balance(&env, &vesting.token, claimable);
 
     let token_client = get_token_client(&env, &vesting.token);
     token_client.transfer(&env.current_contract_address(), &beneficiary, &claimable);
@@ -434,6 +441,9 @@ pub fn revoke_vesting(env: Env, id: u32, admin: Address) {
         .persistent()
         .set(&DataKey::Vesting(id), &vesting);
     bump(&env, &DataKey::Vesting(id));
+    // The unclaimed remainder is no longer owed to anyone, so it leaves the
+    // locked pool when it is returned to the funder below.
+    decrease_locked_balance(&env, &vesting.token, unclaimed);
 
     if unclaimed > 0 {
         let token_client = get_token_client(&env, &vesting.token);
