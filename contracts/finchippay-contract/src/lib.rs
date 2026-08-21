@@ -1707,7 +1707,7 @@ impl FinchippayContract {
     ///
     /// A contract with thousands of escrows, streams, and receipts cannot be
     /// swept inside one transaction's resource budget, so each call touches at
-    /// most `min(max_keys, MAX_TTL_BUMP_KEYS)` keys and stores a cursor. Call
+    /// most `min(max_keys, MAX_KEYS_PER_SWEEP)` keys and stores a cursor. Call
     /// repeatedly until the return value is smaller than the requested limit to
     /// finish a full pass; the cursor wraps back to the start after the last
     /// class, so an off-chain job can simply keep calling on a schedule.
@@ -1720,9 +1720,12 @@ impl FinchippayContract {
     /// not swept; they are kept alive by the bumps in the functions that touch
     /// them.
     ///
-    /// Returns the number of keys bumped by this call. Because a single sweep
-    /// item can own up to three keys and the budget is checked per item, the
-    /// return value may exceed `max_keys` by at most two.
+    /// Returns the number of keys bumped by this call. The budget is checked
+    /// per sweep item (an item can own up to three keys, e.g. a receipt), so the
+    /// caller's soft `max_keys` hint may be overshot by at most two keys; the
+    /// hard cap `MAX_KEYS_PER_SWEEP` is never exceeded. That keeps a single
+    /// invocation within Soroban's per-transaction instruction budget while
+    /// still making forward progress for any positive `max_keys`.
     pub fn bump_all_ttls(env: Env, admin: Address, max_keys: u32) -> u32 {
         require_initialized(&env);
         admin.require_auth();
@@ -1733,7 +1736,7 @@ impl FinchippayContract {
         if max_keys == 0 {
             panic!("max_keys must be positive");
         }
-        let limit = max_keys.min(MAX_TTL_BUMP_KEYS);
+        let limit = max_keys.min(MAX_KEYS_PER_SWEEP);
 
         let cursor_key = DataKey::TtlSweepCursor;
         let (mut class_index, mut key_index): (u32, u32) = env
@@ -1752,6 +1755,16 @@ impl FinchippayContract {
             let class_len = ttl_class_len(&env, &class);
 
             while key_index < class_len && bumped < limit {
+                // An item is bumped atomically, so the budget is checked against
+                // its worst-case key count *before* touching it. The soft
+                // `bumped < limit` condition above stops the loop once the
+                // caller's chunk is full; this hard check additionally ensures a
+                // final multi-key item can never push the call past
+                // `MAX_KEYS_PER_SWEEP`, the instruction-budget safety bound.
+                let item_cost = ttl_class_item_key_cost(&class, key_index);
+                if bumped.saturating_add(item_cost) > MAX_KEYS_PER_SWEEP {
+                    break;
+                }
                 bumped = bumped.saturating_add(bump_ttl_class_item(&env, &class, key_index));
                 key_index += 1;
             }
