@@ -17,6 +17,7 @@ import { NETWORK, shortenAddress, PaymentRecord } from "@/lib/stellar";
 import { useWallet } from "@/lib/useWallet";
 import { generateCSV, downloadCSV, generatePDF, downloadPDF, type ExportFormat } from "@/utils/export";
 import { formatAsset, formatDate } from "@/utils/format";
+import { logger } from "@/lib/logger";
 
 const TRANSACTION_FILTERS_STORAGE_KEY = "finchippay:transaction-filters";
 

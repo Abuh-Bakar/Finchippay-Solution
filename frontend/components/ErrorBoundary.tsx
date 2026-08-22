@@ -30,8 +30,9 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     logger.error(
-      { component: this.props.name || "unknown", errorInfo },
       `ErrorBoundary caught an error in ${this.props.name || "component"}`,
+      { component: this.props.name || "unknown" },
+      error,
     );
     // Also emit to console so Sentry's auto-capture picks it up alongside
     // the structured logger entry above.

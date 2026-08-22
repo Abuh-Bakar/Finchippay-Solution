@@ -209,14 +209,14 @@ function TransactionList({
     };
     const onFailed = (e: CustomEvent<FailedTxEventDetail>) => dispatchPending({ type: "REMOVE", payload: e.detail.pendingId });
 
-    window.addEventListener("finchippay:pending-tx", onPending);
-    window.addEventListener("finchippay:resolved-tx", onResolved);
-    window.addEventListener("finchippay:failed-tx", onFailed);
+    window.addEventListener("finchippay:pending-tx", onPending as EventListener);
+    window.addEventListener("finchippay:resolved-tx", onResolved as EventListener);
+    window.addEventListener("finchippay:failed-tx", onFailed as EventListener);
 
     return () => {
-      window.removeEventListener("finchippay:pending-tx", onPending);
-      window.removeEventListener("finchippay:resolved-tx", onResolved);
-      window.removeEventListener("finchippay:failed-tx", onFailed);
+      window.removeEventListener("finchippay:pending-tx", onPending as EventListener);
+      window.removeEventListener("finchippay:resolved-tx", onResolved as EventListener);
+      window.removeEventListener("finchippay:failed-tx", onFailed as EventListener);
     };
   }, [onPaymentsChange]);
 
@@ -320,7 +320,7 @@ function TransactionList({
         }
 
         setError("Could not load transaction history.");
-        logger.error(err);
+        logger.error("Failed to load transaction history.", {}, err instanceof Error ? err : undefined);
       } finally {
         setLoading(false);
         setLoadingMore(false);

@@ -2,12 +2,12 @@
   GENERATED FILE — do not edit by hand.
   Source: shared/errorCodes.js
   Regenerate: node scripts/generate-error-codes-doc.js
-  Generated: 2026-08-11 13:41:41 UTC
+  Generated: 2026-08-21 23:15:25 UTC
 -->
 
 # Error codes
 
-> **Last generated:** 2026-08-11 13:41:41 UTC
+> **Last generated:** 2026-08-21 23:15:25 UTC
 
 Every error Finchippay returns carries a machine-readable code from a single
 catalogue shared by the contract, the API, and the frontend. This document is
@@ -401,4 +401,4 @@ Browser wallet (Freighter) interaction errors: not installed, not connected, rej
 
 ---
 
-*Document auto-generated on 2026-08-11 13:41:41 UTC from [`shared/errorCodes.js`](../shared/errorCodes.js).*
+*Document auto-generated on 2026-08-21 23:15:25 UTC from [`shared/errorCodes.js`](../shared/errorCodes.js).*
