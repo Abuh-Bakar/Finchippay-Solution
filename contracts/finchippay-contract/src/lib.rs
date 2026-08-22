@@ -413,7 +413,8 @@ pub enum EmergencyWithdrawalStatus {
 
 /// A time-delayed, multi-sig-gated emergency token rescue.
 ///
-/// Replaces the instant `rescue_tokens` with a safer flow:
+/// This is the sole funds-rescue path; it replaces the removed instant
+/// `rescue_tokens` entrypoint with a safer flow:
 /// 1. Any admin initiates → locks parameters, records activation ledger.
 /// 2. M-of-N admin signers approve.
 /// 3. After BOTH activation ledger is reached AND threshold met → execute.
@@ -443,8 +444,9 @@ pub struct EmergencyWithdrawal {
 }
 
 // ─── Admin governance ──────────────────────────────────────────────────────────
-// Admin-governed operations (pause, unpause, set_pauser, upgrade,
-// rescue_tokens) are gated by the M-of-N admin signer set configured in
+// Admin-governed operations (pause, unpause, set_pauser, set_admin_signers,
+// upgrade, reconcile_balance) are gated by the M-of-N admin signer set
+// configured in
 // `initialize`. Proposals use the Symbol-based `AdminActionProposal` struct
 // defined below, created via `propose_admin_action` and approved via
 // `approve_admin_action`. The legacy single-`Admin` address is retained only
@@ -532,7 +534,7 @@ pub enum TtlClass {
 pub struct AdminActionProposal {
     /// Auto-incrementing proposal ID.
     pub id: u64,
-    /// Which admin action is proposed (e.g. "pause", "upgrade", "rescue").
+    /// Which admin action is proposed (e.g. "pause", "upgrade", "reconcile_balance").
     pub action_type: Symbol,
     /// Additional data needed to execute the action (function-specific).
     pub action_data: Vec<Val>,
@@ -593,7 +595,7 @@ pub enum DataKey {
     EmergencyWithdrawal(u32),
     /// List of addresses authorised to approve emergency withdrawals and
     /// gated admin actions (pause, unpause, set_pauser, set_admin_signers,
-    /// upgrade, rescue_tokens, reconcile_balance). Configured at `initialize`
+    /// upgrade, reconcile_balance). Configured at `initialize`
     /// and updatable via the `set_admin_signers` admin action.
     AdminSigners,
     /// Number of approvals required from `AdminSigners` for emergency
@@ -1119,10 +1121,9 @@ impl FinchippayContract {
     /// `admin_signers` must be non-empty, contain no duplicates, and have at
     /// most `MAX_ADMIN_SIGNERS` entries. `threshold` must be between 1 and
     /// `admin_signers.len()`. `pause`, `unpause`, `set_pauser`,
-    /// `set_admin_signers`, `upgrade`, `rescue_tokens`, and
-    /// `reconcile_balance` all require `threshold` approvals from this signer
-    /// set (via `propose_admin_action` / `approve_admin_action`) rather than a
-    /// single admin signature.
+    /// `set_admin_signers`, `upgrade`, and `reconcile_balance` all require
+    /// `threshold` approvals from this signer set (via `propose_admin_action` /
+    /// `approve_admin_action`) rather than a single admin signature.
     ///
     /// The first signer is also stored as the legacy single `Admin` address
     /// for read-only convenience (`get_admin`) and for `transfer_admin`; it
@@ -1172,8 +1173,8 @@ impl FinchippayContract {
     /// Transfer the legacy single-admin pointer to `new_admin`. Only the
     /// current legacy admin may call this. This does not change the
     /// `AdminSigners` set used to gate `pause`/`unpause`/`set_pauser`/
-    /// `set_admin_signers`/`upgrade`/`rescue_tokens` — propose a
-    /// `set_admin_signers` admin action for that.
+    /// `set_admin_signers`/`upgrade` — propose a `set_admin_signers` admin
+    /// action for that.
     pub fn transfer_admin(env: Env, current_admin: Address, new_admin: Address) {
         current_admin.require_auth();
         let stored = get_admin(&env);
@@ -1189,14 +1190,14 @@ impl FinchippayContract {
     /// Return the legacy single-admin address (the first signer passed to
     /// `initialize`, or whoever `transfer_admin` last set). Kept for
     /// backward compatibility; carries no authority over `pause`, `unpause`,
-    /// `set_pauser`, `upgrade`, or `rescue_tokens` — use
-    /// `get_admin_signers` for the set that actually governs those.
+    /// `set_pauser`, or `upgrade` — use `get_admin_signers` for the set that
+    /// actually governs those.
     pub fn get_admin(env: Env) -> Address {
         get_admin(&env)
     }
 
     /// Return the current admin signer set that governs `pause`, `unpause`,
-    /// `set_pauser`, `upgrade`, `rescue_tokens`, and `reconcile_balance`.
+    /// `set_pauser`, `upgrade`, and `reconcile_balance`.
     pub fn get_admin_signers(env: Env) -> Vec<Address> {
         get_admin_signers(&env)
     }
@@ -1279,8 +1280,8 @@ impl FinchippayContract {
         action_type: Symbol,
         action_data: Vec<Val>,
     ) -> u64 {
-        // The `rescue_tokens` admin action transfers funds, so the whole
-        // propose (and any auto-execution) is non-reentrant.
+        // Keep the whole propose (and any threshold-1 auto-execution)
+        // non-reentrant; admin actions mutate contract state.
         let _guard = ReentrancyGuard::acquire(&env);
         require_initialized(&env);
         proposer.require_auth();
@@ -1505,45 +1506,6 @@ impl FinchippayContract {
             env.events().publish(
                 (Symbol::new(env, "upgraded"),),
                 (current_ver + 1, wasm_hash, layout_version),
-            );
-        } else if action == &Symbol::new(env, "rescue_tokens") {
-            // The rescue admin action moves funds, so it is blocked while the
-            // circuit breaker is engaged. (Governance actions that must stay
-            // callable while paused — `unpause` in particular — are not gated
-            // here; only the fund-moving branch is.)
-            require_not_paused(env);
-            let token_address: Address = proposal
-                .action_data
-                .get(0)
-                .unwrap()
-                .try_into_val(env)
-                .expect("invalid rescue_tokens payload");
-            let to: Address = proposal
-                .action_data
-                .get(1)
-                .unwrap()
-                .try_into_val(env)
-                .expect("invalid rescue_tokens payload");
-            let amount: i128 = proposal
-                .action_data
-                .get(2)
-                .unwrap()
-                .try_into_val(env)
-                .expect("invalid rescue_tokens payload");
-            if amount <= 0 {
-                panic!("amount must be positive");
-            }
-            let token = get_token_client(env, &token_address);
-            let balance = token.balance(&env.current_contract_address());
-            let locked = locked_balance(env, &token_address);
-            let unlocked = balance.checked_sub(locked).expect("overflow");
-            if amount > unlocked {
-                panic!("insufficient unlocked balance");
-            }
-            contract_transfer_out(env, &token, &to, &amount);
-            env.events().publish(
-                (Symbol::new(env, "rescue_tokens"),),
-                (token_address, amount, to),
             );
         } else if action == &Symbol::new(env, "reconcile_balance") {
             let token_address: Address = proposal
@@ -1896,51 +1858,6 @@ impl FinchippayContract {
             ledger_write_bytes: 600 + (signers_count * 100),
             estimated_stroops: 8_000 + (count_i128 * 2_000),
         }
-    }
-
-    /// Admin: rescue tokens accidentally sent directly to the contract address.
-    /// Since all legitimate funds are tracked via escrow/stream/multisig IDs,
-    /// any unbounded tokens held by the contract can be safely swept by the admin
-    /// to a designated address. Only the admin may call this.
-    ///
-    /// # DEPRECATED
-    /// DEPRECATED: This function performs an instant transfer without time
-    /// delay or multi-sig approval, creating a single-point-of-failure risk.
-    /// Use `initiate_emergency_withdrawal` → `approve_emergency_withdrawal` →
-    /// `execute_emergency_withdrawal` instead. Will be removed in v4.0.
-    pub fn rescue_tokens(
-        env: Env,
-        admin: Address,
-        token_address: Address,
-        amount: i128,
-        to: Address,
-    ) {
-        let _guard = ReentrancyGuard::acquire(&env);
-        // The circuit breaker must also freeze this legacy rescue path: even
-        // though it is admin-gated, it is still a value-transferring entry
-        // point, so it must not move funds while the contract is paused.
-        require_not_paused(&env);
-        admin.require_auth();
-        let stored = get_admin(&env);
-        if admin != stored {
-            panic!("Unauthorized");
-        }
-        if amount <= 0 {
-            panic!("amount must be positive");
-        }
-        let token = get_token_client(&env, &token_address);
-        let balance = token.balance(&env.current_contract_address());
-        let locked = locked_balance(&env, &token_address);
-        let unlocked = balance.checked_sub(locked).expect("overflow");
-        if amount > unlocked {
-            panic!("insufficient unlocked balance");
-        }
-        contract_transfer_out(&env, &token, &to, &amount);
-
-        env.events().publish(
-            (Symbol::new(&env, "rescue_tokens"),),
-            (token_address, amount, to),
-        );
     }
 
     // ─── Emergency withdrawal (time-delayed, multi-sig) ────────────────────────
@@ -4777,7 +4694,8 @@ mod tests {
     }
 
     #[test]
-    fn test_rescue_tokens_emits_rescue_tokens_event() {
+    #[should_panic(expected = "unknown admin action")]
+    fn test_rescue_tokens_admin_action_rejected() {
         let env = Env::default();
         let (contract_id, client) = deploy(&env);
         let admin = client.get_admin();
@@ -4792,37 +4710,12 @@ mod tests {
                 400i128.into_val(&env),
             ],
         );
+
+        // `rescue_tokens` is no longer a supported admin action. Proposing it
+        // must be rejected, steering callers to the time-delayed
+        // `initiate_emergency_withdrawal` → `approve_emergency_withdrawal` →
+        // `execute_emergency_withdrawal` flow instead.
         client.propose_admin_action(&admin, &Symbol::new(&env, "rescue_tokens"), &data);
-
-        // Threshold-1 deploy auto-executes the rescue on propose. The test host
-        // clears the event buffer at the start of every top-level invocation, so
-        // inspect the proposal's events before any further contract call.
-        let events = env.events().all().filter_by_contract(&contract_id);
-        assert_eq!(
-            events,
-            vec![
-                &env,
-                (
-                    contract_id.clone(),
-                    (Symbol::new(&env, "admin_action_proposed"),).into_val(&env),
-                    (1u64, Symbol::new(&env, "rescue_tokens"), admin.clone()).into_val(&env),
-                ),
-                (
-                    contract_id.clone(),
-                    (Symbol::new(&env, "admin_action_approved"),).into_val(&env),
-                    (1u64, admin.clone(), 1u32, 1u32).into_val(&env),
-                ),
-                (
-                    contract_id.clone(),
-                    (Symbol::new(&env, "rescue_tokens"),).into_val(&env),
-                    (token_id.clone(), 400i128, to.clone()).into_val(&env),
-                ),
-            ]
-        );
-
-        // Funds must have moved to the recipient.
-        let sac = token::StellarAssetClient::new(&env, &token_id);
-        assert_eq!(sac.balance(&to), 400);
     }
     #[test]
     fn test_pagination_bounds() {
@@ -5068,32 +4961,6 @@ mod tests {
 
     // ── Vesting locked-balance accounting (#692) ──────────────────────────
 
-    /// A vesting deposit must be counted as locked so the single-admin
-    /// `rescue_tokens` path cannot sweep an active schedule.
-    #[test]
-    #[should_panic(expected = "insufficient unlocked balance")]
-    fn test_vesting_funds_are_locked_against_rescue() {
-        let env = Env::default();
-        let (_, client) = deploy(&env);
-        let admin = client.get_admin();
-        let from = Address::generate(&env);
-        let beneficiary = Address::generate(&env);
-        let to = Address::generate(&env);
-        env.mock_all_auths();
-
-        let token_id = create_token(&env, &admin, &from, 10_000);
-        let amount = 1_000i128;
-        let start = env.ledger().sequence();
-        let cliff = start + 10;
-        let end = start + 30;
-
-        client.create_vesting(&token_id, &from, &beneficiary, &amount, &cliff, &end);
-
-        // The entire on-chain balance is the vesting deposit, so every unit is
-        // locked: rescuing any of it must fail.
-        client.rescue_tokens(&admin, &token_id, &amount, &to);
-    }
-
     /// The emergency-withdrawal path reads the same locked balance, so it must
     /// also refuse to initiate a withdrawal of vesting funds.
     #[test]
@@ -5119,10 +4986,10 @@ mod tests {
     }
 
     /// While a vesting is active only genuinely unlocked funds (e.g. a direct
-    /// donation to the contract address) are rescueable; the vesting deposit
-    /// itself stays protected.
+    /// donation to the contract address) are withdrawable via the emergency
+    /// withdrawal flow; the vesting deposit itself stays protected.
     #[test]
-    fn test_vesting_rescue_can_sweep_only_unlocked_funds() {
+    fn test_vesting_emergency_withdrawal_can_sweep_only_unlocked_funds() {
         let env = Env::default();
         let (contract_id, client) = deploy(&env);
         let admin = client.get_admin();
@@ -5140,16 +5007,21 @@ mod tests {
         client.create_vesting(&token_id, &from, &beneficiary, &amount, &cliff, &end);
 
         // 300 untracked tokens land directly on the contract (stray transfer).
-        // Only these are unlocked and therefore rescueable.
+        // Only these are unlocked and therefore withdrawable via the emergency
+        // withdrawal flow.
         let sac = token::StellarAssetClient::new(&env, &token_id);
         sac.mint(&contract_id, &300);
 
-        client.rescue_tokens(&admin, &token_id, &300, &to);
+        let wid = client.initiate_emergency_withdrawal(&admin, &token_id, &300, &to);
+        let w = client.get_emergency_withdrawal(&wid);
+        advance(&env, w.activation_ledger);
+        client.approve_emergency_withdrawal(&wid, &admin);
         assert_eq!(sac.balance(&to), 300);
     }
 
     /// After a full claim the locked balance must drop to zero so the claimed
-    /// amount is no longer protected from (and no longer blocks) rescues.
+    /// amount is no longer protected from (and no longer blocks) emergency
+    /// withdrawals.
     #[test]
     fn test_vesting_claim_releases_locked_balance() {
         let env = Env::default();
@@ -5174,15 +5046,21 @@ mod tests {
         assert_eq!(claimed, amount);
 
         // Donate 300 untracked tokens; with the locked balance now zero these
-        // are the only funds on the contract and must be rescueable.
+        // are the only funds on the contract and must be withdrawable via the
+        // emergency withdrawal flow.
         let sac = token::StellarAssetClient::new(&env, &token_id);
         sac.mint(&contract_id, &300);
-        client.rescue_tokens(&admin, &token_id, &300, &to);
+
+        let wid = client.initiate_emergency_withdrawal(&admin, &token_id, &300, &to);
+        let w = client.get_emergency_withdrawal(&wid);
+        advance(&env, w.activation_ledger);
+        client.approve_emergency_withdrawal(&wid, &admin);
         assert_eq!(sac.balance(&to), 300);
     }
 
     /// After a revoke the unclaimed remainder is returned to the funder and
-    /// must leave the locked pool, so post-revoke donations stay rescueable.
+    /// must leave the locked pool, so post-revoke donations stay withdrawable
+    /// via the emergency withdrawal flow.
     #[test]
     fn test_vesting_revoke_releases_locked_balance() {
         let env = Env::default();
@@ -5205,10 +5083,14 @@ mod tests {
         client.revoke_vesting(&id, &admin);
 
         // Donate 300 untracked tokens; with the locked balance now zero these
-        // must be rescueable.
+        // must be withdrawable via the emergency withdrawal flow.
         let sac = token::StellarAssetClient::new(&env, &token_id);
         sac.mint(&contract_id, &300);
-        client.rescue_tokens(&admin, &token_id, &300, &to);
+
+        let wid = client.initiate_emergency_withdrawal(&admin, &token_id, &300, &to);
+        let w = client.get_emergency_withdrawal(&wid);
+        advance(&env, w.activation_ledger);
+        client.approve_emergency_withdrawal(&wid, &admin);
         assert_eq!(sac.balance(&to), 300);
     }
 
