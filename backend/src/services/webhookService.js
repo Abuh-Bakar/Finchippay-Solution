@@ -402,7 +402,7 @@ async function writeToDeadLetterQueue(deliveryId, webhook, payload, errorMsg, re
     await knex("dead_letter_queue").insert({
       id: crypto.randomUUID(),
       delivery_id: deliveryId,
-      webhook_id: resolvedWebhook.id,
+      webhook_id: webhook.id,
       payload: typeof payload === "string" ? payload : JSON.stringify(payload),
       retry_timestamps: JSON.stringify(retryTimestamps),
       final_error: errorMsg,
