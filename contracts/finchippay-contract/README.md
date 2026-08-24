@@ -16,7 +16,7 @@ Soroban smart contract for the **Finchippay-Solution** platform on Stellar.
 | **Streaming** | `open_stream`, `claim_stream`, `top_up_stream`, `close_stream`, `reject_stream`, `transfer_stream`, `get_stream`, `get_claimable` |
 | **Multi-sig** | `create_multisig`, `approve_multisig`, `cancel_multisig`, `timeout_multisig`, `get_multisig` |
 | **Batch** | `batch_send` |
-| **Admin** | `initialize`, `transfer_admin`, `get_admin`, `pause`, `unpause`, `is_paused`, `set_pauser`, `get_pauser`, `upgrade`, `get_version`, `rescue_tokens` |
+| **Admin** | `initialize`, `transfer_admin`, `get_admin`, `pause`, `unpause`, `is_paused`, `set_pauser`, `get_pauser`, `upgrade`, `get_version` |
 | **Diagnostics** | `get_contract_stats`, `get_escrow_count`, `get_stream_count`, `get_multisig_count` |
 
 ## Streaming Payments
@@ -71,7 +71,8 @@ transfers) are fully supported: the cached `LastContractBalance` matches the
 real on-chain balance, and every deposit/claim settles exactly.
 
 **Fee-on-transfer / taxed / deflationary tokens** (where `transfer` moves
-*less* than `amount` into the recipient) are **not** supported for deposits:
+*less* than `amount` into the recipient) are supported by the measured contract
+swap entry points and remain rejected by other deposit-style flows:
 the phantom-deposit check in `require_transfer_succeeded` compares the actual
 balance deltas and rejects the operation (`TransferFailed`) rather than locking
 a balance that never fully arrived. This is deliberate — it guarantees **no
@@ -138,7 +139,6 @@ bash ../../scripts/deploy-contract.sh
 | `(stream_reject, id)` | `(recipient, refund)` | `reject_stream` |
 | `(stream_transfer, id)` | `(old_recipient, new_recipient)` | `transfer_stream` |
 | `(escrow_claim_partial, id)` | `(to, claim_amount, remaining)` | `claim_escrow_partial` |
-| `(rescue_tokens,)` | `(token, amount, to)` | `rescue_tokens` |
 | `(pauser_set,)` | `pauser: Address` | `set_pauser` |
 | `(batch_send, from)` | `count: u32` | `batch_send` |
 | `(paused,)` | `()` | `pause` |

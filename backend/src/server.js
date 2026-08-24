@@ -10,6 +10,10 @@
 // set in .env is visible when the OpenTelemetry SDK initialises.
 require("dotenv").config();
 
+// Docker secrets (JWT_SECRET_FILE, DATABASE_URL_FILE, etc.) must be resolved
+// into plain env vars before any other module reads them.
+require("./config/dockerSecrets");
+
 // ─── OpenTelemetry tracing (must load before Express/HTTP imports) ────────────
 // Auto-instrumentation hooks into Node's module loader via require-in-the-middle,
 // so this must be required before express, http, etc. are imported.
@@ -57,7 +61,7 @@ const eventIndexer = require("./services/eventIndexer");
 const {
   startRetryWorker,
   closeAllStreams: closeWebhookStreams,
-} = require("./services/webhookSubscriptionService");
+} = require("./services/webhookService");
 const logger = require("./utils/logger");
 const { validateEnv, parseAllowedOrigins } = require("./config/validateEnv");
 const { requireJsonContentType } = require("./middleware/bodyParsing");
@@ -76,14 +80,7 @@ const { requestIdMiddleware } = require("./middleware/requestId");
 const traceContextMiddleware = require("./middleware/tracing");
 const crypto = require("crypto");
 
-const { ApolloServer } = require("@apollo/server");
-const { expressMiddleware } = require("@as-integrations/express4");
-const {
-  ApolloServerPluginLandingPageLocalDefault,
-  ApolloServerPluginLandingPageDisabled,
-} = require("@apollo/server/plugin/landingPage/default");
-const typeDefs = require("./graphql/schema");
-const resolvers = require("./graphql/resolvers");
+const { mountGraphQL } = require("./graphql");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -323,6 +320,12 @@ app.use("/api/v1/tokens", tokensRoutes);
 app.use("/federation", federationRoutes);
 app.use("/metrics", metricsRoutes);
 
+// ─── GraphQL ───────────────────────────────────────────────────────────────────
+// Mounted at module scope (not inside the require.main guard below) so the
+// endpoint exists on the exported `app` for both production startup and
+// tests that `require("../src/server")` directly.
+mountGraphQL(app);
+
 // ─── API Documentation ─────────────────────────────────────────────────────────
 
 app.use(
@@ -476,47 +479,6 @@ if (require.main === module) {
     // Start scheduled transaction executor and data retention cron
     require("./services/scheduledExecutor").start();
     require("./services/dataRetentionService").startRetentionCron();
-
-    const apolloServer = new ApolloServer({
-      typeDefs,
-      resolvers,
-      introspection: process.env.NODE_ENV !== "production",
-      plugins: [
-        process.env.NODE_ENV !== "production"
-          ? ApolloServerPluginLandingPageLocalDefault({ footer: false })
-          : ApolloServerPluginLandingPageDisabled(),
-      ],
-    });
-
-    await apolloServer.start();
-    app.use(
-      "/api/graphql",
-      express.json(),
-      expressMiddleware(apolloServer, {
-        context: async ({ req }) => {
-          let user = null;
-          const authHeader = req.headers.authorization;
-          if (authHeader && authHeader.startsWith("Bearer ")) {
-            try {
-              const token = authHeader.split(" ")[1];
-              const jwt = require("jsonwebtoken");
-              const jwtSecret = process.env.JWT_SECRET || null;
-              if (!jwtSecret) {
-                // JWT_SECRET is not configured — skip token decoding
-                return { user: null };
-              }
-              const decoded = jwt.verify(token, jwtSecret);
-              if (decoded.publicKey && /^G[A-Z0-9]{55}$/.test(decoded.publicKey)) {
-                user = decoded;
-              }
-            } catch {
-              // invalid token — context.user stays null
-            }
-          }
-          return { user };
-        },
-      }),
-    );
 
     const server = app.listen(PORT, async () => {
       logger.info(
