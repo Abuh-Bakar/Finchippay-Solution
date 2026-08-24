@@ -1217,6 +1217,43 @@ fn test_create_vesting() {
 }
 
 #[test]
+fn test_create_vesting_rejects_current_or_past_end_ledger() {
+    let env = Env::default();
+    let (_, client) = deploy(&env);
+    let admin = client.get_admin();
+    let funder = Address::generate(&env);
+    let beneficiary = Address::generate(&env);
+    env.mock_all_auths();
+
+    let token_id = create_token(&env, &admin, &funder, 10_000);
+    advance_ledger(&env, 100);
+    let cliff = 50u32;
+    let current_end = env.ledger().sequence();
+    let past_end = current_end - 1;
+
+    assert!(client
+        .try_create_vesting(
+            &token_id,
+            &funder,
+            &beneficiary,
+            &5_000,
+            &cliff,
+            &current_end,
+        )
+        .is_err());
+    assert!(client
+        .try_create_vesting(
+            &token_id,
+            &funder,
+            &beneficiary,
+            &5_000,
+            &cliff,
+            &past_end,
+        )
+        .is_err());
+}
+
+#[test]
 fn test_claim_vesting_after_cliff() {
     let env = Env::default();
     let (_, client) = deploy(&env);
