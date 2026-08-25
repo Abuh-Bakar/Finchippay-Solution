@@ -13,6 +13,7 @@ import { apiClient, type Tip as TipRecord, type TipStats as TipsStats } from "@/
 import { logger } from "@/lib/logger";
 import { getContractTipTotal, getContractTipCount, CONTRACT_ID } from "@/lib/stellar";
 import { formatXLM, shortenAddress, formatUSD, formatStroopsToXLM } from "@/utils/format";
+import { logger } from "@/lib/logger";
 
 interface CreatorTipsDashboardProps {
   publicKey: string;

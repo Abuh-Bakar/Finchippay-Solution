@@ -238,7 +238,7 @@ export interface PaymentRecord {
   /** Unique operation ID assigned by Horizon. */
   id: string;
   /** Whether this payment was sent or received by the queried account. */
-  type: "sent" | "received" | "merge";
+  type: "sent" | "received" | "merge" | "payment";
   /** Whether this payment was sent or received by the queried account. */
   amount: string;
   /** Asset code, e.g. `"XLM"` */
@@ -251,8 +251,12 @@ export interface PaymentRecord {
   memo?: string;
   /** ISO 8601 timestamp of when the operation was created. */
   createdAt: string;
+  /** ISO 8601 alias for createdAt (used in tests and search). */
+  timestamp?: string;
   /** Hash of the parent transaction. */
   transactionHash: string;
+  /** Alias for transactionHash (used in search and UI components). */
+  hash: string;
   /** Horizon paging token used for cursor-based pagination. */
   pagingToken?: string;
   /** Category of the transaction. */
@@ -1024,7 +1028,9 @@ export async function getPaymentHistory(
         to: payment.to,
         memo,
         createdAt: payment.created_at,
+        timestamp: payment.created_at,
         transactionHash: payment.transaction_hash,
+        hash: payment.transaction_hash,
         pagingToken: payment.paging_token,
         category: TransactionCategory.Payment,
       };
@@ -1043,7 +1049,9 @@ export async function getPaymentHistory(
         from: merge.account || merge.source_account, // Handle potential variations in property names
         to: merge.into, // The destination account
         createdAt: merge.created_at,
+        timestamp: merge.created_at,
         transactionHash: merge.transaction_hash,
+        hash: merge.transaction_hash,
         pagingToken: merge.paging_token,
         category: TransactionCategory.Merge,
       };
@@ -1105,7 +1113,9 @@ export async function fetchAllPayments(
         from: payment.from,
         to: payment.to,
         createdAt: payment.created_at,
+        timestamp: payment.created_at,
         transactionHash: payment.transaction_hash,
+        hash: payment.transaction_hash,
         pagingToken: payment.paging_token,
         category: TransactionCategory.Payment,
       });
@@ -1437,7 +1447,9 @@ export function streamPayments(
         to: payment.to,
         memo,
         createdAt: payment.created_at,
+        timestamp: payment.created_at,
         transactionHash: payment.transaction_hash,
+        hash: payment.transaction_hash,
         pagingToken: payment.paging_token,
         category: TransactionCategory.Payment,
       };

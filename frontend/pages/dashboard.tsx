@@ -508,7 +508,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
 
       setSpendingData(months);
     } catch (err) {
-      logger.error("Failed to fetch spending history:", err);
+      logger.error("Failed to fetch spending history:", {}, err instanceof Error ? err : undefined);
     } finally {
       setSpendingLoading(false);
     }
@@ -521,7 +521,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
       const history = await getRecentPaymentsForSparkline(publicKey, 10);
       setSparklineData(history.map(h => parseFloat(h.amount)));
     } catch (err) {
-      logger.error("Failed to fetch sparkline data:", err);
+      logger.error("Failed to fetch sparkline data:", {}, err instanceof Error ? err : undefined);
     } finally {
       setSparklineLoading(false);
     }
@@ -560,7 +560,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
       });
       setThirtyDayData(days);
     } catch (err) {
-      logger.error("Failed to fetch 30-day volume:", err);
+      logger.error("Failed to fetch 30-day volume:", {}, err instanceof Error ? err : undefined);
     } finally {
       setThirtyDayLoading(false);
     }
@@ -868,7 +868,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
           badge: '/favicon.svg',
         });
       } catch (err) {
-        logger.error('Test notification failed:', err);
+        logger.error('Test notification failed:', {}, err instanceof Error ? err : undefined);
       }
     }
   };
@@ -898,7 +898,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
                   badge: '/favicon.svg',
                 });
               } catch (err) {
-                logger.error('showNotification failed:', err);
+                logger.error('showNotification failed:', {}, err instanceof Error ? err : undefined);
               }
             } else {
               // Page is visible — in-app bubble is less intrusive.
@@ -920,7 +920,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
         setIncomingPayment(payment);
       },
       (error) => {
-        logger.error('Dashboard payment stream error:', error);
+        logger.error('Dashboard payment stream error:', {}, error instanceof Error ? error : undefined);
       }
     );
 
