@@ -2,11 +2,10 @@
  * lib/sdk-instance.ts
  * Type-safe SDK client instance for Finchippay API calls.
  *
- * Provides a centralized, authenticated SDK client that components and hooks
- * can import. Abstracts away token management and base URL configuration.
+ * Re-exports the central apiClient instance from @/lib/api dogfooding @finchippay/sdk.
  */
 
-import { apiFetch } from "./api";
+import { apiClient } from "./api";
 
 interface SdkConfig {
   baseUrl: string;
@@ -68,5 +67,5 @@ export const sdk = new FinchippaySdk({ baseUrl: API_URL ?? "" });
 
 /** Initialize SDK authentication from stored token. */
 export function initSdkAuth(): void {
-  // Stub: loads token from localStorage and sets on sdk instance
+  // Authentication is dynamically resolved via ensureAccessToken() in apiClient
 }
