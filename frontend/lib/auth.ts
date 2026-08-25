@@ -161,34 +161,18 @@ export async function getAccessToken(): Promise<string | null> {
   return ensureAccessToken();
 }
 
-export interface SessionInfo {
-  id: number;
-  publicKey: string;
-  deviceInfo?: string;
-  ipAddress?: string;
-  createdAt: string;
-  lastUsedAt?: string;
-  expiresAt: string;
-}
+export type { SessionInfo } from "@finchippay/sdk";
 
 /**
  * Get active sessions for current user
  */
-export async function getSessions(): Promise<SessionInfo[]> {
+export async function getSessions(): Promise<import("@finchippay/sdk").SessionInfo[]> {
   const token = await ensureAccessToken();
   if (!token) return [];
 
-  const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/+$/, "");
   try {
-    const res = await fetch(`${API_URL}/api/auth/sessions`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-    if (res.ok) {
-      const data = await res.json();
-      return data.sessions || [];
-    }
+    const { apiClient } = await import("./api");
+    return await apiClient.auth.getSessions();
   } catch (err) {
     logger.error("Failed to fetch sessions", {}, err instanceof Error ? err : undefined);
   }
@@ -200,7 +184,8 @@ export async function getSessions(): Promise<SessionInfo[]> {
  */
 export async function revokeSession(sessionId: number | string): Promise<boolean> {
   const token = await ensureAccessToken();
-  const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/+$/, "");
+  if (!token) return false;
+
   try {
     const res = await fetch(`${API_URL}/api/auth/revoke`, {
       method: "POST",
@@ -226,7 +211,8 @@ export async function revokeSession(sessionId: number | string): Promise<boolean
  */
 export async function revokeAllSessions(): Promise<boolean> {
   const token = await ensureAccessToken();
-  const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/+$/, "");
+  if (!token) return false;
+
   try {
     const res = await fetch(`${API_URL}/api/auth/revoke`, {
       method: "POST",
