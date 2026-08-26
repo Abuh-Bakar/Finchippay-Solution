@@ -22,6 +22,8 @@ const {
   formatPaginatedResponse,
 } = require("../utils/paginate");
 const { verifyJWT } = require("../middleware/auth");
+const { sensitiveLimiter } = require("../middleware/rateLimit");
+const { userLimiter } = require("../middleware/userRateLimit");
 
 /**
  * Restrict scheduled-transaction routes to the authenticated account holder.
@@ -74,7 +76,7 @@ async function requireScheduleOwner(req, res, next) {
  * The owner is derived from the authenticated user's JWT.
  * If publicKey is provided, it must match the authenticated user's publicKey.
  */
-router.post("/", verifyJWT, validate(scheduleTransactionSchema), async (req, res, next) => {
+router.post("/", sensitiveLimiter, userLimiter, verifyJWT, validate(scheduleTransactionSchema), async (req, res, next) => {
   try {
     const { signedXDR, submitAt, publicKey } = req.validated;
     if (publicKey && publicKey !== req.user.publicKey) {
@@ -102,7 +104,7 @@ router.post("/", verifyJWT, validate(scheduleTransactionSchema), async (req, res
  * Validation: the id comes from req.validated (idParamSchema enforces a
  * non-empty string). Service treats it as opaque.
  */
-router.post("/pending/:id/submit", verifyJWT, validate(idParamSchema, "params"), async (req, res, next) => {
+router.post("/pending/:id/submit", sensitiveLimiter, userLimiter, verifyJWT, validate(idParamSchema, "params"), async (req, res, next) => {
   try {
     const { id } = req.validated;
     const { signedXDR } = req.body;
@@ -139,7 +141,7 @@ router.post("/pending/:id/submit", verifyJWT, validate(idParamSchema, "params"),
  * GET /api/scheduled-transactions/:publicKey/pending
  * Lists pending executions for a given public key with standardized pagination.
  */
-router.get("/:publicKey/pending", verifyJWT, requireOwnSchedule, async (req, res, next) => {
+router.get("/:publicKey/pending", sensitiveLimiter, userLimiter, verifyJWT, requireOwnSchedule, async (req, res, next) => {
   try {
     const rawPending = await scheduledTransactionService.listPendingExecutions(
       req.params.publicKey,
@@ -165,7 +167,7 @@ router.get("/:publicKey/pending", verifyJWT, requireOwnSchedule, async (req, res
  * GET /api/scheduled-transactions/:publicKey
  * Lists all schedules for a given public key with standardized pagination.
  */
-router.get("/:publicKey", verifyJWT, requireOwnSchedule, validate(loosePublicKeyParamSchema, "params"), async (req, res, next) => {
+router.get("/:publicKey", sensitiveLimiter, userLimiter, verifyJWT, requireOwnSchedule, validate(loosePublicKeyParamSchema, "params"), async (req, res, next) => {
   try {
     const { publicKey } = req.validated;
     const rawSchedules = await scheduledTransactionService.listSchedules(publicKey);
@@ -193,7 +195,7 @@ router.get("/:publicKey", verifyJWT, requireOwnSchedule, validate(loosePublicKey
  * Validation: the id comes from req.validated (idParamSchema enforces a
  * non-empty string), so the service can treat it as opaque.
  */
-router.put("/:id", verifyJWT, requireScheduleOwner, validate(idParamSchema, "params"), async (req, res, next) => {
+router.put("/:id", sensitiveLimiter, userLimiter, verifyJWT, requireScheduleOwner, validate(idParamSchema, "params"), async (req, res, next) => {
   try {
     const { id } = req.validated;
     const updated = await scheduledTransactionService.updateSchedule(id, req.body);
@@ -207,7 +209,7 @@ router.put("/:id", verifyJWT, requireScheduleOwner, validate(idParamSchema, "par
  * DELETE /api/scheduled-transactions/:id
  * Deletes or cancels a scheduled transaction by ID.
  */
-router.delete("/:id", verifyJWT, requireScheduleOwner, validate(idParamSchema, "params"), async (req, res, next) => {
+router.delete("/:id", sensitiveLimiter, userLimiter, verifyJWT, requireScheduleOwner, validate(idParamSchema, "params"), async (req, res, next) => {
   try {
     const { id } = req.validated;
     const deleted = await scheduledTransactionService.deleteSchedule(id);
@@ -231,7 +233,7 @@ router.delete("/:id", verifyJWT, requireScheduleOwner, validate(idParamSchema, "
  * Manually trigger immediate execution of a scheduled transaction,
  * regardless of its scheduled time.
  */
-router.post("/:id/execute-now", verifyJWT, requireScheduleOwner, validate(idParamSchema, "params"), async (req, res, next) => {
+router.post("/:id/execute-now", sensitiveLimiter, userLimiter, verifyJWT, requireScheduleOwner, validate(idParamSchema, "params"), async (req, res, next) => {
   try {
     const { id } = req.validated;
     const result = await scheduledExecutor.executeNow(id);
@@ -246,7 +248,7 @@ router.post("/:id/execute-now", verifyJWT, requireScheduleOwner, validate(idPara
  * Get execution history for a scheduled transaction.
  * Shows all execution attempts, retries, and failures.
  */
-router.get("/:id/executions", verifyJWT, requireScheduleOwner, validate(idParamSchema, "params"), async (req, res, next) => {
+router.get("/:id/executions", sensitiveLimiter, userLimiter, verifyJWT, requireScheduleOwner, validate(idParamSchema, "params"), async (req, res, next) => {
   try {
     const { id } = req.validated;
     const executions = await scheduledExecutor.getExecutionHistory(id);

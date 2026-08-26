@@ -36,6 +36,17 @@ jest.mock("@stellar/stellar-sdk", () => {
   };
 });
 
+// Mock rate limiters to avoid hitting limits in tests
+jest.mock("../src/middleware/rateLimit", () => ({
+  sensitiveLimiter: (req, res, next) => next(),
+  strictLimiter: (req, res, next) => next(),
+  authRefreshLimiter: (req, res, next) => next(),
+}));
+
+jest.mock("../src/middleware/userRateLimit", () => ({
+  userLimiter: (req, res, next) => next(),
+}));
+
 // Mock the service before requiring the route
 jest.mock("../src/services/scheduledTransactionService");
 const scheduledTransactionService = require("../src/services/scheduledTransactionService");
