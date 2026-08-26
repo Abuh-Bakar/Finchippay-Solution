@@ -70,6 +70,10 @@ const CreatorTipsDashboard = dynamic(() => import("../components/CreatorTipsDash
 });
 const AIPaymentAssistant = dynamic(() => import("../components/AIPaymentAssistant"), { ssr: false });
 const RecurringPayments = dynamic(() => import("../components/RecurringPayments"), { ssr: false });
+const PendingTransactions = dynamic(() => import("../components/PendingTransactions"), {
+  ssr: false,
+  loading: () => <Skeleton height="h-24" />,
+});
 const StreamingPayments = dynamic(() => import("../components/StreamingPayments"), { ssr: false });
 const PriceAlertsPanel = dynamic(() => import("../components/PriceAlertsPanel"), {
   ssr: false,
@@ -1448,6 +1452,8 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
           </div>
         </div>
       </div>
+
+      <PendingTransactions />
 
       <BubbleNotification message={bubbleMessage} visible={showBubble} />
 
