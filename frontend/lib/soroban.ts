@@ -52,16 +52,42 @@ export interface StreamRecord {
   status: "Active" | "Ended" | "Cancelled";
 }
 
+/** Contract `MultiSigProposal` (contracts/finchippay-contract/src/types.rs). */
 export interface MultiSigProposal {
   id: number;
+  proposer: string;
+  recipient: string;
   token: string;
-  from: string;
-  to: string;
   amount: string;
-  approvals: number;
   threshold: number;
+  signers: string[];
+  approvals: string[];
+  status: "Pending" | "Executed" | "Cancelled";
+  expirationLedger: number;
+  /** Back-compat alias for legacy consumers reading `.from`. */
+  from: string;
+  /** Back-compat alias for legacy consumers reading `.to`. */
+  to: string;
+  /** Back-compat aliases for legacy consumers reading `.executed/.cancelled`. */
   executed: boolean;
   cancelled: boolean;
+}
+
+/** A single-admin-governance action proposed for approval by the admin signer set. */
+export interface AdminActionProposal {
+  id: number;
+  /** e.g. "pause", "unpause", "set_admin_signers", "set_pauser", "upgrade", "reconcile_balance". */
+  actionType: string;
+  /** Function-specific payload produced by `propose_admin_action`. */
+  actionData: unknown[];
+  /** Admin signers that have approved so far. */
+  approvals: string[];
+  /** Number of unique admin approvals required to execute. */
+  threshold: number;
+  /** Whether this proposal has been executed. */
+  executed: boolean;
+  /** Ledger after which the proposal expires and can no longer be approved. */
+  expirationLedger: number;
 }
 
 export interface ContractStats {
@@ -339,7 +365,14 @@ export class FinchippayClient {
    */
   private toScVal(value: unknown): import("@stellar/stellar-sdk").xdr.ScVal {
     if (typeof value === "number") {
-      return nativeToScVal(value, { type: Number.isInteger(value) ? "u32" : "i128" });
+      if (Number.isInteger(value)) {
+        // u64 ancestors are used for multisig/admin proposal ids; fall back to
+        // u64 for any integer beyond the u32 range.
+        return value >= 0 && value <= 0xffffffff
+          ? nativeToScVal(value, { type: "u32" })
+          : nativeToScVal(BigInt(value), { type: "u64" });
+      }
+      return nativeToScVal(value, { type: "i128" });
     }
     if (typeof value === "bigint") {
       return nativeToScVal(value, { type: "i128" });
@@ -493,17 +526,107 @@ export class FinchippayClient {
     const result = await this.simulateCall("get_multisig", [proposalId], caller);
     if (!result) return null;
     const decoded = result as Record<string, unknown>;
+    const signersRaw = decoded.signers;
+    const approvalsRaw = decoded.approvals;
+    const proposer = String(decoded.proposer ?? "");
+    const recipient = String(decoded.recipient ?? "");
+    const status = String(decoded.status ?? "Pending") as MultiSigProposal["status"];
+    const executed = status === "Executed" || Boolean(decoded.executed ?? false);
+    const cancelled = status === "Cancelled" || Boolean(decoded.cancelled ?? false);
     return {
       id: Number(proposalId),
+      proposer,
+      recipient,
       token: String(decoded.token ?? ""),
-      from: String(decoded.from ?? ""),
-      to: String(decoded.to ?? ""),
       amount: String(decoded.amount ?? "0"),
-      approvals: Number(decoded.approvals ?? 0),
       threshold: Number(decoded.threshold ?? 0),
-      executed: Boolean(decoded.executed ?? false),
-      cancelled: Boolean(decoded.cancelled ?? false),
+      signers: Array.isArray(signersRaw) ? signersRaw.map(String) : [],
+      approvals: Array.isArray(approvalsRaw) ? approvalsRaw.map(String) : [],
+      status,
+      expirationLedger: Number(decoded.expiration_ledger ?? decoded.expirationLedger ?? 0),
+      from: proposer,
+      to: recipient,
+      executed,
+      cancelled,
     };
+  }
+
+  /**
+   * Return the number of payment multi-sig proposals created so far
+   * (mirrors `get_multisig_count` on the contract).
+   */
+  async getMultisigCount(caller?: string): Promise<number> {
+    const result = await this.simulateCall("get_multisig_count", [], caller);
+    return Number(result ?? 0);
+  }
+
+  // ── Treasury / admin-governance query methods ─────────────────────────
+
+  /** Return the current admin signer set (G... addresses). */
+  async getAdminSigners(caller?: string): Promise<string[]> {
+    const result = await this.simulateCall("get_admin_signers", [], caller);
+    if (!Array.isArray(result)) return [];
+    return result.map(String);
+  }
+
+  /** Return the number of approvals required for admin actions to execute. */
+  async getAdminSignersThreshold(caller?: string): Promise<number> {
+    const result = await this.simulateCall("get_admin_signers_threshold", [], caller);
+    return Number(result ?? 1);
+  }
+
+  /**
+   * Fetch a single admin-governance proposal from the contract.
+   *
+   * The contract stores admin-action proposals as `AdminActionProposal`
+   * (id, action_type, action_data, approvals, threshold, executed,
+   * expiration_ledger). `action_data` is a `Vec<Val>` of crypto primitives
+   * (addresses / u32 / symbols / bytes); `scValToNative` yields them as JS
+   * values so we keep the raw array for display.
+   */
+  async getAdminActionProposal(
+    proposalId: number,
+    caller?: string,
+  ): Promise<AdminActionProposal | null> {
+    const result = await this.simulateCall("get_admin_action_proposal", [proposalId], caller);
+    if (!result) return null;
+    const decoded = result as Record<string, unknown>;
+    const approvalsRaw = decoded.approvals;
+    return {
+      id: Number(proposalId),
+      actionType: String(decoded.action_type ?? decoded.actionType ?? "unknown"),
+      actionData: Array.isArray(decoded.action_data ?? decoded.actionData)
+        ? (decoded.action_data ?? decoded.actionData)
+        : [],
+      approvals: Array.isArray(approvalsRaw) ? approvalsRaw.map(String) : [],
+      threshold: Number(decoded.threshold ?? 1),
+      executed: Boolean(decoded.executed ?? false),
+      expirationLedger: Number(decoded.expiration_ledger ?? decoded.expirationLedger ?? 0),
+    };
+  }
+
+  /**
+   * Build an approve_admin_action transaction, ready for wallet signing.
+   *
+   * When the approval count reaches the configured admin threshold the
+   * contract auto-executes the action.
+   */
+  async buildApproveAdminActionTx(
+    proposalId: number,
+    approver: string,
+  ): Promise<Transaction> {
+    return this.buildTransaction("approve_admin_action", [proposalId, approver], approver);
+  }
+
+  /**
+   * Build an approve_multisig transaction for a payment multi-sig proposal,
+   * ready for wallet signing.
+   */
+  async buildApprovePaymentMultisigTx(
+    proposalId: number,
+    signer: string,
+  ): Promise<Transaction> {
+    return this.buildTransaction("approve_multisig", [proposalId, signer], signer);
   }
 }
 
