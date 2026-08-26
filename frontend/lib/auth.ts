@@ -16,9 +16,15 @@ export function setJwtToken(token: string | null): void {
   inMemoryAccessToken = token;
 }
 
+/**
+ * Returns a non-null sentinel value when a session flag exists in localStorage.
+ * The actual refresh token is never stored in the client — /api/auth/refresh
+ * relies on the backend's httpOnly cookie. A boolean flag is kept so the app
+ * can attempt a refresh right after a page reload without a 401-first round
+ * trip.
+ */
 export function getRefreshToken(): string | null {
   if (typeof window === "undefined") return null;
-  // Return a dummy value if the session flag exists, so the app knows to attempt refresh via httpOnly cookie.
   return localStorage.getItem("finchippay_has_session") ? "true" : null;
 }
 
@@ -26,12 +32,12 @@ export function setRefreshToken(token: string | null): void {
   if (typeof window !== "undefined") {
     if (token) {
       localStorage.setItem("finchippay_has_session", "true");
-      // Clean up the insecure token if it exists
-      localStorage.removeItem("finchippay_refresh_token");
     } else {
       localStorage.removeItem("finchippay_has_session");
-      localStorage.removeItem("finchippay_refresh_token");
     }
+    // Defence-in-depth: purge any legacy residual refresh-token key from
+    // earlier versions. Nothing in the current codebase ever writes it.
+    localStorage.removeItem("finchippay_refresh_token");
   }
 }
 
@@ -39,6 +45,7 @@ export function clearJwtToken(): void {
   inMemoryAccessToken = null;
   if (typeof window !== "undefined") {
     localStorage.removeItem("finchippay_has_session");
+    // Purge any legacy residual key from versions that stored the token.
     localStorage.removeItem("finchippay_refresh_token");
   }
 }
