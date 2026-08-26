@@ -21,12 +21,9 @@ import { useWallet } from "@/lib/useWallet";
 import {
   generateCSV,
   downloadCSV,
-  generatePDF,
-  downloadPDF,
   type ExportFormat,
 } from "@/utils/export";
 import { formatAsset, formatDate } from "@/utils/format";
-import { logger } from "@/lib/logger";
 
 const TRANSACTION_FILTERS_STORAGE_KEY = "finchippay:transaction-filters";
 
@@ -171,7 +168,7 @@ export default function Transactions() {
     setExportDropdownOpen(false);
 
     // Use requestAnimationFrame to ensure the loading UI renders before heavy generation
-    const generate = () => {
+    const generate = async () => {
       try {
         const dateStamp = new Date().toISOString().slice(0, 10);
 
@@ -179,6 +176,9 @@ export default function Transactions() {
           const csv = generateCSV(filteredPayments);
           downloadCSV(csv, dateStamp);
         } else {
+          // jspdf + jspdf-autotable are the heaviest dependencies on this route;
+          // import them lazily only when the user actually exports a PDF (issue #610).
+          const { generatePDF, downloadPDF } = await import("@/utils/export");
           const dateRangeLabel = hasActiveFilters
             ? `Filtered view (${filteredPayments.length} of ${payments.length} transactions)`
             : undefined;
