@@ -313,6 +313,14 @@ async function submitPendingExecution(id, signedXDR) {
   }
 }
 
+async function getScheduleById(id) {
+  return knex("scheduled_transactions").where("id", id).first();
+}
+
+async function getPendingExecutionById(id) {
+  return knex("pending_executions").where("id", id).first();
+}
+
 module.exports = {
   createSchedule,
   listSchedules,
@@ -323,4 +331,6 @@ module.exports = {
   loadActiveSchedules,
   buildUnsignedPaymentXDR,
   estimateNextRun,
+  getScheduleById,
+  getPendingExecutionById,
 };
