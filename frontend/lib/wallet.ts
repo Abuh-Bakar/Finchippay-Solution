@@ -263,9 +263,6 @@ export function disconnectWallet(): void {
 
   setJwtToken(null);
   clearAuthToken();
-  if (typeof window !== "undefined") {
-    localStorage.removeItem("finchippay_refresh_token");
-  }
 }
 
 export { isLedgerSupported, signTransactionWithLedger, getLedgerPublicKey, connectLedger, disconnectLedger } from "./ledger";
