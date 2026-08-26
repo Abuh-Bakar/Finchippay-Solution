@@ -150,7 +150,9 @@
     "balanceTrendDownward": "Tendência do saldo: baixa",
     "balanceLive": "Ao vivo",
     "balancePolling": "Atualizando a cada 30s",
-    "viewPortfolio": "Ver Portfólio →"
+    "viewPortfolio": "Ver Portfólio →",
+    "balanceReconnecting": "Reconectando…",
+    "balanceStale": "Desatualizado — os dados podem estar desatualizados"
   },
   "portfolio": {
     "title": "Portfólio",

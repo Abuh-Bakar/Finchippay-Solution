@@ -84,6 +84,15 @@ interface SendPaymentFormProps {
     amount: string;
     memo?: string;
   } | null;
+  /** Optional hook into the balance stream for optimistic send deltas. */
+  optimisticBalanceApi?: OptimisticBalanceApi | null;
+}
+
+export interface OptimisticBalanceApi {
+  /** Apply an optimistic XLM delta; call rollback(key) on failure. */
+  applyDelta(deltaXlm: string, key: string): void;
+  /** Remove a pending optimistic delta by key. */
+  rollback(key: string): void;
 }
 
 type Status = PaymentFlowStatus;
@@ -138,6 +147,7 @@ function SendPaymentForm({
   hideAmountField = false,
   hideMemoField = false,
   accountBalances = [],
+  optimisticBalanceApi,
 }: SendPaymentFormProps) {
   const { t } = useTranslation("common");
   const { addToast } = useToastContext();
@@ -218,6 +228,7 @@ function SendPaymentForm({
         const result = await submitTransaction(signedXDR);
         if (result?.hash) {
           successCount++;
+          optimisticBalanceApi?.applyDelta(`-${amt.toFixed(7)}`, `send:${result.hash}`);
         } else {
           failCount++;
         }
@@ -243,6 +254,9 @@ function SendPaymentForm({
   const scannerControlsRef = useRef<IScannerControls | null>(null);
   const isDetectingRef = useRef(false);
   const destinationInputRef = useRef<HTMLInputElement | null>(null);
+  // Tracks the tx hash whose optimistic delta is currently applied, so a later
+  // failure in the send flow can roll it back.
+  const optimisticAppliedHashRef = useRef<string | null>(null);
 
   // Power-user shortcut: press "S" (when not already typing in a field and no
   // modal is open) to jump focus to the destination input (#264).
@@ -830,6 +844,15 @@ function SendPaymentForm({
       const result = await submitTransaction(signedXDR);
       setTxHash(result.hash);
 
+      // The transaction has landed — apply the optimistic balance delta so the
+      // UI reflects the spend immediately instead of waiting for the next
+      // stream/poll round. Only XLM moves the XLM balance; custom assets and
+      // USDC are tracked separately.
+      if (assetParam === "XLM" && optimisticBalanceApi && result?.hash) {
+        optimisticAppliedHashRef.current = result.hash;
+        optimisticBalanceApi.applyDelta(`-${amountNum.toFixed(7)}`, `send:${result.hash}`);
+      }
+
       activeStep = "confirming";
       markStepStarted("confirming");
       setStatus("confirming");
@@ -853,6 +876,12 @@ function SendPaymentForm({
 
       onSuccess?.(result.hash);
     } catch (err: unknown) {
+      // If the optimistic delta was applied but a later step failed, roll it
+      // back so a failed send cannot leave a phantom balance reduction.
+      if (optimisticBalanceApi && optimisticAppliedHashRef.current) {
+        optimisticBalanceApi.rollback(`send:${optimisticAppliedHashRef.current}`);
+        optimisticAppliedHashRef.current = null;
+      }
       if (pendingId) {
         const updatedPending = JSON.parse(sessionStorage.getItem("finchippay:pending-txs") || "[]").filter((t: PendingTransaction) => t.id !== pendingId);
         sessionStorage.setItem("finchippay:pending-txs", JSON.stringify(updatedPending));
