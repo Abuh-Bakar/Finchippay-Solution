@@ -1,6 +1,7 @@
 "use strict";
 
 const nock = require("nock");
+const { parseEvent } = require("../src/services/eventParser");
 
 const SOROBAN_RPC_URL = "https://soroban-testnet.stellar.org";
 const TEST_CONTRACT_ID = "CDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZ123456";
@@ -155,6 +156,13 @@ describe("eventIndexer cursor reliability", () => {
     expect(client.query).toHaveBeenCalledWith("COMMIT");
   });
 
+  it("stores the RPC event id in payload.id for the deduplication index", () => {
+    expect(parseEvent(event("dedupe-id", 7)).payload).toMatchObject({
+      id: "dedupe-id",
+      eventId: "dedupe-id",
+    });
+  });
+
   it("does not advance the watermark when a conflict occurs in the range", async () => {
     const client = {
       query: jest.fn().mockResolvedValueOnce({}).mockResolvedValueOnce({ rowCount: 0 }).mockResolvedValueOnce({}),
@@ -174,6 +182,61 @@ describe("eventIndexer cursor reliability", () => {
 
     expect(indexer._internals.getCursorForTest().lastProcessedLedger).toBe(0);
     expect(pool.query).not.toHaveBeenCalledWith(expect.stringContaining("last_processed_ledger = EXCLUDED"), expect.any(Array));
+  });
+
+  it("advances the PostgreSQL cursor in the same transaction as a clean batch", async () => {
+    const client = {
+      query: jest
+        .fn()
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({ rowCount: 1 })
+        .mockResolvedValueOnce({ rowCount: 1 })
+        .mockResolvedValueOnce({}),
+      release: jest.fn(),
+    };
+    const pool = {
+      on: jest.fn(),
+      connect: jest.fn(async () => client),
+      query: jest.fn(async () => ({ rows: [], rowCount: 1 })),
+      end: jest.fn(async () => {}),
+    };
+    mockRpc("getLatestLedger", { sequence: 5 });
+    mockRpc("getEvents", { events: [event("clean", 5)], cursor: null });
+    const indexer = loadIndexer({ databaseUrl: "postgres://test", pool });
+
+    await indexer._internals.pollOnce();
+
+    const calls = client.query.mock.calls.map(([sql]) => String(sql));
+    const cursorCall = calls.findIndex((sql) => sql.includes("indexer_state"));
+    const commitCall = calls.findIndex((sql) => sql === "COMMIT");
+
+    expect(cursorCall).toBeGreaterThan(-1);
+    expect(commitCall).toBeGreaterThan(cursorCall);
+    expect(pool.query).not.toHaveBeenCalledWith(expect.stringContaining("indexer_state"), expect.any(Array));
+    expect(indexer._internals.getCursorForTest().lastProcessedLedger).toBe(5);
+  });
+
+  it("advances the cursor after a fully paged empty PostgreSQL range", async () => {
+    const pool = {
+      on: jest.fn(),
+      query: jest.fn(async () => ({ rows: [], rowCount: 1 })),
+      end: jest.fn(async () => {}),
+    };
+    mockRpc("getLatestLedger", { sequence: 6 });
+    mockRpc("getEvents", { events: [], cursor: "empty-next" });
+    mockRpc("getEvents", { events: [], cursor: null }, (body) => {
+      return body.params.pagination.cursor === "empty-next";
+    });
+    const indexer = loadIndexer({ databaseUrl: "postgres://test", pool });
+
+    await indexer._internals.pollOnce();
+
+    expect(pool.query).toHaveBeenCalledWith(expect.stringContaining("indexer_state"), [
+      "contract_events",
+      6,
+      null,
+    ]);
+    expect(indexer._internals.getCursorForTest().lastProcessedLedger).toBe(6);
   });
 
   it("does not advance the watermark when an insert error rolls back the batch", async () => {

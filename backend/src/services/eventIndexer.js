@@ -256,9 +256,10 @@ async function getEvents(startLedger, endLedger) {
  * Insert parsed events into the store (PostgreSQL or in-memory fallback).
  *
  * @param {Array<object>} events - parsed event rows
+ * @param {{ cursorLedger?: number, cursorTxId?: string|null }} [options]
  * @returns {Promise<{ inserted: number, conflicts: number, errors: number }>} insert summary
  */
-async function storeEvents(events) {
+async function storeEvents(events, options = {}) {
   if (events.length === 0) return { inserted: 0, conflicts: 0, errors: 0 };
 
   const pool = getPgPool();
@@ -293,6 +294,9 @@ async function storeEvents(events) {
         } else {
           summary.conflicts++;
         }
+      }
+      if (summary.conflicts === 0 && options.cursorLedger !== undefined) {
+        await saveCursorWithQueryable(client, options.cursorLedger, options.cursorTxId ?? null);
       }
       await client.query("COMMIT");
     } catch (err) {
@@ -334,15 +338,8 @@ async function ensureIndexerState(pool) {
   );
 }
 
-async function saveCursor(pool, ledger, txId = null) {
-  if (!pool) {
-    lastProcessedLedger = ledger;
-    lastProcessedTxId = txId;
-    memoryLastProcessedTxId = txId;
-    return;
-  }
-
-  await pool.query(
+async function saveCursorWithQueryable(queryable, ledger, txId = null) {
+  await queryable.query(
     `INSERT INTO indexer_state (name, last_processed_ledger, last_processed_tx_id, updated_at)
      VALUES ($1, $2, $3, NOW())
      ON CONFLICT (name)
@@ -352,6 +349,17 @@ async function saveCursor(pool, ledger, txId = null) {
        updated_at = NOW()`,
     [INDEXER_STATE_NAME, ledger, txId],
   );
+}
+
+async function saveCursor(pool, ledger, txId = null) {
+  if (!pool) {
+    lastProcessedLedger = ledger;
+    lastProcessedTxId = txId;
+    memoryLastProcessedTxId = txId;
+    return;
+  }
+
+  await saveCursorWithQueryable(pool, ledger, txId);
 
   lastProcessedLedger = ledger;
   lastProcessedTxId = txId;
@@ -454,7 +462,12 @@ async function pollOnce() {
           );
         }
       }
-      storeSummary = await storeEvents(parsed);
+      const cursorTxId = getLastTxId(parsed);
+      const shouldAdvanceWithBatch = parseFailures === 0;
+      storeSummary = await storeEvents(
+        parsed,
+        shouldAdvanceWithBatch ? { cursorLedger: latestLedger, cursorTxId } : {},
+      );
       contractEventsProcessedTotal.inc({ outcome: "indexed" }, storeSummary.inserted);
       logger.info(
         {
@@ -480,8 +493,13 @@ async function pollOnce() {
     }
 
     if (parseFailures === 0 && storeSummary.conflicts === 0 && storeSummary.errors === 0) {
-      const pool = process.env.DATABASE_URL ? getPgPool() : null;
-      await saveCursor(pool, latestLedger, getLastTxId(parsed));
+      if (rawEvents.length === 0 || !process.env.DATABASE_URL) {
+        const pool = process.env.DATABASE_URL ? getPgPool() : null;
+        await saveCursor(pool, latestLedger, getLastTxId(parsed));
+      } else {
+        lastProcessedLedger = latestLedger;
+        lastProcessedTxId = getLastTxId(parsed);
+      }
     } else {
       logger.warn(
         {

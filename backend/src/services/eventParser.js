@@ -104,6 +104,7 @@ function parseEvent(raw) {
   }
 
   const payload = {
+    id: raw.id ?? null,
     topics: topics,
     data: data ?? null,
     eventId: raw.id ?? null,
