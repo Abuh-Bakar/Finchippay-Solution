@@ -1,3 +1,4 @@
+import { registerClientReset } from "@/lib/soroban";
 import {
   FinchippayContractClient,
   EscrowStatus,
@@ -27,6 +28,22 @@ export interface EscrowRecord {
 
 export type EscrowTab = "active" | "completed" | "incoming";
 
+// ─── Escrow Contract Client Singleton ───────────────────────────────────────
+
+let _escrowClient: FinchippayContractClient | null = null;
+
+/**
+ * Reset the escrow contract client singleton. Invoked automatically by
+ * resetClient() in soroban.ts so a network switch invalidates every cached
+ * contract client in one call.
+ */
+function resetEscrowClient(): void {
+  _escrowClient = null;
+}
+
+// Register the escrow client reset with the shared reset registry at module load.
+registerClientReset(resetEscrowClient);
+
 function getCache(): Record<string, CacheEntry> {
   if (typeof window === "undefined") return {};
   try {
@@ -49,9 +66,19 @@ function isCacheValid(entry: CacheEntry): boolean {
   return Date.now() - entry.fetchedAt < CACHE_TTL_MS;
 }
 
+/**
+ * Get or create the escrow contract client singleton.
+ *
+ * The client is built from the current network configuration. After a network
+ * switch, call resetClient() from soroban.ts to invalidate this singleton so the
+ * next call builds a fresh client targeting the new RPC/passphrase.
+ */
 function getClient(): FinchippayContractClient {
   if (!CONTRACT_ID) throw new Error("Contract ID is not configured.");
-  return new FinchippayContractClient(CONTRACT_ID);
+  if (!_escrowClient) {
+    _escrowClient = new FinchippayContractClient(CONTRACT_ID);
+  }
+  return _escrowClient;
 }
 
 export async function getEscrows(publicKey: string, forceRefresh = false): Promise<EscrowRecord[]> {

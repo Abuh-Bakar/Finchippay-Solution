@@ -512,6 +512,25 @@ export class FinchippayClient {
 let _client: FinchippayClient | null = null;
 
 /**
+ * Registry of reset callbacks for all contract clients that need to be
+ * invalidated when the network changes. Other modules can register their
+ * own reset functions here so that resetClient() invalidates every cached
+ * contract client, not just the one in this file.
+ */
+type ResetCallback = () => void;
+const _resetRegistry: ResetCallback[] = [];
+
+/**
+ * Register a reset callback that will be invoked when resetClient() is called.
+ * Use this to invalidate module-level client singletons elsewhere so a network
+ * switch clears every cached contract client in one call.
+ * @param callback A function that resets the calling module's cached client.
+ */
+export function registerClientReset(callback: ResetCallback): void {
+  _resetRegistry.push(callback);
+}
+
+/**
  * Get or create the default FinchippayClient singleton.
  *
  * Reads NEXT_PUBLIC_CONTRACT_ID and constructs the RPC URL from the
@@ -535,8 +554,14 @@ export function getClient(): FinchippayClient {
 }
 
 /**
- * Reset the singleton (useful for testing or network changes).
+ * Reset the singleton and every registered client singleton (useful for testing
+ * or network changes). After calling this, the next call to getClient() or any
+ * registered client factory will build a fresh instance targeting the current
+ * network configuration.
  */
 export function resetClient(): void {
   _client = null;
+  for (const callback of _resetRegistry) {
+    callback();
+  }
 }
