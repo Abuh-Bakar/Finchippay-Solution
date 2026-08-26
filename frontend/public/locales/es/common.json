@@ -229,7 +229,8 @@
     "transactionHash": "Hash de Transacción",
     "updateNicknamePrompt": "Actualizar apodo del contacto:",
     "usernameNotFound": "Usuario no encontrado",
-    "viewOnExplorer": "Ver en Explorador"
+    "viewOnExplorer": "Ver en Explorador",
+    "needsTrustline": "Añade una línea de confianza para {asset} antes de enviar."
   },
   "settings": {
     "active": "activos",
@@ -332,5 +333,9 @@
     "title": "Pagos Recientes",
     "tryAgain": "Intentar de nuevo",
     "viewOnExpert": "Ver en Stellar Expert"
+  },
+  "assetSelect": {
+    "noAssets": "No hay activos disponibles.",
+    "addTrustline": "Línea de confianza"
   }
 }

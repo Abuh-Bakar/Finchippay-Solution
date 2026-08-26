@@ -229,7 +229,8 @@
     "transactionHash": "تجزئة المعاملة",
     "updateNicknamePrompt": "تحديث الاسم المستعار لجهة الاتصال:",
     "usernameNotFound": "لم يتم العثور على اسم المستخدم",
-    "viewOnExplorer": "عرض في المستكشف"
+    "viewOnExplorer": "عرض في المستكشف",
+    "needsTrustline": "أضف خط ثقة لـ {asset} قبل الإرسال."
   },
   "settings": {
     "active": "نشط",
@@ -332,5 +333,9 @@
     "title": "المدفوعات الأخيرة",
     "tryAgain": "حاول مرة أخرى",
     "viewOnExpert": "عرض على Stellar Expert"
+  },
+  "assetSelect": {
+    "noAssets": "لا توجد أصول متاحة.",
+    "addTrustline": "خط الثقة"
   }
 }
