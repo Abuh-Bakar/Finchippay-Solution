@@ -69,6 +69,38 @@ export const STELLAR_TRANSACTION_TIMEOUT_SECONDS = 60;
 /** Stellar MEMO_TEXT values are capped at 28 UTF-8 bytes by the protocol. */
 export const STELLAR_MEMO_TEXT_MAX_BYTES = 28;
 
+const HORIZON_UNAVAILABLE_MESSAGE = "Horizon unavailable, please retry";
+
+type HorizonAccountError = {
+  status?: unknown;
+  type?: unknown;
+  response?: {
+    status?: unknown;
+    type?: unknown;
+    data?: {
+      type?: unknown;
+      status?: unknown;
+    };
+  };
+};
+
+/** Returns true only for Horizon's account-not-found response. */
+export function isHorizonAccountNotFoundError(error: unknown): boolean {
+  const candidate = error as HorizonAccountError;
+  const status =
+    candidate?.response?.status ?? candidate?.status ?? candidate?.response?.data?.status;
+  const type =
+    candidate?.response?.data?.type ?? candidate?.response?.type ?? candidate?.type;
+  return status === 404 || type === "not_found";
+}
+
+/** Converts transient Horizon failures into a stable retryable user-facing error. */
+export function toHorizonUnavailableError(error: unknown): Error {
+  const unavailable = new Error(HORIZON_UNAVAILABLE_MESSAGE);
+  unavailable.cause = error;
+  return unavailable;
+}
+
 /** A base Stellar account must keep two reserve units before subentries. */
 export const STELLAR_BASE_ACCOUNT_RESERVE_COUNT = 2;
 
@@ -742,11 +774,11 @@ export async function buildPaymentTransaction({
     let destinationExists = true;
     try {
       await server.loadAccount(toPublicKey);
-    } catch (err: any) {
-      if (err?.response?.status === 404) {
+    } catch (err: unknown) {
+      if (isHorizonAccountNotFoundError(err)) {
         destinationExists = false;
       } else {
-        throw err;
+        throw toHorizonUnavailableError(err);
       }
     }
 
