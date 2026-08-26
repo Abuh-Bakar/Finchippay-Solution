@@ -67,6 +67,11 @@ export function useBalanceStream(publicKey: string | null): BalanceStream {
 
   const startPolling = useCallback(
     (key: string, generation: number) => {
+      // Polling is the active data source; ensure the consumer sees a non-live
+      // indicator even when no closeSource() preceded this call (e.g. initial
+      // EventSource fallback, ticket fetch failure, or reconnection from a
+      // stale closure after a generation change).
+      setIsLive(false);
       if (pollTimerRef.current !== null) return;
 
       const poll = async () => {
