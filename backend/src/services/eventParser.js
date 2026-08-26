@@ -108,6 +108,7 @@ function parseEvent(raw) {
     data: data ?? null,
     eventId: raw.id ?? null,
     pagingToken: raw.pagingToken ?? null,
+    txHash: raw.txHash ?? null,
   };
 
   return {
