@@ -5,7 +5,8 @@
  * Re-exports the central apiClient instance from @/lib/api dogfooding @finchippay/sdk.
  */
 
-import { apiClient } from "./api";
+import { apiClient, apiFetch } from "./api";
+import { getJwtToken } from "./auth";
 
 interface SdkConfig {
   baseUrl: string;
@@ -33,12 +34,11 @@ class FinchippaySdk {
     return h;
   }
 
-  async getChallenge(publicKey: string): Promise<{ transaction: string }> {
-    const res = await apiFetch(`${this.baseUrl}/api/auth/challenge`, {
-      method: "POST",
+  async getChallenge(publicKey: string): Promise<{ transaction: string; networkPassphrase: string }> {
+    const res = await apiFetch(\`\${this.baseUrl}/api/auth?account=\${encodeURIComponent(publicKey)}\`, {
+      method: "GET",
       credentials: "include",
       headers: this.headers(),
-      body: JSON.stringify({ publicKey }),
     });
     return res.json();
   }
@@ -48,11 +48,11 @@ class FinchippaySdk {
     token?: string;
     refreshToken?: string;
   }> {
-    const res = await apiFetch(`${this.baseUrl}/api/auth/verify`, {
+    const res = await apiFetch(\`\${this.baseUrl}/api/auth\`, {
       method: "POST",
       credentials: "include",
       headers: this.headers(),
-      body: JSON.stringify({ signedXDR }),
+      body: JSON.stringify({ transaction: signedXDR }),
     });
     return res.json();
   }
@@ -67,5 +67,8 @@ export const sdk = new FinchippaySdk({ baseUrl: API_URL ?? "" });
 
 /** Initialize SDK authentication from stored token. */
 export function initSdkAuth(): void {
-  // Authentication is dynamically resolved via ensureAccessToken() in apiClient
+  const token = getJwtToken();
+  if (token) {
+    sdk.setToken(token);
+  }
 }
