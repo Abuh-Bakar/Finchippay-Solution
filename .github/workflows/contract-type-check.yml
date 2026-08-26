@@ -34,7 +34,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
           key: ${{ runner.os }}-cargo-bindings-${{ hashFiles('contracts/finchippay-contract/Cargo.lock') }}
-      - run: cargo install --locked stellar-cli
+      - name: Install Stellar CLI
+        if: ${{ env.CONTRACT_ID != '' }}
+        run: cargo install --locked stellar-cli
       - name: Generate bindings
         if: ${{ env.CONTRACT_ID != '' }}
         run: bash ../scripts/gen-contract-bindings.sh
