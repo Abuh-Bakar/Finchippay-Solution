@@ -166,7 +166,7 @@ router.get(
   async (req, res, next) => {
     try {
       const { publicKey } = req.validated;
-      let row = await knex("notification_preferences").where("public_key", publicKey).first();
+      const row = await knex("notification_preferences").where("public_key", publicKey).first();
 
       if (!row) {
         // Return defaults
