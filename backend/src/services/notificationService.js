@@ -25,7 +25,6 @@ var logger = require("../utils/logger");
 var knex = require("../db/connection");
 var emailRenderer = require("./emailRenderer");
 var emailTrackingService = require("./emailTrackingService");
-var emailVerificationService = require("./emailVerificationService");
 var metricsService = require("./metricsService");
 
 // â”€â”€â”€ Configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -219,7 +218,9 @@ async function queueEmail(to, templateType, data, opts) {
   let unsubToken = null;
   try {
     unsubToken = await ensureUnsubscribeToken(to, "all");
-  } catch (_) {}
+  } catch (err) {
+    logger.debug({ type: "unsubscribe_token_precreate_failed", error: err.message }, "Unsubscribe token pre-create failed");
+  }
 
   const unsubscribeUrl = unsubToken
     ? `${BASE_URL}/api/emails/unsubscribe?token=${unsubToken}`
