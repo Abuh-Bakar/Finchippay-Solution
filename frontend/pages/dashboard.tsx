@@ -16,7 +16,7 @@ import dynamic from "next/dynamic";
 import Head from "next/head";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { Step } from "react-joyride";
 import {
@@ -208,11 +208,27 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
   const { publicKey } = useWallet();
   const { t } = useTranslation("common");
   // Balance arrives over SSE, falling back to polling automatically (#157).
+  // The status field exposes a richer live / reconnecting / stale / polling
+  // view so the UI can warn when the shown number may be out of date (#641).
   const {
     xlmBalance: streamedXlmBalance,
     isLive: isBalanceLive,
+    status: balanceStatus,
     lastUpdatedAt: balanceUpdatedAt,
+    applyOptimisticDelta,
+    rollbackOptimistic,
   } = useBalanceStream(publicKey);
+  const optimisticBalanceApi = useMemo(
+    () =>
+      publicKey
+        ? {
+            applyDelta: (deltaXlm: string, key: string) =>
+              applyOptimisticDelta(deltaXlm, `dashboard:${key}`),
+            rollback: (key: string) => rollbackOptimistic(`dashboard:${key}`),
+          }
+        : null,
+    [publicKey, applyOptimisticDelta, rollbackOptimistic]
+  );
   // Move focus to the dashboard heading once a wallet is connected, so keyboard
   // and screen-reader focus follows the content instead of staying on the
   // now-hidden Connect control (#252).
@@ -1159,11 +1175,23 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
                 <p className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-400 sm:justify-end">
                   <span
                     className={`h-1.5 w-1.5 rounded-full ${
-                      isBalanceLive ? "animate-pulse bg-emerald-400" : "bg-amber-400"
+                      balanceStatus === "live"
+                        ? "animate-pulse bg-emerald-400"
+                        : balanceStatus === "reconnecting"
+                        ? "animate-pulse bg-amber-400"
+                        : balanceStatus === "stale"
+                        ? "bg-red-400"
+                        : "bg-slate-400"
                     }`}
                     aria-hidden="true"
                   />
-                  {isBalanceLive ? t("dashboard.balanceLive") : t("dashboard.balancePolling")}
+                  {balanceStatus === "live"
+                    ? t("dashboard.balanceLive")
+                    : balanceStatus === "reconnecting"
+                    ? t("dashboard.balanceReconnecting")
+                    : balanceStatus === "stale"
+                    ? t("dashboard.balanceStale")
+                    : t("dashboard.balancePolling")}
                 </p>
               </div>
             ) : accountNotFound && isTestnet ? (
@@ -1329,7 +1357,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
       </Link>
 
       <FeatureGate flag="streaming_payments">
-        <StreamingPayments publicKey={publicKey} />
+        <StreamingPayments publicKey={publicKey} optimisticBalanceApi={optimisticBalanceApi} />
       </FeatureGate>
 
       {/* Price Alerts — Issue #80 */}
@@ -1396,6 +1424,7 @@ export default function Dashboard({ stellarURI }: DashboardProps) {
               xlmBalance={xlmBalance || "0"}
               usdcBalance={usdcBalance}
               accountBalances={otherBalances}
+              optimisticBalanceApi={optimisticBalanceApi}
               onSuccess={handlePaymentSuccess}
               prefill={
                 recurringPrefill
