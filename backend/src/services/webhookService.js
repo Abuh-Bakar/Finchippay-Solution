@@ -57,6 +57,10 @@ const {
   parseTopics,
   matchesWebhookTopic,
 } = require("./webhookTopics");
+const {
+  accountCacheKey,
+  paymentsCachePattern,
+} = require("./stellarCacheKeys");
 const knex = require("../db/connection");
 require("dotenv").config();
 
@@ -626,8 +630,8 @@ function startMonitoring(webhookArg) {
         try {
           const cache = getCache();
           if (cache) {
-            await cache.del(`account:${webhook.publicKey}`);
-            await cache.delPattern(`payments:${webhook.publicKey}:*`);
+            await cache.del(accountCacheKey(webhook.publicKey));
+            await cache.delPattern(paymentsCachePattern(webhook.publicKey));
           }
         } catch {
           /* cache clear failure is non-critical */

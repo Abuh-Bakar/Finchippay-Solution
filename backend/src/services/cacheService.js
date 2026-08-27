@@ -8,17 +8,17 @@
  *   3. Graceful degradation — if Redis is unavailable, log a warning and use LRU only.
  *
  * Cache keys use namespaced prefixes:
- *   - account:<publicKey>           → account balances (30 s TTL)
- *   - payments:<publicKey>:<limit>:<cursor?> → payment history (60 s TTL)
+ *   - account:<network>:<publicKey> → account balances (30 s TTL)
+ *   - payments:<network>:<publicKey>:<limit> → payment history (60 s TTL)
  *   - analytics:summary:<publicKey>  → analytics summary (5 min TTL)
  *   - analytics:top-recipients:<pk>  → top recipients (5 min TTL)
  *   - analytics:activity:<publicKey> → activity by day (5 min TTL)
  *
  * Usage:
  *   const cache = require("./cacheService");
- *   const data = await cache.get("account:GABC...");
- *   await cache.set("account:GABC...", accountData, 30);
- *   await cache.del("account:GABC...");
+ *   const data = await cache.get("account:<network>:GABC...");
+ *   await cache.set("account:<network>:GABC...", accountData, 30);
+ *   await cache.del("account:<network>:GABC...");
  *   await cache.delPattern("analytics:*");
  */
 
