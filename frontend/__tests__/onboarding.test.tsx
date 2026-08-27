@@ -36,6 +36,7 @@ import {
 import OnboardingTour, { TOUR_STEPS, STEP_COUNT } from "@/components/OnboardingTour";
 import {
   getTourProgress,
+  ONBOARDING_STATE_VERSION,
   STORAGE_KEY as ONBOARDING_STATE_STORAGE_KEY,
 } from "@/lib/onboardingState";
 
@@ -384,6 +385,68 @@ describe("OnboardingTour component", () => {
       ...overrides,
     };
   }
+
+  describe("persisted onboarding state", () => {
+    beforeEach(clearStorage);
+    afterEach(clearStorage);
+
+    it("migrates a valid legacy payload to the versioned schema", () => {
+      localStorage.setItem(
+        ONBOARDING_STATE_STORAGE_KEY,
+        JSON.stringify({
+          completedSteps: [0, 2],
+          completed: "true",
+          lastSeen: 123,
+          featureVersions: { welcome: "true" },
+        }),
+      );
+
+      expect(getTourProgress()).toEqual({
+        version: ONBOARDING_STATE_VERSION,
+        completedSteps: [0, 2],
+        completed: true,
+        completedAt: null,
+        dismissed: false,
+        lastSeen: 123,
+        featureVersions: { welcome: true },
+      });
+    });
+
+    it("resets malformed persisted state to defaults", () => {
+      localStorage.setItem(ONBOARDING_STATE_STORAGE_KEY, "{not-json");
+
+      expect(getTourProgress()).toEqual({
+        version: ONBOARDING_STATE_VERSION,
+        completedSteps: [],
+        completed: false,
+        completedAt: null,
+        dismissed: false,
+        lastSeen: 0,
+        featureVersions: {},
+      });
+    });
+
+    it("drops unknown steps and resets unsupported schema versions", () => {
+      localStorage.setItem(
+        ONBOARDING_STATE_STORAGE_KEY,
+        JSON.stringify({
+          version: ONBOARDING_STATE_VERSION,
+          completedSteps: [-1, 0, 4, 5, 99, 4],
+          completed: false,
+          lastSeen: "invalid",
+          featureVersions: {},
+        }),
+      );
+      expect(getTourProgress().completedSteps).toEqual([0, 4]);
+
+      localStorage.setItem(
+        ONBOARDING_STATE_STORAGE_KEY,
+        JSON.stringify({ version: ONBOARDING_STATE_VERSION + 1 }),
+      );
+      expect(getTourProgress().completed).toBe(false);
+      expect(localStorage.getItem(ONBOARDING_STATE_STORAGE_KEY)).toBeNull();
+    });
+  });
 
   it("renders nothing when tour is not running and not resumable", () => {
     const { container } = render(<OnboardingTour tour={makeTourState()} />);
