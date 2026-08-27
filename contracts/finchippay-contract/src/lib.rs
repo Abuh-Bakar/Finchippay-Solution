@@ -458,7 +458,6 @@ pub struct EmergencyWithdrawal {
 /// Maximum ledgers into the future an escrow can be created (≈ 30 days at 5 s).
 const MAX_ESCROW_LEDGERS: u32 = 518_400;
 /// Maximum duration a recipient can pause a stream (≈ 1 year at 5s/ledger).
-const MAX_PAUSE_LEDGERS: u32 = 6_307_200;
 /// Maximum deposit amount for a single stream (1 trillion stroops).
 pub const MAX_STREAM_DEPOSIT: i128 = 1_000_000_000_000_000_000;
 /// Maximum rate per ledger for a stream (avoids overflow in elapsed * rate).
@@ -5806,33 +5805,42 @@ mod tests {
         let events = env.events().all().filter_by_contract(&contract_id);
         assert_eq!(
             events,
-            vec![&env, (
-                contract_id.clone(),
-                (Symbol::new(&env, "milestone_escrow_created"), id).into_val(&env),
-                (2u32).into_val(&env),
-            )]
+            vec![
+                &env,
+                (
+                    contract_id.clone(),
+                    (Symbol::new(&env, "milestone_escrow_created"), id).into_val(&env),
+                    (2u32).into_val(&env),
+                )
+            ]
         );
 
         client.approve_milestone(&id, &0, &agent);
         let events = env.events().all().filter_by_contract(&contract_id);
         assert_eq!(
             events,
-            vec![&env, (
-                contract_id.clone(),
-                (Symbol::new(&env, "milestone_approved"), id).into_val(&env),
-                (0u32).into_val(&env),
-            )]
+            vec![
+                &env,
+                (
+                    contract_id.clone(),
+                    (Symbol::new(&env, "milestone_approved"), id).into_val(&env),
+                    (0u32).into_val(&env),
+                )
+            ]
         );
 
         client.claim_milestone(&id, &0, &to);
         let events = env.events().all().filter_by_contract(&contract_id);
         assert_eq!(
             events,
-            vec![&env, (
-                contract_id.clone(),
-                (Symbol::new(&env, "milestone_claimed"), id, 0u32).into_val(&env),
-                (600i128).into_val(&env),
-            )]
+            vec![
+                &env,
+                (
+                    contract_id.clone(),
+                    (Symbol::new(&env, "milestone_claimed"), id, 0u32).into_val(&env),
+                    (600i128).into_val(&env),
+                )
+            ]
         );
     }
 

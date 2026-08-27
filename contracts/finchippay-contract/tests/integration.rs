@@ -1309,3 +1309,131 @@ fn test_approve_emergency_withdrawal() {
     let withdrawal = client.get_emergency_withdrawal(&wid);
     assert_eq!(withdrawal.approvals.len(), 1);
 }
+
+// ─── Dispute Resolution ────────────────────────────────────────────────────
+
+#[test]
+fn test_resolve_dispute_release_twice_fails() {
+    let env = Env::default();
+    let (_, client) = deploy(&env);
+    let admin = client.get_admin();
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+    let arbitrator = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.add_arbitrator(&admin, &arbitrator);
+
+    let token_id = create_token(&env, &admin, &from, 5_000);
+    let release = env.ledger().sequence() + 100;
+
+    let eid = client.create_disputable_escrow(&token_id, &from, &to, &2_000, &release, &arbitrator);
+
+    client.raise_dispute(&eid, &from);
+
+    let release_sym = Symbol::new(&env, "release");
+    client.resolve_dispute(&eid, &arbitrator, &release_sym, &to, &2_000);
+
+    let result = client.try_resolve_dispute(&eid, &arbitrator, &release_sym, &to, &2_000);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_resolve_dispute_refund_twice_fails() {
+    let env = Env::default();
+    let (_, client) = deploy(&env);
+    let admin = client.get_admin();
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+    let arbitrator = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.add_arbitrator(&admin, &arbitrator);
+
+    let token_id = create_token(&env, &admin, &from, 5_000);
+    let release = env.ledger().sequence() + 100;
+
+    let eid = client.create_disputable_escrow(&token_id, &from, &to, &2_000, &release, &arbitrator);
+
+    client.raise_dispute(&eid, &from);
+
+    let refund_sym = Symbol::new(&env, "refund");
+    client.resolve_dispute(&eid, &arbitrator, &refund_sym, &to, &0);
+
+    let result = client.try_resolve_dispute(&eid, &arbitrator, &refund_sym, &to, &0);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_resolve_dispute_split_twice_fails() {
+    let env = Env::default();
+    let (_, client) = deploy(&env);
+    let admin = client.get_admin();
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+    let arbitrator = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.add_arbitrator(&admin, &arbitrator);
+
+    let token_id = create_token(&env, &admin, &from, 5_000);
+    let release = env.ledger().sequence() + 100;
+
+    let eid = client.create_disputable_escrow(&token_id, &from, &to, &2_000, &release, &arbitrator);
+
+    client.raise_dispute(&eid, &from);
+
+    let split_sym = Symbol::new(&env, "split");
+    client.resolve_dispute(&eid, &arbitrator, &split_sym, &to, &1_000);
+
+    let result = client.try_resolve_dispute(&eid, &arbitrator, &split_sym, &to, &1_000);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_resolve_dispute_state_and_token_checks() {
+    let env = Env::default();
+    let (contract_id, client) = deploy(&env);
+    let admin = client.get_admin();
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+    let arbitrator = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.add_arbitrator(&admin, &arbitrator);
+
+    let token_id = create_token(&env, &admin, &from, 10_000);
+    let release = env.ledger().sequence() + 100;
+
+    let eid = client.create_disputable_escrow(&token_id, &from, &to, &2_000, &release, &arbitrator);
+
+    client.create_escrow(
+        &token_id,
+        &from,
+        &to,
+        &5_000,
+        &release,
+        &Symbol::new(&env, ""),
+    );
+
+    let sac_client = token::Client::new(&env, &token_id);
+    let contract_bal_before = sac_client.balance(&contract_id);
+
+    client.raise_dispute(&eid, &from);
+
+    let split_sym = Symbol::new(&env, "split");
+    client.resolve_dispute(&eid, &arbitrator, &split_sym, &to, &1_000);
+
+    let contract_bal_mid = sac_client.balance(&contract_id);
+    assert_eq!(contract_bal_mid, contract_bal_before - 2_000);
+
+    let escrow = client.get_escrow(&eid);
+    assert_eq!(escrow.status, EscrowStatus::Released);
+    assert_eq!(escrow.disputed, false);
+
+    let result = client.try_resolve_dispute(&eid, &arbitrator, &split_sym, &to, &1_000);
+    assert!(result.is_err());
+
+    let contract_bal_after = sac_client.balance(&contract_id);
+    assert_eq!(contract_bal_after, contract_bal_mid);
+}
