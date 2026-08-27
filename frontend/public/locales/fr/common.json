@@ -231,7 +231,8 @@
     "transactionHash": "Hash de Transaction",
     "updateNicknamePrompt": "Mettre à jour le surnom du contact :",
     "usernameNotFound": "Utilisateur non trouvé",
-    "viewOnExplorer": "Voir sur l'Explorateur"
+    "viewOnExplorer": "Voir sur l'Explorateur",
+    "needsTrustline": "Ajoutez une trustline pour {asset} avant d'envoyer."
   },
   "settings": {
     "active": "actifs",
@@ -334,5 +335,9 @@
     "title": "Paiements Récents",
     "tryAgain": "Réessayer",
     "viewOnExpert": "Voir sur Stellar Expert"
+  },
+  "assetSelect": {
+    "noAssets": "Aucun actif disponible.",
+    "addTrustline": "Trustline"
   }
 }

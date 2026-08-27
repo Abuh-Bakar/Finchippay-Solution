@@ -231,7 +231,8 @@
     "transactionHash": "גיבוב העסקה",
     "updateNicknamePrompt": "עדכון הכינוי של איש הקשר:",
     "usernameNotFound": "שם המשתמש לא נמצא",
-    "viewOnExplorer": "צפייה בסייר"
+    "viewOnExplorer": "צפייה בסייר",
+    "needsTrustline": "הוסף קו אמון עבור {asset} לפני השליחה."
   },
   "settings": {
     "active": "פעיל",
@@ -334,5 +335,9 @@
     "title": "תשלומים אחרונים",
     "tryAgain": "נסה שוב",
     "viewOnExpert": "צפייה ב-Stellar Expert"
+  },
+  "assetSelect": {
+    "noAssets": "אין נכסים זמינים.",
+    "addTrustline": "קו אמון"
   }
 }
