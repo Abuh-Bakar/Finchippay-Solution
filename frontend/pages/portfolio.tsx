@@ -14,10 +14,9 @@ import Head from "next/head";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import PortfolioAllocation from "@/components/PortfolioAllocation";
 import PortfolioOverview from "@/components/PortfolioOverview";
-import TokenPriceChart from "@/components/TokenPriceChart";
 import { FeatureGate } from "@/lib/FeatureFlags";
+import { logger } from "@/lib/logger";
 import {
   getPortfolioHoldings,
   loadCustomTokens,
@@ -32,9 +31,13 @@ import {
   type FiatCurrency,
 } from "@/lib/portfolio";
 import { useWallet } from "@/lib/useWallet";
-import { logger } from "@/lib/logger";
 
 const WalletConnect = dynamic(() => import("@/components/WalletConnect"), { ssr: false });
+// PortfolioAllocation + TokenPriceChart both depend on recharts (the heaviest
+// client lib on this route); lazy-load them so recharts leaves the portfolio
+// first-load chunk (issue #610).
+const PortfolioAllocation = dynamic(() => import("@/components/PortfolioAllocation"), { ssr: false });
+const TokenPriceChart = dynamic(() => import("@/components/TokenPriceChart"), { ssr: false });
 
 export default function PortfolioPage() {
   const { t } = useTranslation("common");
