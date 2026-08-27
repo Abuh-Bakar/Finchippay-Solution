@@ -34,7 +34,7 @@ import {
   ONBOARDING_KEY_STEP,
 } from "@/hooks/useOnboardingTour";
 import OnboardingTour, { TOUR_STEPS, STEP_COUNT } from "@/components/OnboardingTour";
-import { STORAGE_KEY as ONBOARDING_STATE_STORAGE_KEY } from "@/lib/onboardingState";
+import { getTourProgress, STORAGE_KEY as ONBOARDING_STATE_STORAGE_KEY } from "@/lib/onboardingState";
 
 // ── Mock useWallet (transitively pulls in lib/wallet.ts -> @finchippay/sdk,
 // which isn't resolvable in this workspace's test environment) ──────────────
@@ -233,6 +233,7 @@ describe("useOnboardingTour hook", () => {
     });
 
     expect(localStorage.getItem(ONBOARDING_KEY_DISMISSED)).toBe("true");
+    expect(getTourProgress().dismissed).toBe(true);
 
     // A fresh hook instantiation should not auto-start
     const { result: result2 } = renderHook(() => useOnboardingTour());
@@ -258,7 +259,21 @@ describe("useOnboardingTour hook", () => {
     });
 
     expect(localStorage.getItem(ONBOARDING_KEY_COMPLETED)).toBe("true");
+    expect(getTourProgress().completedAt).toEqual(expect.any(Number));
     expect(result.current.stepIndex).toBe(0);
+  });
+
+  it("does not re-trigger after dismissal when the hook remounts", async () => {
+    const { result, unmount } = renderHook(() => useOnboardingTour());
+
+    await waitFor(() => expect(result.current.isRunning).toBe(true));
+    act(() => result.current.dismissForever());
+    unmount();
+
+    const { result: remounted } = renderHook(() => useOnboardingTour());
+    await waitFor(() => expect(remounted.current.isDismissed).toBe(true));
+    expect(remounted.current.isRunning).toBe(false);
+    expect(getTourProgress().dismissed).toBe(true);
   });
 
   // 7. Step progression — nextStep advances correctly, prevStep decrements
@@ -435,16 +450,16 @@ describe("OnboardingTour component", () => {
     expect(prevStep).toHaveBeenCalledTimes(1);
   });
 
-  it("calls skipTour and setStepIndex when Joyride fires a skip action", () => {
-    const skipTour = jest.fn();
+  it("calls dismissForever and setStepIndex when Joyride fires a skip action", () => {
+    const dismissForever = jest.fn();
     const setStepIndex = jest.fn();
     render(
       <OnboardingTour
-        tour={makeTourState({ isRunning: true, skipTour, setStepIndex })}
+        tour={makeTourState({ isRunning: true, dismissForever, setStepIndex })}
       />
     );
     fireEvent.click(screen.getByTestId("joyride-skip"));
-    expect(skipTour).toHaveBeenCalled();
+    expect(dismissForever).toHaveBeenCalled();
     expect(setStepIndex).toHaveBeenCalled();
   });
 
