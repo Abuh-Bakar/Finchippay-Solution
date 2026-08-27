@@ -102,6 +102,7 @@ export function getTourProgress(): OnboardingProgress {
       const parsed = JSON.parse(raw);
       const progress = validateProgress(parsed);
       if (progress) {
+        // Persist valid legacy data in the current schema after migration.
         if (parsed.version !== ONBOARDING_STATE_VERSION) saveProgress(progress);
         return progress;
       }
