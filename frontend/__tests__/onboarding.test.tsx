@@ -34,7 +34,10 @@ import {
   ONBOARDING_KEY_STEP,
 } from "@/hooks/useOnboardingTour";
 import OnboardingTour, { TOUR_STEPS, STEP_COUNT } from "@/components/OnboardingTour";
-import { getTourProgress, STORAGE_KEY as ONBOARDING_STATE_STORAGE_KEY } from "@/lib/onboardingState";
+import {
+  getTourProgress,
+  STORAGE_KEY as ONBOARDING_STATE_STORAGE_KEY,
+} from "@/lib/onboardingState";
 
 // ── Mock useWallet (transitively pulls in lib/wallet.ts -> @finchippay/sdk,
 // which isn't resolvable in this workspace's test environment) ──────────────
